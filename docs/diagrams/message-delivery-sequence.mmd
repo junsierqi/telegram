@@ -1,0 +1,15 @@
+sequenceDiagram
+    participant A as Sender Client
+    participant G as Gateway
+    participant C as Chat Service
+    participant DB as PostgreSQL
+    participant B as Recipient Client
+
+    A->>G: Send message
+    G->>C: Validate and route
+    C->>DB: Persist message
+    DB-->>C: Stored message id
+    C-->>G: Delivery payload
+    G-->>B: Push message
+    B-->>G: Ack received
+    G-->>A: Delivery confirmation

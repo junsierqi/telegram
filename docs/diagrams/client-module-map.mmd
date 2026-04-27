@@ -1,0 +1,12 @@
+flowchart TD
+    Shell["App Shell"] --> Auth["Auth Module"]
+    Shell --> Contacts["Contacts Module"]
+    Shell --> Chat["Chat Module"]
+    Shell --> Devices["Device Module"]
+    Shell --> Notify["Notification Module"]
+    Shell --> Remote["Remote Control Module"]
+    Chat --> Transport["Transport Layer"]
+    Devices --> Transport
+    Remote --> Transport
+    Shell --> Storage["Local Storage"]
+    Shell --> Platform["Platform Adapters"]

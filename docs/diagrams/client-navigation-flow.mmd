@@ -1,0 +1,11 @@
+flowchart TD
+    Start["App Start"] --> Session{"Stored session valid?"}
+    Session -- Yes --> Sync["Sync and connect"]
+    Session -- No --> Login["Login/Register"]
+    Login --> Sync
+    Sync --> Main["Main Shell"]
+    Main --> Conversations["Conversation List"]
+    Main --> Settings["Settings"]
+    Main --> Devices["Devices"]
+    Conversations --> Chat["Chat View"]
+    Chat -. future .-> RemoteRequest["Request Remote Session"]

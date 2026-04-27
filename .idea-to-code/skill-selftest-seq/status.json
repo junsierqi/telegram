@@ -1,0 +1,19 @@
+{
+  "title": "idea-to-code sequential self test",
+  "slug": "skill-selftest-seq",
+  "created_at_utc": "2026-04-20T05:27:30.352305+00:00",
+  "updated_at_utc": "2026-04-20T05:27:46.475784+00:00",
+  "state": "completed",
+  "current_focus": "Verify ordered lifecycle behavior.",
+  "next_gate": "Finalize path produces a completed bundle with preserved milestone history",
+  "finalized_at_utc": "2026-04-20T05:27:46.475784+00:00",
+  "milestones": [
+    {
+      "name": "Sequential self test milestone",
+      "timestamp_utc": "2026-04-20T05:27:40.122566+00:00",
+      "delivered": "Initialized and updated the bundle in strict command order.",
+      "verified": "Observed milestone and verification history plus status metadata after checkpoint.",
+      "next": "Finalize the bundle and verify the completion snapshot."
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant A as Requester Client
+    participant S as Server Control Plane
+    participant B as Target Client
+    participant R as Relay or P2P Path
+
+    A->>S: Request remote session
+    S->>B: Deliver approval request
+    B-->>S: Approve
+    S-->>A: Session token and path info
+    S-->>B: Session token and path info
+    A->>R: Open viewer channel
+    B->>R: Open host channel
+    A-->>B: Input events
+    B-->>A: Screen frames
+    A->>S: End session
+    S->>B: Finalize and audit

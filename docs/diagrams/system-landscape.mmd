@@ -1,0 +1,12 @@
+flowchart TD
+    Client["C++20 Desktop Client"] --> Gateway["Python Gateway/API"]
+    Gateway --> Auth["Auth Service"]
+    Gateway --> Chat["Chat Service"]
+    Gateway --> Presence["Presence Service"]
+    Gateway --> Device["Device Registry"]
+    Chat --> DB["PostgreSQL"]
+    Presence --> Redis["Redis"]
+    Gateway --> FileMeta["File Metadata Service"]
+    FileMeta --> ObjectStore["Object Storage"]
+    Gateway -. future .-> Remote["Remote Session Coordination"]
+    Remote -. future .-> Relay["Relay/Media Service"]

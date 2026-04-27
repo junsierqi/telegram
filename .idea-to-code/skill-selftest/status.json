@@ -1,0 +1,19 @@
+{
+  "title": "idea-to-code self test",
+  "slug": "skill-selftest",
+  "created_at_utc": "2026-04-20T05:26:54.842118+00:00",
+  "updated_at_utc": "2026-04-20T05:26:56.896575+00:00",
+  "state": "completed",
+  "current_focus": "Exercise the finalize path safely.",
+  "next_gate": "Finalize path passes",
+  "finalized_at_utc": "2026-04-20T05:26:54.917703+00:00",
+  "milestones": [
+    {
+      "name": "Self test milestone",
+      "timestamp_utc": "2026-04-20T05:26:56.896575+00:00",
+      "delivered": "Initialized and exercised the delivery bundle workflow.",
+      "verified": "Confirmed init plus checkpoint created and updated the expected files.",
+      "next": "Run finalize to close the self-test bundle."
+    }
+  ]
+}

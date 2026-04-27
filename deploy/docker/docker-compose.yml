@@ -1,0 +1,100 @@
+services:
+  telegram-server:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/server.Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-127.0.0.1,localhost}
+    environment:
+      TELEGRAM_HOST: 0.0.0.0
+      TELEGRAM_PORT: 8787
+      TELEGRAM_DB_FILE: /data/runtime.sqlite
+      TELEGRAM_PG_DSN: ${TELEGRAM_PG_DSN:-}
+      TELEGRAM_ATTACHMENT_DIR: /data/attachments
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost}
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      no_proxy: ${no_proxy:-127.0.0.1,localhost}
+    ports:
+      - "8787:8787"
+    volumes:
+      - telegram_server_data:/data
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; s=socket.create_connection(('127.0.0.1',8787),2); s.close()"
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+
+  postgres:
+    image: postgres:16-alpine
+    profiles:
+      - postgres
+    environment:
+      POSTGRES_DB: telegram
+      POSTGRES_USER: telegram
+      POSTGRES_PASSWORD: telegram_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - telegram_postgres_data:/var/lib/postgresql/data
+
+  telegram-server-postgres:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/server.Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-127.0.0.1,localhost}
+    profiles:
+      - postgres
+    depends_on:
+      - postgres
+    environment:
+      TELEGRAM_HOST: 0.0.0.0
+      TELEGRAM_PORT: 8787
+      TELEGRAM_DB_FILE: ""
+      TELEGRAM_PG_DSN: postgresql://telegram:telegram_dev_password@postgres:5432/telegram
+      TELEGRAM_ATTACHMENT_DIR: /data/attachments
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost,postgres}
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      no_proxy: ${no_proxy:-127.0.0.1,localhost,postgres}
+    ports:
+      - "8788:8787"
+    volumes:
+      - telegram_server_pg_data:/data
+
+  telegram-tls-proxy:
+    image: nginx:1.27-alpine
+    profiles:
+      - tls
+    depends_on:
+      - telegram-server
+    ports:
+      - "8443:8443"
+    volumes:
+      - ../tls/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../tls/certs:/etc/nginx/certs:ro
+
+volumes:
+  telegram_server_data:
+  telegram_postgres_data:
+  telegram_server_pg_data:

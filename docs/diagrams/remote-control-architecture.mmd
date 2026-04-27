@@ -1,0 +1,8 @@
+flowchart TD
+    Requester["Requester Client"] --> Control["Control Channel"]
+    Target["Target Client"] --> Control
+    Control --> RemoteCoord["Remote Session Coordination"]
+    RemoteCoord --> DeviceRegistry["Device Registry"]
+    RemoteCoord --> Policy["Policy and Audit"]
+    Requester -. media/input .-> Relay["Relay or Direct P2P"]
+    Target -. media/input .-> Relay

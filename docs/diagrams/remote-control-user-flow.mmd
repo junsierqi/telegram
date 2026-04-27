@@ -1,0 +1,9 @@
+flowchart TD
+    A["Open chat or device panel"] --> B["Request remote control"]
+    B --> C["Server validates target"]
+    C --> D["Target receives approval dialog"]
+    D --> E{"Approved?"}
+    E -- No --> F["Notify rejection"]
+    E -- Yes --> G["Establish direct or relayed path"]
+    G --> H["Start screen and input session"]
+    H --> I["User ends session or disconnects"]

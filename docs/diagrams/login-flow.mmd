@@ -1,0 +1,9 @@
+flowchart TD
+    A["Launch App"] --> B{"Has saved session?"}
+    B -- Yes --> C["Validate token"]
+    B -- No --> D["Show login/register"]
+    C -- Valid --> E["Load shell"]
+    C -- Invalid --> D
+    D --> F["Submit credentials"]
+    F --> G["Receive tokens and profile"]
+    G --> E

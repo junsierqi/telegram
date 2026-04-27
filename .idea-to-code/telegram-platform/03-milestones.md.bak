@@ -1,0 +1,54 @@
+# Milestones
+
+## Current Phase
+
+- Status: in_progress
+- Current focus: Remote session lifecycle now fully terminates and disconnects at the control plane
+- Next gate: Media plane handshake or structured error codes
+
+## Milestone History
+
+## Artifact-driven skill upgrade
+
+- Timestamp: 2026-04-20T05:26:28.072684+00:00
+- Delivered: Strengthened the idea-to-code skill with persistent delivery bundle management and repository-backed milestone artifacts.
+- Verified: Ran the bundle script commands against the telegram repo and inspected the generated files plus status output.
+- Next: Use the same bundle while continuing typed protocol and UI work in the telegram project.
+## Typed server request payloads
+
+- Timestamp: 2026-04-20T05:39:53.945849+00:00
+- Delivered: Converted login, message_send, remote_invite, and remote_approve request payloads into typed dataclasses and updated server dispatch to consume typed fields.
+- Verified: Ran cmake --build build, python -m server.main, and a TCP end-to-end run with the Python server plus the C++ client executable.
+- Next: Continue tightening the protocol boundary, likely with typed client response models or stronger server-side validation.
+## Typed client response models
+
+- Timestamp: 2026-04-20T05:45:09.260611+00:00
+- Delivered: Added typed client response parsing for login, device list, conversation sync, message delivery, remote session state, and relay assignment, then updated client state handling to consume typed response payloads.
+- Verified: Ran cmake --build build, python -m server.main, and a TCP end-to-end run with python -m server.main --tcp-server plus the built C++ client executable.
+- Next: Tighten protocol robustness further with explicit client-side error handling and stronger request or response validation.
+## Protocol error handling and validation
+
+- Timestamp: 2026-04-20T05:50:46.084722+00:00
+- Delivered: Added explicit server-side validation for invalid credentials, empty messages, conversation access, remote invite mismatches, and remote approval authorization, then surfaced protocol error responses into the client state and logs.
+- Verified: Ran cmake --build build, python -m server.main, a TCP end-to-end run with python -m server.main --tcp-server plus the C++ client executable, and a targeted Python validation script covering invalid login, empty message send, and unauthorized remote approval.
+- Next: Keep hardening the control plane with typed error codes or move into the next layer such as persistence and richer session lifecycle handling.
+## Lightweight server persistence
+
+- Timestamp: 2026-04-20T05:59:05.134820+00:00
+- Delivered: Added JSON-backed runtime persistence for conversations and remote sessions, wired message and remote-session mutations to save state, restored counters from persisted records, and exposed a configurable --state-file entrypoint.
+- Verified: Ran cmake --build build, python -m server.main, a TCP end-to-end run with python -m server.main --tcp-server --state-file <temp file> plus the C++ client executable, and a restart-focused Python validation script that verified message and remote-session state survive across app instances.
+- Next: Move from file-backed snapshots toward richer lifecycle handling, likely explicit session termination/rejection/cancel flows or a more structured persistence layer.
+## Remote session reject and cancel flows
+
+- Timestamp: 2026-04-20T06:16:32.660948+00:00
+- Delivered: Extended the control plane with explicit remote reject and cancel request handling, added terminated payload parsing on the client, and hardened remote-session service transitions for rejected and cancelled states.
+- Verified: Ran cmake --build build, python -m server.main, a TCP end-to-end run with python -m server.main --tcp-server --state-file <temp file> plus the built C++ client executable, and a targeted Python lifecycle script covering reject, cancel, and invalid follow-up transitions.
+- Next: Push the remote-control lifecycle further with termination/disconnect flows and then start separating control-plane events from eventual media-plane orchestration.
+## Remote session terminate and disconnect flows (gate: pass)
+
+- Timestamp: 2026-04-20T08:31:02+00:00
+- Delivered: Added REMOTE_TERMINATE / REMOTE_DISCONNECT protocol messages (server + shared + C++ client), terminate/disconnect methods on RemoteSessionService with active-state guard and actor authorization, terminated/disconnected records with detail payloads, and a C++ demo terminate call in app_shell. RemoteDisconnectRequestPayload carries optional reason.
+- Verified: Ran cmake --build build, started python -m server.main --tcp-server --state-file <temp>, exercised the C++ client which now ends with a terminate round-trip, and ran scripts/validate_terminate_disconnect.py covering 8 lifecycle scenarios (terminate by requester/target, disconnect with reason, pre-approval terminate -> not_active, double terminate -> already_terminal, non-participant -> invalid_session, actor mismatch -> session_actor_mismatch, disconnect-after-terminate -> already_terminal).
+- Next: Start separating control-plane events from the media-plane (rendezvous info + relay handshake) or push into structured persistence / typed error codes.
+- Covers: REQ-REMOTE-LIFECYCLE, REQ-TYPED-PROTO, REQ-VALIDATION
+

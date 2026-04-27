@@ -1,0 +1,1405 @@
+{
+  "title": "Telegram-like chat and remote desktop platform",
+  "slug": "telegram-platform",
+  "created_at_utc": "2026-04-20T05:26:28.066566+00:00",
+  "updated_at_utc": "2026-04-27T11:03:05+00:00",
+  "state": "in_progress",
+  "current_focus": "TLS deployment hardening",
+  "next_gate": "Client TLS parity or PostgreSQL TLS proxy profile",
+  "finalized_at_utc": null,
+  "milestones": [
+    {
+      "name": "Artifact-driven skill upgrade",
+      "timestamp_utc": "2026-04-20T05:26:28.072684+00:00",
+      "delivered": "Strengthened the idea-to-code skill with persistent delivery bundle management and repository-backed milestone artifacts.",
+      "verified": "Ran the bundle script commands against the telegram repo and inspected the generated files plus status output.",
+      "next": "Use the same bundle while continuing typed protocol and UI work in the telegram project.",
+      "covers": [
+        "REQ-CHAT-CORE"
+      ]
+    },
+    {
+      "name": "Typed server request payloads",
+      "timestamp_utc": "2026-04-20T05:39:53.945849+00:00",
+      "delivered": "Converted login, message_send, remote_invite, and remote_approve request payloads into typed dataclasses and updated server dispatch to consume typed fields.",
+      "verified": "Ran cmake --build build, python -m server.main, and a TCP end-to-end run with the Python server plus the C++ client executable.",
+      "next": "Continue tightening the protocol boundary, likely with typed client response models or stronger server-side validation.",
+      "covers": [
+        "REQ-CHAT-CORE",
+        "REQ-REMOTE-LIFECYCLE",
+        "REQ-TYPED-PROTO"
+      ]
+    },
+    {
+      "name": "Typed client response models",
+      "timestamp_utc": "2026-04-20T05:45:09.260611+00:00",
+      "delivered": "Added typed client response parsing for login, device list, conversation sync, message delivery, remote session state, and relay assignment, then updated client state handling to consume typed response payloads.",
+      "verified": "Ran cmake --build build, python -m server.main, and a TCP end-to-end run with python -m server.main --tcp-server plus the built C++ client executable.",
+      "next": "Tighten protocol robustness further with explicit client-side error handling and stronger request or response validation.",
+      "covers": [
+        "REQ-CHAT-CORE",
+        "REQ-REMOTE-LIFECYCLE",
+        "REQ-TYPED-PROTO"
+      ]
+    },
+    {
+      "name": "Protocol error handling and validation",
+      "timestamp_utc": "2026-04-20T05:50:46.084722+00:00",
+      "delivered": "Added explicit server-side validation for invalid credentials, empty messages, conversation access, remote invite mismatches, and remote approval authorization, then surfaced protocol error responses into the client state and logs.",
+      "verified": "Ran cmake --build build, python -m server.main, a TCP end-to-end run with python -m server.main --tcp-server plus the C++ client executable, and a targeted Python validation script covering invalid login, empty message send, and unauthorized remote approval.",
+      "next": "Keep hardening the control plane with typed error codes or move into the next layer such as persistence and richer session lifecycle handling.",
+      "covers": [
+        "REQ-CHAT-CORE",
+        "REQ-REMOTE-LIFECYCLE",
+        "REQ-VALIDATION"
+      ]
+    },
+    {
+      "name": "Lightweight server persistence",
+      "timestamp_utc": "2026-04-20T05:59:05.134820+00:00",
+      "delivered": "Added JSON-backed runtime persistence for conversations and remote sessions, wired message and remote-session mutations to save state, restored counters from persisted records, and exposed a configurable --state-file entrypoint.",
+      "verified": "Ran cmake --build build, python -m server.main, a TCP end-to-end run with python -m server.main --tcp-server --state-file <temp file> plus the C++ client executable, and a restart-focused Python validation script that verified message and remote-session state survive across app instances.",
+      "next": "Move from file-backed snapshots toward richer lifecycle handling, likely explicit session termination/rejection/cancel flows or a more structured persistence layer.",
+      "covers": [
+        "REQ-CHAT-CORE",
+        "REQ-PERSISTENCE",
+        "REQ-REMOTE-LIFECYCLE"
+      ]
+    },
+    {
+      "name": "Remote session reject and cancel flows",
+      "timestamp_utc": "2026-04-20T06:16:32.660948+00:00",
+      "delivered": "Extended the control plane with explicit remote reject and cancel request handling, added terminated payload parsing on the client, and hardened remote-session service transitions for rejected and cancelled states.",
+      "verified": "Ran cmake --build build, python -m server.main, a TCP end-to-end run with python -m server.main --tcp-server --state-file <temp file> plus the built C++ client executable, and a targeted Python lifecycle script covering reject, cancel, and invalid follow-up transitions.",
+      "next": "Push the remote-control lifecycle further with termination/disconnect flows and then start separating control-plane events from eventual media-plane orchestration.",
+      "covers": [
+        "REQ-REMOTE-LIFECYCLE"
+      ]
+    },
+    {
+      "name": "Remote session terminate and disconnect flows",
+      "timestamp_utc": "2026-04-20T08:31:02+00:00",
+      "delivered": "Added REMOTE_TERMINATE / REMOTE_DISCONNECT protocol messages (server + shared + C++ client), terminate/disconnect methods on RemoteSessionService with active-state guard and actor authorization, terminated/disconnected records with detail payloads, and a C++ demo terminate call in app_shell. RemoteDisconnectRequestPayload carries optional reason.",
+      "verified": "Ran cmake --build build, started python -m server.main --tcp-server --state-file <temp>, exercised the C++ client which now ends with a terminate round-trip, and ran scripts/validate_terminate_disconnect.py covering 8 lifecycle scenarios (terminate by requester/target, disconnect with reason, pre-approval terminate -> not_active, double terminate -> already_terminal, non-participant -> invalid_session, actor mismatch -> session_actor_mismatch, disconnect-after-terminate -> already_terminal).",
+      "next": "Start separating control-plane events from the media-plane (rendezvous info + relay handshake) or push into structured persistence / typed error codes.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-REMOTE-LIFECYCLE",
+        "REQ-TYPED-PROTO",
+        "REQ-VALIDATION"
+      ]
+    },
+    {
+      "name": "Robust state-file loading",
+      "timestamp_utc": "2026-04-20T09:12:42+00:00",
+      "delivered": "InMemoryState._load_runtime_state now treats empty / whitespace-only state files as 'start fresh' instead of crashing with JSONDecodeError. Discovered during end-to-end TCP run when mktemp produced an empty file.",
+      "verified": "python scripts/validate_empty_state_file.py passes 4 scenarios: empty file, whitespace-only file, missing nested path (parent created on first save), and non-empty existing file (regression guard for persistence round-trip).",
+      "next": "Move into the media-plane handshake (REMOTE_RENDEZVOUS_REQUEST → REMOTE_RENDEZVOUS_INFO, approved→negotiating state transition).",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-PERSISTENCE"
+      ]
+    },
+    {
+      "name": "Media-plane rendezvous handshake (Plan A)",
+      "timestamp_utc": "2026-04-20T09:23:03+00:00",
+      "delivered": "New REMOTE_RENDEZVOUS_REQUEST / REMOTE_RENDEZVOUS_INFO control-plane exchange. RemoteSessionService.request_rendezvous() validates actor+state, transitions approved->negotiating on first call, and returns an ICE-style candidate list (host/host/srflx/relay) plus relay metadata. Typed payloads on both sides: server RemoteRendezvousInfoPayload + RemoteRendezvousCandidate dataclasses; client RemoteRendezvousInfoPayload + RemoteRendezvousCandidate structs added to the response variant; RemoteControlState now tracks candidate_count. app_shell demo now issues an alice rendezvous request between approve and terminate.",
+      "verified": "cmake --build build (clean); python scripts/validate_rendezvous.py 6/6 (approved->negotiating; idempotent in negotiating; awaiting_approval -> not_ready; terminated -> not_ready; actor mismatch -> session_actor_mismatch; unknown session -> unknown_remote_session); regression passes on validate_terminate_disconnect.py 8/8 and validate_empty_state_file.py 4/4; TCP end-to-end run shows rendezvous yielding 4 candidates with correct kinds and relay info, state transitioning approved->negotiating.",
+      "next": "Move toward real media-plane bytes: either structured persistence for sessions, typed error-code enum, or a minimal UDP media channel between rendezvous candidates.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-MEDIA-RENDEZVOUS",
+        "REQ-REMOTE-LIFECYCLE",
+        "REQ-TYPED-PROTO"
+      ]
+    },
+    {
+      "name": "Typed error codes",
+      "timestamp_utc": "2026-04-20T09:51:08+00:00",
+      "delivered": "Introduced ErrorCode enum in shared C++ header (kInvalidCredentials .. kRemoteSessionNotReadyForRendezvous, 23 members + to_wire/from_wire helpers) and a matching Python StrEnum. New ServiceError exception carries a typed ErrorCode; all 23 raise sites in auth/chat/remote_session services converted. ERROR responses now emit {code: <wire>, message: <human>} via a new ErrorResponsePayload dataclass/struct; dispatch fallback for unsupported message types and transport-level errors also use typed codes. Client parser reads code, ClientViewState exposes last_error_code alongside last_error_message, app_shell prints both.",
+      "verified": "cmake --build build clean. python scripts/validate_typed_errors.py 11/11 (invalid_credentials, invalid_session, session_actor_mismatch, unknown_conversation, empty_message, unknown_target_device, self_remote, remote_approval_denied, rendezvous_not_ready, unsupported_message_type, code-catalog completeness). Regressions pass: terminate_disconnect 8/8, rendezvous 6/6, empty_state_file 4/4. TCP end-to-end run unchanged on happy path; last_error_code field visible in client state prints.",
+      "next": "Milestone A — persist login sessions across server restart.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-TYPED-ERRORS",
+        "REQ-TYPED-PROTO",
+        "REQ-VALIDATION"
+      ]
+    },
+    {
+      "name": "Session persistence",
+      "timestamp_utc": "2026-04-20T10:03:23+00:00",
+      "delivered": "InMemoryState now persists the sessions dict alongside conversations and remote sessions. Load path reconstructs SessionRecord entries. AuthService counter recovered from highest persisted sess_N (parallel to RemoteSessionService._next_remote_counter). login() triggers save_runtime_state() so each issued session hits disk immediately.",
+      "verified": "scripts/validate_session_persistence.py 5/5 (session survives restart, counter skips past persisted max, no-state-file keeps memory-only semantics, unknown session still returns typed INVALID_SESSION, cumulative persistence across conversations+remote_sessions+sessions). Regressions intact: typed_errors 11/11, terminate_disconnect 8/8, rendezvous 6/6, empty_state_file 4/4.",
+      "next": "Milestone C — first real media-plane byte channel (UDP echo bound to relay port, C++ probe after rendezvous).",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-SESSION-PERSIST",
+        "REQ-PERSISTENCE"
+      ]
+    },
+    {
+      "name": "First UDP media-plane byte channel",
+      "timestamp_utc": "2026-04-20T10:11:37+00:00",
+      "delivered": "New server/server/media_plane.py hosts a threaded UDP echo (ThreadedUdpMediaServer) with a tiny framing scheme (4-byte sid length + session_id + payload) and a client helper send_probe. server/main.py exposes --udp-port (0 = disabled). C++ client gains transport/udp_media_probe.{h,cpp} — a Winsock UDP probe with configurable timeout that frames identically. app_shell triggers the probe after alice's rendezvous when TELEGRAM_LIKE_UDP_PORT is set, prints ack=yes|no + byte count + text. chat_client_core now exports ws2_32 publicly so the UDP file links cleanly.",
+      "verified": "scripts/validate_udp_media.py 5/5 (basic echo, empty/small/near-MTU payloads, 3 distinct session ids don't corrupt each other, MAX_PACKET_SIZE constant present, thread shuts down cleanly). TCP+UDP end-to-end with --udp-port 9001 --state-file <tmp>: C++ client prints 'udp probe ack=yes bytes=39 text=ack:sess_1:hello from alice media plane'. Regressions all green: typed_errors 11/11, session_persistence 5/5, terminate_disconnect 8/8, rendezvous 6/6, empty_state_file 4/4.",
+      "next": "Wire the UDP probe into the rendezvous response by routing the probe to relay_endpoint port; add per-session validation on the UDP path; then move toward real screen-capture / input-injection payloads.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-MEDIA-BYTE-CHANNEL",
+        "REQ-MEDIA-RENDEZVOUS",
+        "REQ-TYPED-PROTO"
+      ]
+    },
+    {
+      "name": "Per-session UDP media-plane auth",
+      "timestamp_utc": "2026-04-20T10:38:03+00:00",
+      "delivered": "ThreadedUdpMediaServer gains optional authorizer callback; _UdpEchoHandler checks it and silently drops unauthorized packets. Crucial subtlety: DatagramRequestHandler.finish() unconditionally replies with wfile.getvalue(), so a bare return emits a zero-length ACK — overrode finish() to honour a _drop flag and actually stay silent. server/main.py now constructs ServerApplication up front and passes it into both serve_udp_in_thread (as the authorizer's backing state) and serve_tcp (new keyword arg), giving both planes a shared InMemoryState. control_plane.serve_tcp accepts an optional pre-built app without breaking existing callers. Authorization rule: session_id must map to a logged-in user who is currently a participant in at least one active (approved/negotiating/connecting/streaming/controlling) remote session.",
+      "verified": "scripts/validate_udp_media_auth.py 5/5 (unknown session_id drops silently, logged-in-only drops, approved-participant echoes, terminate flips back to drop, no-authorizer keeps legacy accept-all behaviour). Full regression green: validate_udp_media 5/5, validate_typed_errors 11/11, validate_session_persistence 5/5, validate_terminate_disconnect 8/8, validate_rendezvous 6/6, validate_empty_state_file 4/4.",
+      "next": "Switch UDP from pure echo to a structured media frame (frame_chunk with seq + payload), driven by session state; start real media semantics on top of this auth gate.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-MEDIA-AUTH",
+        "REQ-MEDIA-BYTE-CHANNEL",
+        "REQ-REMOTE-LIFECYCLE"
+      ]
+    },
+    {
+      "name": "Structured frame_chunk stream",
+      "timestamp_utc": "2026-04-20T10:52:18+00:00",
+      "delivered": "Media plane now emits structured frame_chunk datagrams on subscribe. Payload grammar: envelope(sid_len|sid|body) where body is either legacy echo or subscribe 'SUB:<count>:<cookie>' -> server emits <count> frame_chunks (kind=F | u32 seq | u32 len | payload). Frame payload is deterministic (_fake_frame_payload: b'frame-<n>|<cookie>') for byte-exact assertions. Auth gate from D1 still applies — unauthorized subscribe drops silently. MAX_FRAME_COUNT=32 caps abusive counts. build_frame_chunk / parse_frame_chunk / build_subscribe_payload / subscribe_and_collect are the public surface for callers. Legacy echo preserved so validate_udp_media stays green. Binary wire format kept tiny (9-byte header per frame).",
+      "verified": "scripts/validate_media_frames.py 6/6 (subscribe N=5 returns seq 1..5 with exact payload bytes, subscribe N=0 is silent, cookie round-trip, legacy echo still works, unauthorized subscribe silent-drops, MAX_FRAME_COUNT cap honored). Full regression 44/44: udp_media_auth 5/5, udp_media 5/5, typed_errors 11/11, session_persistence 5/5, terminate_disconnect 8/8, rendezvous 6/6, empty_state_file 4/4.",
+      "next": "D3 — wire a C++ UDP subscribe/frame-receiver into the client so app_shell demo can print received seq numbers after rendezvous (mirrors validate_media_frames.py logic in the client).",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-MEDIA-FRAME-STREAM",
+        "REQ-MEDIA-AUTH",
+        "REQ-MEDIA-BYTE-CHANNEL"
+      ]
+    },
+    {
+      "name": "Structured frame payload header",
+      "timestamp_utc": "2026-04-20T11:02:45+00:00",
+      "delivered": "frame_chunk payload body now starts with a 12-byte structured header: u16 width | u16 height | u32 timestamp_ms | u8 codec | 3 reserved. New helpers build_frame_payload / parse_frame_payload keep the struct format in one place. _fake_frame_payload wraps the old deterministic body (frame-<n>|<cookie>) with the header — existing byte-exact assertions keep passing, new assertions verify structured fields (640x360, CODEC_RAW, 33ms*seq timestamps). CODEC_RAW=1 placeholder until we pick something real.",
+      "verified": "scripts/validate_media_frames.py 7/7 including new parse_frame_payload round-trip scenario and field-level assertions in the basic stream scenario. Legacy cookie/echo/auth/cap regressions all still green.",
+      "next": "D3 — C++ udp_frame_stream module to consume these structured frames; app_shell prints seq/width/height/codec after rendezvous.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-FRAME-HEADER",
+        "REQ-MEDIA-FRAME-STREAM"
+      ]
+    },
+    {
+      "name": "C++ UDP frame_chunk consumer",
+      "timestamp_utc": "2026-04-20T11:33:48+00:00",
+      "delivered": "New client/src/transport/udp_frame_stream.{h,cpp} — Winsock UDP subscribe + frame_chunk parser that mirrors server/server/media_plane.py wire format byte-for-byte (sid_len|sid envelope | 'F' kind | u32 seq | u32 payload_len | u16 w | u16 h | u32 ts | u8 codec | 3 rsv | body). subscribe_and_collect returns FrameChunk structs with parsed header fields. CMakeLists adds the new translation unit. app_shell now, when TELEGRAM_LIKE_UDP_PORT is set, performs the post-rendezvous probe *and* a subscribe(5, 'demo'), then prints each frame's seq / width×height / codec / ts / body_bytes.",
+      "verified": "cmake --build clean. TCP+UDP end-to-end: C++ client prints 5 received frames with correct header fields (640x360, codec=1, ts=33ms*seq, body_bytes=12). Full regression 51/51 across 8 validators (media_frames 7/7, udp_media_auth 5/5, udp_media 5/5, typed_errors 11/11, session_persistence 5/5, terminate_disconnect 8/8, rendezvous 6/6, empty_state_file 4/4).",
+      "next": "D5 — synthetic screen capture: server reads one PPM/BMP frame and streams its pixel rows as frame_chunk bodies; width/height come from the real image, not the hardcoded 640x360.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-CPP-FRAME-CONSUMER",
+        "REQ-FRAME-HEADER",
+        "REQ-MEDIA-FRAME-STREAM"
+      ]
+    },
+    {
+      "name": "Synthetic screen capture source",
+      "timestamp_utc": "2026-04-20T11:55:05+00:00",
+      "delivered": "New server/server/screen_source.py with a ScreenSource Protocol and StaticImageScreenSource implementation. Four bundled patterns (gradient/black/white/red) built via build_test_pattern; make_test_pattern_source(width, height, pattern) is the public factory. ThreadedUdpMediaServer accepts optional screen_source; handler calls source.next_frame(seq, cookie) when present and falls back to _fake_frame_payload when absent — backward compatible with every existing validator. server/main.py gains --screen-source '<pattern>[:WxH]' flag. End-to-end with --screen-source gradient:24x16: C++ client now prints real 24x16 RGB gradient frames (1156 body bytes = 1152 pixels + cookie).",
+      "verified": "validate_screen_source 5/5 (gradient pixel pin, solid red, no-source regression, custom dims propagate, unknown pattern rejected). Full regression 56/56 across 9 validators. TCP+UDP end-to-end confirmed: C++ receives 24x16 codec=1 frames reflecting real source dims.",
+      "next": "D6 — client -> server input events (keyboard/mouse) over the control plane; new InputService + REMOTE_INPUT_EVENT message type.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-SCREEN-SOURCE",
+        "REQ-FRAME-HEADER",
+        "REQ-MEDIA-FRAME-STREAM"
+      ]
+    },
+    {
+      "name": "Input event injection (control plane)",
+      "timestamp_utc": "2026-04-20T12:04:42+00:00",
+      "delivered": "Two new protocol message types (REMOTE_INPUT_EVENT / REMOTE_INPUT_ACK) cross server (Python StrEnum) and shared C++ header. RemoteInputEventRequestPayload carries {remote_session_id, kind, data}; RemoteInputAckPayload returns {remote_session_id, sequence, kind}. Three new typed error codes: REMOTE_INPUT_DENIED, UNSUPPORTED_INPUT_KIND, INVALID_INPUT_PAYLOAD (+ human messages). New InputService validates four kinds (key, mouse_move, mouse_button, scroll) with per-kind required data-field schemas, authorizes only the requester of an active remote session, records an in-memory monotonic event log. dispatch branch in app.py wires it.",
+      "verified": "validate_input_injection 9/9: ack payload contents, seq monotonic across 4 kinds, target-user denied, unknown remote_session, pre-approval rejected, terminated rejected, unknown kind, missing-data fields, 4-kind log round-trip. Full regression 65/65 across 10 validators.",
+      "next": "D7 — real relay: server routes bytes between two connected clients (not just server-generated frames). Needs per-session socket bookkeeping + routing table + a second C++ client instance or a Python peer in validators.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-INPUT-INJECT",
+        "REQ-TYPED-PROTO",
+        "REQ-VALIDATION",
+        "REQ-TYPED-ERRORS"
+      ]
+    },
+    {
+      "name": "Server-side UDP relay",
+      "timestamp_utc": "2026-04-20T12:11:03+00:00",
+      "delivered": "ThreadedUdpMediaServer now carries a peer_registry (session_id -> last-seen addr) protected by a lock. Every authorized inbound packet refreshes the registry — no separate control-plane roundtrip needed. Two new wire verbs inside the sid_len|sid envelope: HELLO (register-only, no reply) and RELAY:<target_sid>:<body> (server forwards body to target's registered addr as envelope(sender_sid, body)). Unknown target, malformed relay, and unauthorized sender all silently drop (D1's rule carries through). Python client helpers build_relay_payload / build_hello_payload / send_hello / open_peer_socket for multi-peer tests and future C++ mirror.",
+      "verified": "validate_udp_relay 6/6: unidirectional A→B, bidirectional ping/pong, unknown target silent drop, unauthorized sender silent drop, malformed RELAY drop, registry refresh on ephemeral port change. Regression 71/71 across 11 validators.",
+      "next": "D8 — UDP reliability layer (seq tracking, NACK-based retransmit, ordering buffer). Likely its own session because it's substantial.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-UDP-RELAY",
+        "REQ-MEDIA-AUTH",
+        "REQ-MEDIA-BYTE-CHANNEL"
+      ]
+    },
+    {
+      "name": "UDP reliability layer (ReliableChannel)",
+      "timestamp_utc": "2026-04-20T12:31:12+00:00",
+      "delivered": "New server/server/reliable_stream.py — transport-agnostic ReliableChannel class. Wire verbs REL:<seq>:<body>, NAK:<seq_list>, ACK:<high_water>. Sender assigns monotonic seqs, keeps unacked buffer, retransmits on NAK, trims buffer on cumulative ACK, exposes tick_retransmit() for tail-loss timer-driven recovery. Receiver buffers out-of-order arrivals, drains contiguous seqs in-order on delivery, re-NAKs on every gap-creating packet (dropped NAKs / retransmits recover), emits cumulative ACK as high-water advances, ignores duplicates. Pure algorithm module — not yet wired into the UDP transport (left for a later integration milestone).",
+      "verified": "validate_reliable_stream 5/5 via lossy/reorder/duplicate fake transport: clean 10-pkt stream no NAKs, seq 3+7 drop triggers NAK+retx, seq 4/5 reorder buffered+drained in order, duplicate seq 2 silently dropped, 30% random loss on 20 packets delivers everything in order via NAK-driven retx + tick tail-loss recovery. Regression 76/76 across 12 validators.",
+      "next": "D9 — DTLS on the media plane. Needs an external crypto library (pynacl or cryptography). Will pause at start of next session to confirm dependency choice.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-UDP-RELIABILITY"
+      ]
+    },
+    {
+      "name": "Chat message fan-out (E1)",
+      "timestamp_utc": "2026-04-20T12:49:40+00:00",
+      "delivered": "New ConnectionRegistry (server/server/connection_registry.py) keys session_id -> thread-safe writer callable. _ControlPlaneHandler registers on successful login and unregisters in a finally block, with a per-connection write lock that serializes response writes with async pushes. ServerApplication._fanout_message_deliver pushes a MESSAGE_DELIVER envelope (correlation_id='push_<msg_id>', session_id set to recipient) to every participant session except the origin session — multi-device participants see their own pushes too. InMemoryState.sessions_for_user helper added. SessionRecord gains last_seen_at:float=0.0 (unused here, groundwork for E4) with backward-compatible load path.",
+      "verified": "validate_message_fanout.py 4/4 — push_to_other_participant (bob gets push with push_* correlation, alice gets only response), push_to_other_session_of_same_user (alice's session B gets push when she sends from session A), no_crash_when_participant_logged_out, multiple_messages_arrive_in_order (5 sequential sends arrive at receiver in-order). Regression sampled: session_persistence 5/5, typed_errors 11/11, input_injection 9/9 — no breakage from the SessionRecord field addition.",
+      "next": "E4 — heartbeat + TTL presence: HEARTBEAT_PING/ACK messages, PRESENCE_QUERY_REQUEST/RESPONSE, last_seen_at populated on login and heartbeat, is_device_online/is_user_online use TTL.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-CHAT-FANOUT",
+        "REQ-CHAT-CORE",
+        "REQ-TYPED-PROTO"
+      ]
+    },
+    {
+      "name": "Presence heartbeat + TTL-based online (E4)",
+      "timestamp_utc": "2026-04-20T12:52:57+00:00",
+      "delivered": "Four new message types (HEARTBEAT_PING/ACK, PRESENCE_QUERY_REQUEST/RESPONSE) with typed dataclass payloads. AuthService takes a clock callable; SessionRecord.last_seen_at is populated on login. PresenceService takes clock + ttl_seconds (default 30s); touch() refreshes timestamps + persists; is_session_fresh / is_device_online / is_user_online all compare (now - last_seen_at) <= ttl; query_users returns PresenceUserStatus list with online bool + last_seen_at_ms; list_devices.active now routes through the TTL check rather than plain 'session exists'. ServerApplication accepts clock + presence_ttl_seconds constructor args, dispatches HEARTBEAT_PING (touches + returns HEARTBEAT_ACK with server_timestamp_ms and echoed client_timestamp_ms) and PRESENCE_QUERY_REQUEST (returns per-user status + server_timestamp_ms).",
+      "verified": "validate_presence_heartbeat.py 6/6 via fake clock + ttl=5s: login_populates_last_seen (session.last_seen_at=1000.0, user/device online), stale_session_flips_offline (still online at 4.9s past TTL, offline at 5.1s past), heartbeat_refreshes_last_seen (heartbeat at t=4s keeps online at t=8.9s, offline at t=9.1s; ACK echoes client_ts and reports server_ts=1004000ms), presence_query_returns_typed_status (alice/bob online, ghost offline + last_seen_at_ms=0), device_list_active_mirrors_ttl (device.active flips after 6s stale), multi_session_user_online_if_any_fresh (user counts online if any session is within TTL). Full regression 86/86 across 14 validators — no breakage.",
+      "next": "E2 (registration) — will need F2 password hashing pulled forward. OR E5 group conversations / E6 read receipts / E7 edit-delete / E8 contacts / E3 attachments as the remaining chat-completeness arc.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-PRESENCE-HEARTBEAT",
+        "REQ-TYPED-PROTO",
+        "REQ-CHAT-CORE"
+      ]
+    },
+    {
+      "name": "Registration + password hashing (E2+F2)",
+      "timestamp_utc": "2026-04-20T13:23:02+00:00",
+      "delivered": "New server/server/crypto.py: PBKDF2-SHA256 (120k iters, 16B salt, 32B derived) via stdlib hashlib + hmac.compare_digest. Format 'pbkdf2_sha256$iter$salt_hex$hash_hex'. UserRecord.password -> UserRecord.password_hash (rename); seed users (alice/bob) hashed at module init via hash_password(). state.py save_runtime_state now persists users + devices; load path accepts legacy 'password' key by re-hashing on read for migration. AuthService.login switched to verify_password. New AuthService.register validates username pattern (^[A-Za-z0-9_][A-Za-z0-9_.-]{2,31}$), min password len 8, unique username (case-insensitive), unique device_id, non-empty display_name; creates UserRecord+DeviceRecord+SessionRecord atomically with hashed password. New message types REGISTER_REQUEST/RESPONSE + RegisterRequestPayload/RegisterResponsePayload. New error codes USERNAME_TAKEN / WEAK_PASSWORD / DEVICE_ID_TAKEN / INVALID_REGISTRATION_PAYLOAD with matching human messages. Dispatch branch in app.py wires it.",
+      "verified": "validate_registration.py 7/7 (seed users still login, register+login round-trip, password stored as pbkdf2_sha256$... not plaintext, duplicate username rejected, weak password rejected, duplicate device rejected, malformed usernames rejected incl empty/short/space/emoji/leading-dash, new account survives state-file restart). validate_typed_errors.py 11/11 — code-catalog completeness picked up the 4 new codes with human messages.",
+      "next": "E5 — group conversations: CONVERSATION_CREATE / CONVERSATION_ADD_PARTICIPANT / CONVERSATION_REMOVE_PARTICIPANT; fan-out unchanged; persist membership.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-USER-REGISTRATION",
+        "REQ-PASSWORD-HASH",
+        "REQ-TYPED-PROTO",
+        "REQ-TYPED-ERRORS",
+        "REQ-PERSISTENCE"
+      ]
+    },
+    {
+      "name": "Group conversations (E5)",
+      "timestamp_utc": "2026-04-20T13:26:33+00:00",
+      "delivered": "ConversationRecord gains title:str. ChatService gains create_conversation (dedupes participants, rejects unknown user_ids, rejects <2 total), add_participant (auth via existing-participant check, rejects duplicates + unknown users), remove_participant (same auth, rejects not-present). Three new message types CONVERSATION_CREATE / CONVERSATION_ADD_PARTICIPANT / CONVERSATION_REMOVE_PARTICIPANT; CONVERSATION_UPDATED is used as both the response type and the fan-out push type. Four new error codes: UNKNOWN_USER, CONVERSATION_PARTICIPANT_ALREADY_PRESENT, CONVERSATION_PARTICIPANT_NOT_PRESENT, CONVERSATION_TOO_FEW_PARTICIPANTS. Fan-out helper refactored: _fanout_message_deliver split into _fanout_to_conversation + _fanout_to_users (reusable for any conversation-scoped push); dedupes sessions via a seen set. Remove-participant fan-out explicitly notifies the kicked user too (so their client learns they left).",
+      "verified": "validate_group_conversations.py 6/6 — create 3-person group, dedupe + unknown-user + too-few, add/remove lifecycle incl duplicate-add + missing-remove, non-participant cannot modify, fan-out on create + send + remove (kicked user still gets notified), persistence across restart. Regressions green: validate_message_fanout 4/4, validate_typed_errors 11/11 (new codes all have human messages), validate_session_persistence 5/5.",
+      "next": "E6 — read receipts: MESSAGE_READ + per-user last-read pointer persisted; MESSAGE_READ_UPDATE fanned out to other participants.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-GROUP-CONVERSATIONS",
+        "REQ-TYPED-PROTO",
+        "REQ-TYPED-ERRORS",
+        "REQ-PERSISTENCE",
+        "REQ-CHAT-FANOUT"
+      ]
+    },
+    {
+      "name": "Read receipts (E6)",
+      "timestamp_utc": "2026-04-20T13:28:45+00:00",
+      "delivered": "ConversationRecord gains read_markers: dict[user_id -> last_read_message_id] persisted; ConversationDescriptor exposes the same via CONVERSATION_SYNC. New MESSAGE_READ / MESSAGE_READ_UPDATE messages with MessageReadRequestPayload / MessageReadUpdatePayload dataclasses. ChatService.mark_read enforces participant access, rejects unknown message_id with typed UNKNOWN_MESSAGE, and advances the pointer forward-only (if the user tries to mark an older message the pointer stays put). Dispatch branch pushes MESSAGE_READ_UPDATE via _fanout_to_conversation to other participants; reader gets the synchronous response.",
+      "verified": "validate_read_receipts.py 6/6: mark-read advances pointer + pushes to other participants (reader only gets response, no echo push), forward-only advancement (mark m3 then m1 stays at m3), unknown_message rejected, non-participant access_denied, read_markers surface in conversation_sync, markers persist across state-file restart.",
+      "next": "E7 — message edit/delete: MESSAGE_EDIT / MESSAGE_DELETE; sender-only auth; MESSAGE_EDITED / MESSAGE_DELETED push; soft-delete with deleted=true flag.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-READ-RECEIPTS",
+        "REQ-TYPED-PROTO",
+        "REQ-TYPED-ERRORS",
+        "REQ-PERSISTENCE",
+        "REQ-CHAT-FANOUT"
+      ]
+    },
+    {
+      "name": "Message edit + delete (E7)",
+      "timestamp_utc": "2026-04-20T13:30:47+00:00",
+      "delivered": "Four new message types: MESSAGE_EDIT / MESSAGE_EDITED (request + push), MESSAGE_DELETE / MESSAGE_DELETED (request + push). Three new typed error codes: MESSAGE_EDIT_DENIED, MESSAGE_DELETE_DENIED, MESSAGE_ALREADY_DELETED. MessageDescriptor gains edited:bool + deleted:bool so CONVERSATION_SYNC and pushed descriptors show the flags. ChatService.edit_message: sender-only, rejects empty text + already-deleted. ChatService.delete_message: sender-only, soft-delete sets deleted=True + text='', rejects double-delete. Both push to other participants via _fanout_to_conversation; sender gets the response, others get push. Storage keeps the message record (for id continuity / read-marker references); only text + edited/deleted flags change.",
+      "verified": "validate_message_edit_delete.py 8/8: edit own + push, edit others denied, edit empty rejected, delete own soft-deletes + push + sync sees it, double-delete rejected, edit after delete rejected, delete others denied, unknown message rejected. All existing validators should remain green — will sweep at end of arc.",
+      "next": "E8 — per-user directed contact lists with add/remove/list.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-MESSAGE-EDIT-DELETE",
+        "REQ-TYPED-PROTO",
+        "REQ-TYPED-ERRORS",
+        "REQ-CHAT-FANOUT",
+        "REQ-PERSISTENCE"
+      ]
+    },
+    {
+      "name": "Contacts (E8)",
+      "timestamp_utc": "2026-04-20T13:32:28+00:00",
+      "delivered": "New server/server/services/contacts.py ContactsService: directed per-user contact list keyed by owner_user_id. InMemoryState.contacts: dict[owner_user_id -> list[target_user_id]] persisted as-is + loaded with default empty dict. Four new message types: CONTACT_ADD / CONTACT_REMOVE / CONTACT_LIST_REQUEST / CONTACT_LIST_RESPONSE. ContactDescriptor (user_id + display_name + online) uses PresenceService.is_user_online for real-time online flag. Three new typed error codes: CONTACT_SELF_NOT_ALLOWED, CONTACT_ALREADY_ADDED, CONTACT_NOT_PRESENT. Dispatch branches: add returns updated list, remove returns updated list, list_request returns current list.",
+      "verified": "validate_contacts.py 8/8: add-then-list shows contact + display_name, duplicate add rejected, self add rejected, unknown user rejected, remove without presence rejected then add+remove works, directed semantics (alice adds bob; bob's list stays empty), online flag flips with presence TTL (via injected FakeClock), contacts persist across state-file restart.",
+      "next": "E3 — attachments: binary-capable messages with filename/mime/base64 body + size cap, persisted server-side, fetched via ATTACHMENT_FETCH.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-CONTACTS",
+        "REQ-TYPED-PROTO",
+        "REQ-TYPED-ERRORS",
+        "REQ-PERSISTENCE",
+        "REQ-PRESENCE-HEARTBEAT"
+      ]
+    },
+    {
+      "name": "Attachments (E3)",
+      "timestamp_utc": "2026-04-20T13:34:54+00:00",
+      "delivered": "AttachmentRecord in state (attachment_id, conversation_id, uploader_user_id, filename, mime_type, size_bytes, content_b64) + InMemoryState.attachments persisted. MessageDescriptor + MessageDeliverPayload gain attachment_id (plus filename/mime/size on delivery so recipients know what to fetch); MESSAGE_DELIVER wire payload intentionally omits the body — receivers issue ATTACHMENT_FETCH_REQUEST to pull the bytes. Three new message types: MESSAGE_SEND_ATTACHMENT / ATTACHMENT_FETCH_REQUEST / ATTACHMENT_FETCH_RESPONSE. Four new typed error codes: ATTACHMENT_TOO_LARGE, INVALID_ATTACHMENT_PAYLOAD, UNKNOWN_ATTACHMENT, ATTACHMENT_ACCESS_DENIED. ChatService.send_attachment_message validates: participant access, filename non-empty, declared size 0..1MB, base64 decodes cleanly (strict validate=True), actual decoded length matches declared size_bytes; stores record + creates linked message with attachment_id. ChatService.fetch_attachment gates access to conversation participants only. MAX_ATTACHMENT_SIZE_BYTES=1_048_576.",
+      "verified": "validate_attachments.py 8/8: send+fanout (push has attachment_id but no content_b64) + fetch round-trip byte-exact, size cap enforced, declared/actual size mismatch rejected, invalid base64 rejected, non-participant fetch denied, unknown attachment rejected, content persists across restart (byte-exact round trip), message_descriptor in CONVERSATION_SYNC exposes attachment_id + caption as text.",
+      "next": "Full E-series done. Optional next direction: D9 (media-plane AEAD — needs crypto-library choice), rest of F-series, or polish / bug-fix round.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-ATTACHMENTS",
+        "REQ-TYPED-PROTO",
+        "REQ-TYPED-ERRORS",
+        "REQ-PERSISTENCE",
+        "REQ-CHAT-FANOUT"
+      ]
+    },
+    {
+      "name": "C++ net/ abstraction layer (B1)",
+      "timestamp_utc": "2026-04-20T14:11:59+00:00",
+      "delivered": "New client/src/net/ module: platform.h (NativeSocket alias, is_valid, close_native_socket, set_recv_timeout_ms, native_send/recv/sendto/recvfrom — all with #ifdef _WIN32 vs POSIX branches), socket_error.h/.cpp (NetErrorCode enum + last_native_error + map_native_error for WSAE* and errno), socket_subsystem.h/.cpp (refcounted WSAStartup/WSACleanup on Win, no-op on POSIX), socket_raii.h (move-only Socket wrapper). Refactored session_gateway_client.cpp / udp_media_probe.cpp / udp_frame_stream.cpp to route all socket calls through net/. Removed per-file WSAStartup calls (3 scattered -> 1 shared SocketSubsystem with refcount). CMakeLists: splits ws2_32 (WIN32) vs Threads::Threads (non-Win); added 2 new net/*.cpp sources. POSIX branch is structural only — compile-tested by shape, not yet exercised on a Linux/macOS box (first real port will validate).",
+      "verified": "cmake --build build --config Debug green. Python server-side UDP validators unchanged: validate_udp_media 5/5 and validate_udp_media_auth 5/5. End-to-end app_shell against python server on 8787 (+ --udp-port 8787 --screen-source gradient:24x16) prints 'udp probe ack=yes bytes=39 text=ack:sess_1:hello from alice media plane' and 5 frame_chunks at 24x16 codec=1, ts=33/66/99/132/165ms body_bytes=1156 — byte-identical to pre-refactor behavior.",
+      "next": "A1 — TcpLineClient primitive built on net/: async reader thread + thread-safe writer + wait_for(correlation_id|type, timeout) inbox.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-NET-ABSTRACTION",
+        "REQ-CPP-FRAME-CONSUMER",
+        "REQ-MEDIA-BYTE-CHANNEL"
+      ]
+    },
+    {
+      "name": "TcpLineClient primitive (A1)",
+      "timestamp_utc": "2026-04-20T14:16:52+00:00",
+      "delivered": "client/src/net/tcp_line_client.h/.cpp: async TCP JSON-line client built on net/. Background reader thread drains '\\n'-delimited frames into std::deque<std::string> behind mutex + condvar. send_line() is thread-safe with a separate write mutex. wait_for(predicate, timeout_ms) blocks until a frame matching predicate arrives; unmatched frames stay in original order in the queue. Predicate builders: match_correlation_id(id) (naive scan of envelope JSON for '\"correlation_id\":\"<id>\"') and match_any. drain() returns everything buffered non-blocking. Destructor calls shutdown(SD_BOTH/SHUT_RDWR) to unblock recv() then joins reader. Uses SocketSubsystem so refcount plays nicely with any other net/ user in the same process. Threads::Threads linked PUBLIC from CMakeLists so downstream binaries get pthread automatically.",
+      "verified": "cmake --build build --config Debug — compiles clean on MSVC /W4 /permissive-. Runtime exercised through ControlPlaneClient (A2) and app_chat (A3) which depend on it.",
+      "next": "A2 — ControlPlaneClient: typed RPC wrapper with login/sync/send/read/edit/delete/contacts/presence/heartbeat + background push dispatcher.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-TCP-LINE-CLIENT",
+        "REQ-NET-ABSTRACTION"
+      ]
+    },
+    {
+      "name": "ControlPlaneClient (A2)",
+      "timestamp_utc": "2026-04-20T14:17:06+00:00",
+      "delivered": "client/src/transport/control_plane_client.h/.cpp: typed RPC wrapper over TcpLineClient. Each RPC gets a fresh correlation_id ('rpc_<n>') and blocks via tcp_.wait_for on that exact id. Supports login / conversation_sync / send_message / mark_read / edit_message / delete_message / list_contacts / add_contact / remove_contact / presence_query / heartbeat_ping. JSON composed by string concatenation with proper escaping (quote helper); responses parsed via existing transport::JsonParser + extract_string/bool/number helpers. Background dispatcher thread pulls frames whose correlation_id starts with 'push_' and invokes a single PushHandler callback (registered via set_push_handler). Optional start_heartbeat(interval_ms) spawns a heartbeat_ping thread. Typed result structs (LoginResult, MessageResult, SyncResult with SyncedConversation + SyncedMessage (incl edited/deleted/attachment_id), ContactListResult, PresenceResult, AckResult) always carry {ok, error_code, error_message} for consistent failure handling.",
+      "verified": "cmake --build build --config Debug — compiles clean after fixing (a) atomic fetch_add needing non-const method and (b) dead parse call discarding [[nodiscard]] return. Runtime exercised by app_chat (A3) end-to-end.",
+      "next": "A3 — app_chat interactive C++ binary with slash-command UX matching chat_cli.py; two instances exchange live messages.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-CPP-CONTROL-CLIENT",
+        "REQ-TYPED-PROTO",
+        "REQ-CHAT-FANOUT",
+        "REQ-PRESENCE-HEARTBEAT"
+      ]
+    },
+    {
+      "name": "C++ interactive chat demo (A3)",
+      "timestamp_utc": "2026-04-20T14:22:03+00:00",
+      "delivered": "client/src/app_chat/main.cpp: standalone executable that mirrors the Python chat_cli.py UX in native C++. Parses --user/--password/--device/--host/--port/--conversation/--heartbeat. On login, registers a PushHandler with ControlPlaneClient that prints MESSAGE_DELIVER / MESSAGE_EDITED / MESSAGE_DELETED / MESSAGE_READ_UPDATE / CONVERSATION_UPDATED in a readable format. Main loop reads stdin; slash commands: /sync /read /edit /del /contacts /add /presence /q. Non-slash lines are sent as messages. JSON field extraction in the push printer uses a whitespace-tolerant json_find_string (handles both Python's default ', ' + ': ' separators and compact). CMakeLists adds app_chat executable target. scripts/validate_cpp_chat_e2e.py drives the whole stack: free-port Python server + 2 real app_chat.exe subprocesses + stdin drivers + stdout assertions.",
+      "verified": "validate_cpp_chat_e2e.py 3/3 — bob's push handler receives 'hello bob from C++ chat demo' sent by alice, both clients log in + show initial conv_alice_bob sync, /presence reports both users online. Full server-side regression 129/129 across 20 Python validators unchanged. cmake --build green.",
+      "next": "Open space: a real 2nd platform (Qt/GTK/Android/iOS) to validate POSIX branch of net/; D9 media-plane AEAD still deferred; attachments/groups not yet surfaced in C++ client (Python chat_cli has them via /create; scope for future milestone).",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-CPP-CHAT-DEMO",
+        "REQ-CPP-CONTROL-CLIENT",
+        "REQ-TCP-LINE-CLIENT",
+        "REQ-NET-ABSTRACTION",
+        "REQ-CHAT-FANOUT"
+      ]
+    },
+    {
+      "name": "Qt desktop chat baseline (C1)",
+      "timestamp_utc": "2026-04-24T14:10:20+00:00",
+      "delivered": "Added app_desktop Qt Widgets target with host/port/conversation controls, login form, transcript view, message composer, live push rendering, heartbeat startup, and a --smoke path that exercises connect/login/conversation_sync/message_send without manual UI. CMake now builds app_desktop when Qt6 Widgets is available; README/current-state/roadmap document the C1-C5 chat completion arc.",
+      "verified": "Configured build-codex with Qt6 prefix, built all Debug targets, ran validate_desktop_smoke.py 1/1, validate_cpp_chat_e2e.py 3/3, validate_message_fanout.py 4/4, and validate_typed_errors.py 11/11.",
+      "next": "C2 client state and local cache: introduce a GUI-facing conversation/message store, sync cursor, unread counts, and reconnect reconciliation.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-C1-DESKTOP-GUI",
+        "REQ-CPP-CONTROL-CLIENT",
+        "REQ-CHAT-FANOUT"
+      ]
+    },
+    {
+      "name": "Desktop in-memory chat store (C2a)",
+      "timestamp_utc": "2026-04-24T14:19:16+00:00",
+      "delivered": "Added DesktopChatStore as a GUI-facing in-memory conversation/message model. The store applies conversation_sync snapshots, local send responses, and push envelopes for message_deliver/message_edited/message_deleted; tracks selected conversation and unread counts for unselected conversations; renders transcript and conversation summary snapshots. app_desktop now renders from this store instead of appending raw sync/push text directly. Added app_desktop_store_test C++ test target.",
+      "verified": "cmake --build build-codex --config Debug passed. app_desktop_store_test.exe passed 4/4. validate_desktop_smoke.py passed 1/1. validate_cpp_chat_e2e.py passed 3/3. validate_message_fanout.py passed 4/4.",
+      "next": "Continue C2 with durable local cache and reconnect reconciliation: add sync cursor/last-seen message tracking, selected conversation state, and missed-message recovery after reconnect.",
+      "gate_status": "partial",
+      "covers": [
+        "REQ-C2A-INMEMORY-STORE",
+        "REQ-C2-CLIENT-CACHE",
+        "REQ-C1-DESKTOP-GUI"
+      ]
+    },
+    {
+      "name": "Desktop persistent cache and reconnect reconciliation (C2b)",
+      "timestamp_utc": "2026-04-24T14:26:00+00:00",
+      "delivered": "Extended DesktopChatStore with JSON save/load for current user, selected conversation, conversations, messages, edit/delete flags, attachment ids, participants and unread counts. app_desktop now accepts --cache-file, loads cached state before network sync, renders cached transcript immediately, and saves after sync/send/push. Reconnect reconciliation is implemented as cache-first display followed by full conversation_sync replacement from the server as source of truth.",
+      "verified": "cmake --build build-codex --config Debug passed. app_desktop_store_test.exe passed 6/6 including cache round-trip and reconnect reconciliation. validate_desktop_smoke.py passed 1/1. validate_cpp_chat_e2e.py passed 3/3. validate_message_fanout.py passed 4/4.",
+      "next": "Finish remaining C2 maturity with incremental update cursor/server update offsets and a real conversation list widget; then move to C3 production attachment path.",
+      "gate_status": "partial",
+      "covers": [
+        "REQ-C2B-PERSISTENT-CACHE",
+        "REQ-C2-CLIENT-CACHE",
+        "REQ-C2A-INMEMORY-STORE",
+        "REQ-C1-DESKTOP-GUI"
+      ]
+    },
+    {
+      "name": "Desktop conversation list and local cursor (C2c)",
+      "timestamp_utc": "2026-04-24T14:29:36+00:00",
+      "delivered": "Added a real Qt QListWidget conversation list to app_desktop. The list is rendered from DesktopChatStore, shows title/id/unread/last-message cursor, and selecting a row updates the selected conversation, composer target, transcript and cache. DesktopChatStore now maintains per-conversation last_message_id as a local sync cursor foundation, persists it in the JSON cache, restores it on load, and advances it on sync/send/push. Store test now covers cursor advance and persistence.",
+      "verified": "cmake --build build-codex --config Debug passed. app_desktop_store_test.exe passed 7/7. validate_desktop_smoke.py passed 1/1. validate_cpp_chat_e2e.py passed 3/3. validate_message_fanout.py passed 4/4.",
+      "next": "Move to C3 production attachment path unless we decide to add a server-side incremental sync API first. C2 client-side cache/list/cursor foundation is in place; true incremental sync still requires protocol/server work.",
+      "gate_status": "partial",
+      "covers": [
+        "REQ-C2C-CONVERSATION-LIST",
+        "REQ-C2-CLIENT-CACHE",
+        "REQ-C2B-PERSISTENT-CACHE",
+        "REQ-C2A-INMEMORY-STORE",
+        "REQ-C1-DESKTOP-GUI"
+      ]
+    },
+    {
+      "name": "Production attachment path (C3)",
+      "timestamp_utc": "2026-04-24T14:39:32+00:00",
+      "delivered": "Introduced AttachmentBlobStore as a filesystem-backed object-store-ready boundary. ChatService now validates base64/size as before, writes attachment bytes to the blob store when configured, persists metadata plus storage_key in runtime state, and fetches content from blob storage while preserving legacy inline content_b64 compatibility. server.main exposes --attachment-dir with default <state-file>.attachments. ControlPlaneClient now supports send_attachment and fetch_attachment. app_desktop has an Attach button and --smoke-attachment round-trip.",
+      "verified": "cmake --build build-codex --config Debug passed. validate_attachments.py passed 11/11 including metadata-vs-blob separation, blob restart, and legacy inline migration. validate_desktop_smoke.py passed 1/1 with attachment send/fetch. validate_cpp_chat_e2e.py passed 3/3. validate_message_fanout.py passed 4/4. app_desktop_store_test.exe passed 7/7.",
+      "next": "Move to C4 durable server persistence: replace JSON runtime state with a database-backed repository boundary, starting with SQLite/PostgreSQL-compatible schema and migration from current JSON state.",
+      "gate_status": "partial",
+      "covers": [
+        "REQ-C3A-BLOB-ATTACHMENTS",
+        "REQ-C3-ATTACHMENT-PATH",
+        "REQ-ATTACHMENTS",
+        "REQ-C1-DESKTOP-GUI"
+      ]
+    },
+    {
+      "name": "SQLite durable persistence boundary (C4a)",
+      "timestamp_utc": "2026-04-24T14:44:29+00:00",
+      "delivered": "Added SQLite --db-file persistence backend to InMemoryState while preserving JSON --state-file mode. The SQLite schema persists users, devices, sessions, conversations, remote_sessions, contacts and attachment metadata; state save/load now chooses SQLite when db_file is configured. ServerApplication, create_app, serve_tcp and server.main accept db_file/--db-file, with attachment-dir defaulting from the selected persistence anchor. Added validate_sqlite_persistence.py covering restart recovery for sessions, messages, contacts, remote sessions and attachments plus JSON regression.",
+      "verified": "validate_sqlite_persistence.py passed 2/2. validate_session_persistence.py passed 5/5. validate_attachments.py passed 11/11. validate_registration.py passed 7/7. validate_desktop_smoke.py passed 1/1. validate_cpp_chat_e2e.py passed 3/3. validate_message_fanout.py passed 4/4. validate_typed_errors.py passed 11/11.",
+      "next": "Move to C5 device management completeness: expose device list in the Qt desktop, then add session revoke/trusted-device state as protocol/server work.",
+      "gate_status": "partial",
+      "covers": [
+        "REQ-C4A-SQLITE-PERSISTENCE",
+        "REQ-C4-DURABLE-PERSISTENCE",
+        "REQ-PERSISTENCE",
+        "REQ-SESSION-PERSIST"
+      ]
+    },
+    {
+      "name": "Desktop device management completeness (C5)",
+      "timestamp_utc": "2026-04-24T14:55:55+00:00",
+      "delivered": "Added control-plane device revoke and trust update payloads, server dispatch and PresenceService mutations, C++ ControlPlaneClient device management RPCs, Qt desktop device panel actions, and a dedicated validator for trust/untrust, revoke denial and SQLite persistence.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran app_desktop_store_test 7/7, validate_device_management 3/3, validate_desktop_smoke 1/1, validate_presence_heartbeat 6/6, validate_sqlite_persistence 2/2, validate_attachments 11/11, validate_cpp_chat_e2e 3/3, validate_message_fanout 4/4 and validate_typed_errors 11/11.",
+      "next": "Acceptance sweep for the C1-C5 chat completion arc, then choose whether to close remaining partial gaps: server incremental sync API, attachment download/save UI, PostgreSQL/Redis productionization, or richer last-seen/audit policy.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-C5-DEVICE-MANAGEMENT",
+        "REQ-PRESENCE-HEARTBEAT",
+        "REQ-C4A-SQLITE-PERSISTENCE"
+      ]
+    },
+    {
+      "name": "C1-C5 acceptance sweep",
+      "timestamp_utc": "2026-04-24T15:00:19+00:00",
+      "delivered": "Ran the full validator suite after C5 and fixed a real TCP fanout login race by registering a session's push writer before emitting login_response. Updated current-state docs to reflect the C1-C5 acceptance status and validator counts.",
+      "verified": "Full sweep passed: all scripts/validate_*.py validators green, 24 scripts / 141 scenarios. Targeted regressions also passed for validate_message_fanout 4/4, validate_cpp_chat_e2e 3/3, validate_desktop_smoke 1/1 and validate_device_management 3/3 after the race fix.",
+      "next": "Choose the next production-hardening slice: server incremental sync API, attachment download/save UI, PostgreSQL/Redis productionization, or richer last-seen/audit/policy for device management.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-CHAT-FANOUT",
+        "REQ-C1-DESKTOP-GUI",
+        "REQ-C2-CLIENT-CACHE",
+        "REQ-C3-ATTACHMENT-PATH",
+        "REQ-C4-DURABLE-PERSISTENCE",
+        "REQ-C5-DEVICE-MANAGEMENT"
+      ]
+    },
+    {
+      "name": "Incremental conversation sync (C6a)",
+      "timestamp_utc": "2026-04-25T09:07:47+00:00",
+      "delivered": "Added ConversationSyncRequestPayload cursors, ChatService.sync_for_user_since, server dispatch for cursor-based conversation_sync, ControlPlaneClient.conversation_sync_since, desktop cache cursor export and incremental merge, smoke coverage for incremental sync, and a dedicated validate_incremental_sync.py validator.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran validate_incremental_sync 4/4, app_desktop_store_test 8/8, validate_desktop_smoke 1/1, validate_cpp_chat_e2e 3/3, validate_message_fanout 4/4, validate_typed_errors 11/11, validate_sqlite_persistence 2/2, and a full scripts/validate_*.py sweep: 25 scripts / 145 scenarios all passed.",
+      "next": "Continue C6 with durable edit/delete/read-marker delta logs and paging/windowing, or switch to C3 download/save UI if user-visible attachment completeness is preferred.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-C6A-INCREMENTAL-SYNC",
+        "REQ-C2-CLIENT-CACHE",
+        "REQ-C2B-PERSISTENT-CACHE",
+        "REQ-C2C-CONVERSATION-LIST",
+        "REQ-CHAT-CORE"
+      ]
+    },
+    {
+      "name": "Durable conversation delta log (C6b)",
+      "timestamp_utc": "2026-04-25T09:17:54+00:00",
+      "delivered": "Added per-conversation change_seq and durable changes to runtime state, JSON and SQLite persistence; extended conversation_sync with versions and ConversationChangeDescriptor deltas; recorded edit/delete/read-marker changes in ChatService; parsed sync changes in ControlPlaneClient; persisted desktop sync_version and applied edit/delete deltas on incremental sync; expanded validate_incremental_sync coverage.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran validate_incremental_sync 6/6, app_desktop_store_test 9/9, validate_desktop_smoke 1/1, validate_message_edit_delete 8/8, validate_read_receipts 6/6, validate_sqlite_persistence 2/2, validate_session_persistence 5/5, and a full scripts/validate_*.py sweep: 25 scripts / 147 scenarios all passed.",
+      "next": "Continue C6 with membership/title delta application plus paging/windowing and delta compaction, or switch to user-visible C3 attachment download/save UI.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-C6B-DURABLE-DELTA-LOG",
+        "REQ-C6A-INCREMENTAL-SYNC",
+        "REQ-READ-RECEIPTS",
+        "REQ-MESSAGE-EDIT-DELETE",
+        "REQ-C2-CLIENT-CACHE"
+      ]
+    },
+    {
+      "name": "Conversation metadata delta and compaction (C6c)",
+      "timestamp_utc": "2026-04-25T09:32:20+00:00",
+      "delivered": "Recorded conversation_updated deltas for participant add/remove, added compacted change-log fallback to full conversation sync for stale versions, expanded incremental sync validation for membership metadata and compaction, and taught the desktop store test to verify metadata delta application.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran validate_incremental_sync 8/8, app_desktop_store_test 10/10, validate_group_conversations 6/6, validate_desktop_smoke 1/1, validate_message_edit_delete 8/8, validate_read_receipts 6/6, validate_sqlite_persistence 2/2, and a full scripts/validate_*.py sweep: 25 scripts / 149 scenarios all passed.",
+      "next": "Either continue C6 with production paging/windowing and explicit conflict metadata, or switch to C3 attachment download/save UI for more user-visible completeness.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-C6C-METADATA-DELTA-COMPACTION",
+        "REQ-C6B-DURABLE-DELTA-LOG",
+        "REQ-GROUP-CONVERSATIONS",
+        "REQ-C2-CLIENT-CACHE"
+      ]
+    },
+    {
+      "name": "Desktop attachment save UI (C3b)",
+      "timestamp_utc": "2026-04-25T09:40:06+00:00",
+      "delivered": "Added Qt desktop Attachment ID + Save Attachment control, implemented fetch_attachment-to-file save flow, preserved attachment_id for locally sent attachment messages and cache reloads, and extended desktop smoke validation with --smoke-save-dir content verification.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran app_desktop_store_test 11/11, validate_desktop_smoke 1/1 including attachment save marker and saved file byte check, validate_attachments 11/11, validate_cpp_chat_e2e 3/3, validate_incremental_sync 8/8, validate_sqlite_persistence 2/2, and a full scripts/validate_*.py sweep: 25 scripts / 149 scenarios all passed.",
+      "next": "Continue C3 with attachment previews/thumbnails and upload/download progress, or switch to registration UI for another visible Telegram-like gap.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-C3B-ATTACHMENT-SAVE-UI",
+        "REQ-C3-ATTACHMENT-PATH",
+        "REQ-C3A-BLOB-ATTACHMENTS",
+        "REQ-ATTACHMENTS"
+      ]
+    },
+    {
+      "name": "Desktop attachment metadata preview (C3c)",
+      "timestamp_utc": "2026-04-25T09:48:21+00:00",
+      "delivered": "Extended attachment message descriptors and C++ sync parsing with filename/mime/size metadata, preserved metadata in DesktopChatStore cache/local send paths, rendered filename/size in the desktop transcript, defaulted save dialogs to known filenames, and expanded attachment/store validation coverage.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran app_desktop_store_test 11/11, validate_attachments 11/11, validate_desktop_smoke 1/1, and a full scripts/validate_*.py sweep: 25 scripts / 149 scenarios all passed.",
+      "next": "Continue C3 with real thumbnails/previews and upload/download progress, or switch to registration UI for another visible Telegram-like gap.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-C3C-ATTACHMENT-METADATA-PREVIEW",
+        "REQ-C3B-ATTACHMENT-SAVE-UI",
+        "REQ-C3-ATTACHMENT-PATH",
+        "REQ-C3A-BLOB-ATTACHMENTS",
+        "REQ-ATTACHMENTS"
+      ]
+    },
+    {
+      "name": "Desktop attachment transfer status (C3d)",
+      "timestamp_utc": "2026-04-25T09:54:44+00:00",
+      "delivered": "Added a desktop transfer status row with progress bar for attachment read/upload/download/save stages, emitted verifiable upload/download/save stage markers from app_desktop --smoke, and extended validate_desktop_smoke.py to guard those markers.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran validate_desktop_smoke 1/1 with transfer-status markers, app_desktop_store_test 11/11, validate_attachments 11/11 and validate_incremental_sync 8/8.",
+      "next": "Continue C3 with thumbnail/preview rendering, or switch to registration UI for another visible Telegram-like gap.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-C3D-ATTACHMENT-TRANSFER-STATUS",
+        "REQ-C3C-ATTACHMENT-METADATA-PREVIEW",
+        "REQ-C3B-ATTACHMENT-SAVE-UI",
+        "REQ-C3-ATTACHMENT-PATH",
+        "REQ-C3A-BLOB-ATTACHMENTS",
+        "REQ-ATTACHMENTS"
+      ]
+    },
+    {
+      "name": "Desktop attachment type previews (C3e)",
+      "timestamp_utc": "2026-04-25T10:02:29+00:00",
+      "delivered": "Added preview_text to attachment message results and desktop cache records, generated short local text previews for text/* uploads, rendered text/image preview affordances in the desktop transcript, inferred basic MIME types from selected filenames, and expanded app_desktop_store_test coverage for preview rendering and cache round-trip.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran app_desktop_store_test 11/11 with preview assertions, validate_desktop_smoke 1/1, validate_attachments 11/11 and validate_incremental_sync 8/8.",
+      "next": "Continue with registration UI or real decoded image thumbnails; avoid byte-level attachment progress until chunked upload/download exists.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-C3E-ATTACHMENT-TYPE-PREVIEWS",
+        "REQ-C3D-ATTACHMENT-TRANSFER-STATUS",
+        "REQ-C3C-ATTACHMENT-METADATA-PREVIEW",
+        "REQ-C3B-ATTACHMENT-SAVE-UI",
+        "REQ-C3-ATTACHMENT-PATH",
+        "REQ-C3A-BLOB-ATTACHMENTS",
+        "REQ-ATTACHMENTS"
+      ]
+    },
+    {
+      "name": "Desktop registration UI",
+      "timestamp_utc": "2026-04-25T10:35:35+00:00",
+      "delivered": "Added ControlPlaneClient::register_user for register_request/register_response, added Display Name plus Register controls to the Qt desktop login row, reused the connect/sync path after registration, added --smoke-register to app_desktop, and extended validate_desktop_smoke.py to verify native desktop registration.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran validate_desktop_smoke 1/1 with desktop register smoke marker, validate_registration 7/7 and app_desktop_store_test 11/11.",
+      "next": "Continue visible Telegram-like completion with basic profile/account surface or contact/group creation in the desktop UI.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-DESKTOP-REGISTRATION-UI",
+        "REQ-USER-REGISTRATION",
+        "REQ-PASSWORD-HASH",
+        "REQ-C1-DESKTOP-GUI",
+        "REQ-CPP-CONTROL-CLIENT"
+      ]
+    },
+    {
+      "name": "Desktop contacts and groups UI",
+      "timestamp_utc": "2026-04-26T04:50:59+00:00",
+      "delivered": "Added ControlPlaneClient group conversation RPCs, Qt desktop contacts list/add/remove controls, group creation controls, selected-conversation member add/remove controls, desktop smoke coverage for contacts and group creation, and a human-readable execution log for the phase.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran validate_contacts 8/8, validate_group_conversations 6/6, validate_desktop_smoke 1/1 with contacts/groups markers, app_desktop_store_test 11/11, and a full scripts/validate_*.py sweep: 25 scripts / 149 scenarios all passed.",
+      "next": "Continue Telegram-like desktop polish with message timeline status/timestamps/bubble-like rendering, or add profile/account surface.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-DESKTOP-CONTACTS-GROUPS-UI",
+        "REQ-CONTACTS",
+        "REQ-GROUP-CONVERSATIONS",
+        "REQ-CPP-CONTROL-CLIENT",
+        "REQ-C1-DESKTOP-GUI"
+      ]
+    },
+    {
+      "name": "Desktop message timeline polish",
+      "timestamp_utc": "2026-04-26T05:00:37+00:00",
+      "delivered": "Added server created_at_ms propagation, C++ timestamp/read-marker parsing, desktop cache read-marker persistence, message_read_update handling and bubble-style timestamp/status transcript rendering.",
+      "verified": "Built Debug; ran app_desktop_store_test 12/12, validate_desktop_smoke 1/1, validate_read_receipts 6/6, validate_incremental_sync 8/8, validate_message_fanout 4/4, validate_attachments 11/11 and validate_message_edit_delete 8/8.",
+      "next": "Continue profile/account polish or richer desktop navigation; timeline-specific follow-up is pending/failed send states and a custom rich message list widget.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-DESKTOP-MESSAGE-TIMELINE-POLISH",
+        "REQ-READ-RECEIPTS",
+        "REQ-C2-CLIENT-CACHE",
+        "REQ-C2A-INMEMORY-STORE",
+        "REQ-C2B-PERSISTENT-CACHE",
+        "REQ-C1-DESKTOP-GUI"
+      ]
+    },
+    {
+      "name": "Desktop timeline completion gaps",
+      "timestamp_utc": "2026-04-26T05:09:47+00:00",
+      "delivered": "Closed timeline leftovers with local pending/failed text and attachment send lifecycle, group per-member read details, QTextBrowser rich HTML bubble rendering and explicit legacy timestamp fallback.",
+      "verified": "Built Debug; ran app_desktop_store_test 16/16, validate_desktop_smoke 1/1, validate_read_receipts 6/6, validate_incremental_sync 8/8, validate_message_fanout 4/4 and validate_attachments 11/11.",
+      "next": "Run full validator sweep and then move to profile/account polish or richer desktop navigation/search.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-DESKTOP-TIMELINE-COMPLETION",
+        "REQ-DESKTOP-MESSAGE-TIMELINE-POLISH",
+        "REQ-READ-RECEIPTS",
+        "REQ-C2-CLIENT-CACHE",
+        "REQ-C2A-INMEMORY-STORE",
+        "REQ-C2B-PERSISTENT-CACHE",
+        "REQ-C1-DESKTOP-GUI"
+      ]
+    },
+    {
+      "name": "Profile/account and user discovery",
+      "timestamp_utc": "2026-04-26T06:00:00+00:00",
+      "delivered": "Added authenticated profile_get_request/profile_update_request and user_search_request/user_search_response protocol flows, display-name validation/persistence, online/contact flags for search results, C++ ControlPlaneClient profile/search RPCs, Qt desktop profile refresh/save controls, Qt desktop user search panel, desktop smoke markers and a dedicated validate_profile_search.py validator.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran validate_profile_search 5/5, validate_desktop_smoke 1/1 with profile/search markers, validate_contacts 8/8, validate_registration 7/7, app_desktop_store_test 16/16, and a full scripts/validate_*.py sweep: 26 scripts / 154 scenarios all passed.",
+      "next": "Desktop navigation/search: chat list filtering, selected-conversation message search and keyboard-friendly navigation.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-DESKTOP-PROFILE-SEARCH",
+        "REQ-DESKTOP-REGISTRATION-UI",
+        "REQ-CONTACTS",
+        "REQ-PRESENCE-HEARTBEAT",
+        "REQ-CPP-CONTROL-CLIENT",
+        "REQ-C1-DESKTOP-GUI"
+      ]
+    },
+    {
+      "name": "Desktop navigation/search",
+      "timestamp_utc": "2026-04-26T06:20:00+00:00",
+      "delivered": "Added local chat-list filtering, selected-conversation message search result records, rich timeline search match/focused highlighting, Qt search controls with previous/next navigation and match-count status, plus smoke/store coverage for navigation search.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran app_desktop_store_test 17/17 and validate_desktop_smoke 1/1 with navigation/search marker.",
+      "next": "Message actions: replies, forwards, reactions and pinned messages.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-DESKTOP-NAVIGATION-SEARCH",
+        "REQ-DESKTOP-TIMELINE-COMPLETION",
+        "REQ-C2-CLIENT-CACHE",
+        "REQ-C1-DESKTOP-GUI"
+      ]
+    },
+    {
+      "name": "Message actions",
+      "timestamp_utc": "2026-04-26T15:11:43+00:00",
+      "delivered": "Added replies, forwards, reaction toggles and pin/unpin state across protocol payloads, server message records, fan-out pushes, incremental sync deltas, C++ ControlPlaneClient APIs, DesktopChatStore cache/rendering and Qt desktop controls.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran validate_message_actions 3/3, app_desktop_store_test 18/18, validate_desktop_smoke 1/1, targeted regressions and a full scripts/validate_*.py sweep: 27 scripts / 157 scenarios passed.",
+      "next": "Polish message-action UX with selectable message rows, reply/forward preview cards, pinned banner/list and reaction picker, or move to production paging/global search.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-DESKTOP-MESSAGE-ACTIONS",
+        "REQ-C1-DESKTOP-GUI",
+        "REQ-C2-CLIENT-CACHE",
+        "REQ-C6B-DURABLE-DELTA-LOG",
+        "REQ-CHAT-FANOUT",
+        "REQ-TYPED-PROTO"
+      ]
+    },
+    {
+      "name": "Backlog tasks 1-5 verified slices",
+      "timestamp_utc": "2026-04-26T15:34:30+00:00",
+      "delivered": "Advanced the remaining task list with five verified slices: clickable message ids and Use Match/Use Latest targeting for message actions; server-side message_search_request/message_search_response with optional conversation scope; C++ ControlPlaneClient search_messages and desktop smoke coverage; attachment filename search validation plus SQLite persistence coverage for action metadata; and a Qt revoke-device confirmation dialog.",
+      "verified": "Built Debug with cmake --build build-codex --config Debug; ran validate_message_search 5/5, validate_message_actions 4/4, validate_desktop_smoke 1/1, app_desktop_store_test 19/19, validate_incremental_sync 8/8 and validate_typed_errors 11/11.",
+      "next": "Continue production search/history with paging windows and richer result cards, then move into attachment thumbnails/streaming progress and broader backend repository hardening.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-DESKTOP-MESSAGE-ACTION-UX",
+        "REQ-SERVER-MESSAGE-SEARCH",
+        "REQ-DESKTOP-MESSAGE-ACTIONS",
+        "REQ-DESKTOP-NAVIGATION-SEARCH",
+        "REQ-C3C-ATTACHMENT-METADATA-PREVIEW",
+        "REQ-C4A-SQLITE-PERSISTENCE",
+        "REQ-DESKTOP-DEVICE-POLISH",
+        "REQ-C5-DEVICE-MANAGEMENT",
+        "REQ-CPP-CONTROL-CLIENT"
+      ]
+    },
+    {
+      "name": "Production history paging and Linux Docker boundary",
+      "timestamp_utc": "2026-04-27T01:47:06+00:00",
+      "delivered": "Added bounded conversation history paging to conversation_sync, offset paging to server-side message search, C++ ControlPlaneClient history-page/search paging parsing, desktop smoke coverage for history pages, TELEGRAM_* server environment configuration and deploy/docker Linux server compose files with persistent /data plus an optional PostgreSQL profile.",
+      "verified": "Built Debug with cmake; ran validate_history_paging 2/2, validate_desktop_smoke 1/1 with history-page marker, validate_message_search 5/5, validate_incremental_sync 8/8, app_desktop_store_test 19/19, validate_typed_errors 11/11 and validate_message_actions 4/4. WSL Docker Compose config passed for default and postgres profile; image build was blocked by Docker Hub timeout resolving python:3.12-slim.",
+      "next": "Wire the desktop UI to load older history pages and richer search result cards, then start the PostgreSQL repository boundary once the Docker registry/base image is available.",
+      "gate_status": "partial",
+      "covers": [
+        "REQ-PRODUCTION-HISTORY-PAGING",
+        "REQ-SERVER-MESSAGE-SEARCH",
+        "REQ-CPP-CONTROL-CLIENT",
+        "REQ-LINUX-DOCKER-DEPLOYMENT",
+        "REQ-C4A-SQLITE-PERSISTENCE"
+      ]
+    },
+    {
+      "name": "WSL Docker deployment smoke",
+      "timestamp_utc": "2026-04-27T02:29:19+00:00",
+      "delivered": "Configured WSL Docker daemon proxy for the current 10.20.11.30:10809 proxy, forwarded proxy variables through compose build/runtime environment, added scripts/deploy_wsl_docker.ps1 as a one-command deployment entry, kept SQLite as the default /data/runtime.sqlite local-test backend, verified optional PostgreSQL profile startup, and added validate_docker_deploy.py for a real TCP login smoke against the container.",
+      "verified": "Docker Hub pulls now succeed through the daemon proxy; docker compose build telegram-server passed; docker compose up -d telegram-server produced a healthy container; validate_docker_deploy.py passed; deploy_wsl_docker.ps1 -NoBuild passed; deploy_wsl_docker.ps1 -Mode postgres -NoBuild -NoSmoke passed with postgres and telegram-server running.",
+      "next": "Start the PostgreSQL repository boundary while keeping SQLite as the local/default test backend, or wire desktop UI to load older history pages first.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-LINUX-DOCKER-DEPLOYMENT",
+        "REQ-C4A-SQLITE-PERSISTENCE"
+      ]
+    },
+    {
+      "name": "PostgreSQL repository boundary first slice",
+      "timestamp_utc": "2026-04-27T02:44:48+00:00",
+      "delivered": "Added PostgresStateRepository, normalized users/devices/sessions into PostgreSQL tables, retained remaining runtime domains in a JSONB compatibility snapshot, wired InMemoryState/ServerApplication/server CLI to --pg-dsn and TELEGRAM_PG_DSN, added a PostgreSQL-backed Docker server on port 8788 while preserving SQLite on 8787, installed psycopg in the Docker image, fixed login new-device persistence ordering, and added validate_postgres_repository.py.",
+      "verified": "Built and started telegram-server-postgres with Docker Compose; ran container validate_postgres_repository.py 1/1; ran docker deploy smoke against port 8788 and SQLite port 8787; built Debug with CMake; ran validate_desktop_smoke 1/1, validate_registration 7/7, validate_device_management 3/3, validate_sqlite_persistence 2/2 and validate_typed_errors 11/11.",
+      "next": "Migrate conversations/messages/change logs to dedicated PostgreSQL tables with transactional message write boundaries, while keeping SQLite as the local/default test backend.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-POSTGRES-REPOSITORY-BOUNDARY",
+        "REQ-LINUX-DOCKER-DEPLOYMENT",
+        "REQ-C4A-SQLITE-PERSISTENCE",
+        "REQ-SESSION-PERSIST",
+        "REQ-PERSISTENCE"
+      ]
+    },
+    {
+      "name": "PostgreSQL conversation repository and desktop paging/search polish",
+      "timestamp_utc": "2026-04-27T03:15:52+00:00",
+      "delivered": "Migrated PostgreSQL persistence for conversations, messages and conversation change logs into dedicated tables with single-transaction repository saves; preserved SQLite/default behavior; added desktop Load Older history paging and server message-search result cards backed by DesktopChatStore history-page merging.",
+      "verified": "Built Debug with CMake; ran history paging 2/2, message search 5/5, desktop store 20/20, desktop smoke 1/1, incremental sync 8/8, SQLite persistence 2/2, typed errors 11/11, message actions 4/4, Docker PG deploy smoke on 8788 and container validate_postgres_repository 2/2.",
+      "next": "Migrate contacts, attachments and remote sessions to dedicated PostgreSQL tables, add migrations, then continue richer message-action cards and conflict recovery metadata.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-POSTGRES-REPOSITORY-BOUNDARY",
+        "REQ-PRODUCTION-HISTORY-PAGING",
+        "REQ-SERVER-MESSAGE-SEARCH",
+        "REQ-C2-CLIENT-CACHE",
+        "REQ-C4A-SQLITE-PERSISTENCE"
+      ]
+    },
+    {
+      "name": "PostgreSQL remaining domain repository migration",
+      "timestamp_utc": "2026-04-27T09:36:56+00:00",
+      "delivered": "Migrated contacts, attachment metadata and remote sessions from the PostgreSQL compatibility snapshot into dedicated PostgreSQL tables while preserving the single-transaction repository save and snapshot fallback for older databases.",
+      "verified": "Ran py_compile for repository and PG validator; ran validate_sqlite_persistence 2/2, validate_contacts 8/8, validate_attachments 11/11, validate_rendezvous 6/6, rebuilt/restarted Docker telegram-server-postgres and ran validate_postgres_repository 3/3, plus Docker PG deploy smoke on 8788, desktop smoke 1/1, incremental sync 8/8, typed errors 11/11 and session persistence 5/5.",
+      "next": "Add PostgreSQL schema migrations/versioning, backup/restore checks, then move into TLS/session hardening and installation packaging.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-POSTGRES-REPOSITORY-BOUNDARY",
+        "REQ-C4-DURABLE-PERSISTENCE",
+        "REQ-C4A-SQLITE-PERSISTENCE",
+        "REQ-CONTACTS",
+        "REQ-ATTACHMENTS",
+        "REQ-REMOTE-LIFECYCLE"
+      ]
+    },
+    {
+      "name": "PostgreSQL schema/versioning, backup/restore, session TTL and package staging",
+      "timestamp_utc": "2026-04-27T10:10:52+00:00",
+      "delivered": "Added PostgreSQL schema_migrations version marker and schema_version check, backup/restore repository validator, configurable login-session TTL with heartbeat refresh, and Windows desktop package staging script.",
+      "verified": "py_compile passed; Docker PostgreSQL repository validator 3/3; Docker PostgreSQL backup/restore validator 1/1; session hardening 3/3; session persistence 5/5; typed errors 11/11; package staging smoke created a Windows desktop artifact directory.",
+      "next": "Implement TLS termination/native TLS configuration and move package staging toward signed/checksummed installer delivery.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-POSTGRES-REPOSITORY-BOUNDARY",
+        "REQ-C4-DURABLE-PERSISTENCE",
+        "REQ-POSTGRES-SCHEMA-BACKUP",
+        "REQ-PRODUCTION-SESSION-TTL",
+        "REQ-SESSION-PERSIST",
+        "REQ-WINDOWS-PACKAGE-STAGING",
+        "REQ-VALIDATION"
+      ]
+    },
+    {
+      "name": "Native TLS control-plane configuration",
+      "timestamp_utc": "2026-04-27T10:14:34+00:00",
+      "delivered": "Added optional native TLS wrapping for the Python TCP control plane, CLI/env certificate and key configuration, and TLS config guard validation.",
+      "verified": "py_compile passed; validate_tls_config.py passed 3/3; validate_session_hardening.py passed 3/3.",
+      "next": "Add C++ TLS client support or an external TLS termination recipe, then move package staging toward signed/checksummed installer output.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-TLS-CONTROL-PLANE",
+        "REQ-VALIDATION"
+      ]
+    },
+    {
+      "name": "Checksummed Windows package output and TLS delivery notes",
+      "timestamp_utc": "2026-04-27T10:21:45+00:00",
+      "delivered": "Enhanced Windows desktop package staging with SHA256SUMS.txt, zip checksum output, package-shape validation, and TLS deployment notes that document native server TLS plus the remaining C++ TLS client gap.",
+      "verified": "validate_windows_package.ps1 passed and produced package directory, zip and .sha256; validate_tls_config.py passed 3/3; validate_session_hardening.py passed 3/3; py_compile passed for Python validators.",
+      "next": "Add C++ TLS client transport behind the existing control-plane boundary or add a concrete reverse-proxy TLS termination compose profile.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-WINDOWS-PACKAGE-STAGING",
+        "REQ-WINDOWS-PACKAGE-CHECKSUMS",
+        "REQ-TLS-CONTROL-PLANE",
+        "REQ-VALIDATION"
+      ]
+    },
+    {
+      "name": "TLS handshake smoke and Docker TLS termination profile",
+      "timestamp_utc": "2026-04-27T10:32:56+00:00",
+      "delivered": "Added a real TLS login smoke validator, Docker nginx TLS termination profile on 8443, static deployment config validation, and TLS deployment documentation.",
+      "verified": "py_compile passed; validate_tls_handshake.py passed 1/1; validate_tls_deployment_config.py passed 2/2; validate_tls_config.py passed 3/3.",
+      "next": "Implement C++ TLS client transport parity or add automated cert generation/dev-run script for Docker TLS profile.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-TLS-CONTROL-PLANE",
+        "REQ-TLS-HANDSHAKE-SMOKE",
+        "REQ-TLS-TERMINATION-PROFILE",
+        "REQ-VALIDATION"
+      ]
+    },
+    {
+      "name": "Dev cert generation and live TLS proxy smoke",
+      "timestamp_utc": "2026-04-27T11:03:05+00:00",
+      "delivered": "Added local dev TLS cert generation, ignored cert material path, TLS dev cert validator, TLS proxy smoke validator, and corrected nginx to stream TLS termination for the raw JSON-over-TCP protocol.",
+      "verified": "py_compile passed; validate_tls_dev_cert.py 2/2; validate_tls_handshake.py 1/1; validate_tls_deployment_config.py 2/2; docker compose --profile tls config passed; docker compose --profile tls up for telegram-server and telegram-tls-proxy passed; validate_tls_proxy_smoke.py passed; validate_docker_deploy.py passed on 8787.",
+      "next": "Implement C++ TLS client transport parity or add TLS proxy coverage for PostgreSQL-backed server profile.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-TLS-CONTROL-PLANE",
+        "REQ-TLS-TERMINATION-PROFILE",
+        "REQ-TLS-DEV-CERT",
+        "REQ-TLS-PROXY-SMOKE",
+        "REQ-VALIDATION"
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "blocks": [],
+  "requirements": [
+    {
+      "id": "REQ-TYPED-PROTO",
+      "description": "Typed dataclass/struct protocol payloads on both server and client",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T08:14:57+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-VALIDATION",
+      "description": "Protocol errors surface to client with explicit validation for login, message, remote invite, remote approve",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T08:14:57+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-PERSISTENCE",
+      "description": "Server conversations and remote sessions persist across restart via JSON snapshot",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-20T08:14:57+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-REMOTE-LIFECYCLE",
+      "description": "Remote session lifecycle supports invite/approve/reject/cancel/terminate/disconnect with verified transitions",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T08:14:58+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-CHAT-CORE",
+      "description": "Chat core: login, conversation sync, message send/deliver",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T08:14:58+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-MEDIA-RENDEZVOUS",
+      "description": "Server emits rendezvous info (direct candidates + relay) on request after approval; session transitions approved -> negotiating",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T09:13:16+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-TYPED-ERRORS",
+      "description": "All service-layer errors carry a typed error code enum shared between server and client; clients can switch on code, not free-form strings",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T09:40:15+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-SESSION-PERSIST",
+      "description": "Login sessions (session_id + counter) survive server restart so clients reconnect with the same session_id instead of re-authenticating",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T09:59:33+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-MEDIA-BYTE-CHANNEL",
+      "description": "Server runs a UDP echo listener bound to a configurable port; C++ client can send a probe and observe the echo response after rendezvous",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T10:03:49+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-MEDIA-AUTH",
+      "description": "UDP media plane validates session_id against an active, approved remote session; unauthorized packets are dropped silently",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T10:26:35+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-MEDIA-FRAME-STREAM",
+      "description": "After a 'subscribe' UDP probe, server emits a sequence of structured frame_chunk datagrams (seq + length-prefixed payload) to that client",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T10:45:36+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-FRAME-HEADER",
+      "description": "Server-emitted frame_chunk payloads carry a structured header (width, height, timestamp_ms, codec) so consumers can interpret bytes as a media frame, not just opaque bytes",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T10:58:39+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-CPP-FRAME-CONSUMER",
+      "description": "C++ client can subscribe to the UDP frame stream and print each received frame's header + body length",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T10:58:39+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-SCREEN-SOURCE",
+      "description": "Server can be configured with a pluggable frame source; a bundled test-pattern source provides deterministic RGB pixel frames so the frame stream exposes real width/height/codec rather than hardcoded constants",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T11:44:38+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-INPUT-INJECT",
+      "description": "Requester of an active remote session can push structured input events (key/mouse_move/mouse_button/scroll) through the control plane; server validates kind and actor, records an input log, and emits an ack",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T11:55:46+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-UDP-RELAY",
+      "description": "Server relays UDP datagrams between the two peers of an active remote session. Wire form: RELAY:<target_sid>:<body>; server looks up target addr from its last-seen map and forwards as sid_len|sender_sid|body",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T12:07:01+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-UDP-RELIABILITY",
+      "description": "Peer-side reliability: seq-numbered packets; receiver detects gaps and NACKs missing seqs; sender retransmits; receiver delivers payloads in seq order regardless of arrival order",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T12:14:01+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-CHAT-FANOUT",
+      "description": "A message_send by one participant must be pushed as message_deliver to all other participant sessions in real time (not only available via conversation_sync polling)",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T12:46:19+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-PRESENCE-HEARTBEAT",
+      "description": "Client heartbeat refreshes session last_seen_at; presence query + device is_online use TTL so stale sessions flip to offline; presence state survives targeted query",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T12:46:22+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-PASSWORD-HASH",
+      "description": "User passwords stored as salted hash (stdlib hashlib/pbkdf2, no plaintext on disk); login verifies via constant-time comparison",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-20T13:19:35+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-USER-REGISTRATION",
+      "description": "New users can register via REGISTER_REQUEST: unique username required, minimum password length enforced, registered user can immediately login and exchange messages",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T13:19:38+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-GROUP-CONVERSATIONS",
+      "description": "Authenticated users can create multi-participant conversations (>=2 participants), send/receive messages that fan out to all members, and add/remove participants",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T13:19:39+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-READ-RECEIPTS",
+      "description": "MESSAGE_READ advances a per-user last-read pointer on a conversation and pushes MESSAGE_READ_UPDATE to other participants; conversation_sync exposes read markers",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T13:19:40+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-MESSAGE-EDIT-DELETE",
+      "description": "Message sender can edit message text or soft-delete it; edits/deletes fan out as MESSAGE_EDITED/MESSAGE_DELETED; non-sender attempts return typed errors",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T13:19:42+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-CONTACTS",
+      "description": "Each user maintains a directed contact list with add/remove/list operations; server persists and returns contact details (user_id + display_name + online flag)",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T13:19:44+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-ATTACHMENTS",
+      "description": "Messages can carry a binary attachment (filename/mime/base64 body, size-capped) persisted server-side; fan-out references attachment_id; recipients fetch by id via ATTACHMENT_FETCH",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T13:19:47+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-NET-ABSTRACTION",
+      "description": "C++ client networking code uses a thin net/ abstraction layer (NativeSocket alias, scoped socket init, error-code mapping) so future Linux/macOS/Android/iOS ports only change the platform-specific #ifdef branch; no direct Winsock calls outside net/",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-20T14:03:28+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-TCP-LINE-CLIENT",
+      "description": "C++ TcpLineClient primitive: async reader thread drains JSON lines into a thread-safe inbox, thread-safe writer, blocking wait_for(correlation_id | type, timeout) — usable for both request/response and unsolicited push envelopes",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T14:03:31+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-CPP-CONTROL-CLIENT",
+      "description": "C++ ControlPlaneClient with typed methods: login / conversation_sync / send_message / mark_read / edit_message / delete_message / add_contact / remove_contact / list_contacts / presence_query / heartbeat_ping; push callbacks for message_deliver, message_edited, message_deleted, message_read_update, conversation_updated",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T14:03:34+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-CPP-CHAT-DEMO",
+      "description": "Interactive C++ app_chat binary: two instances connected to the same TCP server can exchange messages live; slash commands cover edit/delete/read/contacts/presence; matches the Python chat_cli.py UX",
+      "type": "functional",
+      "created_at_utc": "2026-04-20T14:03:36+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C2-CLIENT-CACHE",
+      "description": "Desktop client maintains a local conversation/message state cache with reconnect reconciliation, unread counts, and sync cursor support",
+      "type": "functional",
+      "created_at_utc": "2026-04-24T14:09:04+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C4-DURABLE-PERSISTENCE",
+      "description": "Server durable state migrates from JSON snapshots to database-backed users, devices, conversations, messages, contacts, sessions, and attachment metadata",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-24T14:09:05+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C1-DESKTOP-GUI",
+      "description": "Qt desktop GUI baseline can connect, log in, sync a conversation, display pushes, and send text messages through ControlPlaneClient",
+      "type": "functional",
+      "created_at_utc": "2026-04-24T14:09:07+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C3-ATTACHMENT-PATH",
+      "description": "Attachments move from JSON/base64 snapshots toward a production upload/download boundary with desktop UI and object-store-compatible server contract",
+      "type": "functional",
+      "created_at_utc": "2026-04-24T14:09:50+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C5-DEVICE-MANAGEMENT",
+      "description": "Desktop client exposes active devices, session revocation, trusted-device state, and clearer presence/last-seen UX",
+      "type": "functional",
+      "created_at_utc": "2026-04-24T14:09:55+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C2A-INMEMORY-STORE",
+      "description": "Desktop GUI renders from an in-memory conversation/message store that applies sync, local send responses, and push events with unread counts for unselected conversations",
+      "type": "functional",
+      "created_at_utc": "2026-04-24T14:19:01+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C2B-PERSISTENT-CACHE",
+      "description": "DesktopChatStore persists its local conversation/message cache to JSON and reconciles cached state with server conversation_sync after reconnect",
+      "type": "functional",
+      "created_at_utc": "2026-04-24T14:25:46+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C2C-CONVERSATION-LIST",
+      "description": "Desktop GUI exposes a real conversation list backed by DesktopChatStore, supports selecting conversations, and persists per-conversation last_message_id cursors",
+      "type": "functional",
+      "created_at_utc": "2026-04-24T14:29:20+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C3A-BLOB-ATTACHMENTS",
+      "description": "Attachment content is stored behind an object-store-ready blob boundary while runtime state stores metadata only; desktop client can send/fetch attachments through ControlPlaneClient",
+      "type": "functional",
+      "created_at_utc": "2026-04-24T14:39:15+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C4A-SQLITE-PERSISTENCE",
+      "description": "Server supports SQLite --db-file persistence for users, devices, sessions, conversations, remote sessions, contacts, and attachment metadata while preserving JSON state-file mode",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-24T14:44:18+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C6A-INCREMENTAL-SYNC",
+      "description": "Conversation sync accepts per-conversation last_message_id cursors and returns missed message deltas while preserving full-sync compatibility",
+      "type": "functional",
+      "created_at_utc": "2026-04-25T09:07:32+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C6B-DURABLE-DELTA-LOG",
+      "description": "Conversation sync persists per-conversation change versions and returns edit/delete/read-marker deltas across JSON and SQLite restarts",
+      "type": "functional",
+      "created_at_utc": "2026-04-25T09:17:36+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C6C-METADATA-DELTA-COMPACTION",
+      "description": "Conversation sync returns membership metadata deltas and falls back to full conversation sync when compacted change logs no longer cover a client version",
+      "type": "functional",
+      "created_at_utc": "2026-04-25T09:32:05+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C3B-ATTACHMENT-SAVE-UI",
+      "description": "Qt desktop can fetch an attachment by attachment_id and save its bytes to a user-selected local file, with smoke coverage for saved content",
+      "type": "functional",
+      "created_at_utc": "2026-04-25T09:39:47+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C3C-ATTACHMENT-METADATA-PREVIEW",
+      "description": "Conversation sync and desktop cache/rendering preserve attachment filename, MIME type and size for attachment messages",
+      "type": "functional",
+      "created_at_utc": "2026-04-25T09:48:05+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C3D-ATTACHMENT-TRANSFER-STATUS",
+      "description": "Qt desktop exposes verifiable stage-based upload/download/save status for attachment transfers",
+      "type": "functional",
+      "created_at_utc": "2026-04-25T09:54:28+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-C3E-ATTACHMENT-TYPE-PREVIEWS",
+      "description": "Qt desktop renders lightweight text/image attachment preview affordances and preserves preview metadata in the local cache",
+      "type": "functional",
+      "created_at_utc": "2026-04-25T10:02:14+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-DESKTOP-REGISTRATION-UI",
+      "description": "Qt desktop can register a new account through ControlPlaneClient and establish a usable authenticated session",
+      "type": "functional",
+      "created_at_utc": "2026-04-25T10:35:22+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-DESKTOP-CONTACTS-GROUPS-UI",
+      "description": "Qt desktop can list/add/remove contacts, create group conversations, and add/remove selected conversation participants through ControlPlaneClient",
+      "type": "functional",
+      "created_at_utc": "2026-04-26T04:49:12+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-DESKTOP-MESSAGE-TIMELINE-POLISH",
+      "description": "Qt desktop message timeline shows timestamps, inbound/outbound bubble-like rows, local sent/read state and cache-backed read markers",
+      "type": "functional",
+      "created_at_utc": "2026-04-26T05:00:05+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-DESKTOP-TIMELINE-COMPLETION",
+      "description": "Qt desktop timeline closes remaining MVP gaps: pending/failed local sends, per-member group read details, rich bubble rendering and legacy timestamp fallback",
+      "type": "functional",
+      "created_at_utc": "2026-04-26T05:09:17+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-DESKTOP-PROFILE-SEARCH",
+      "description": "Qt desktop can load/update the current profile display name and search users with online/contact result state through authenticated control-plane APIs",
+      "type": "functional",
+      "created_at_utc": "2026-04-26T06:00:00+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-DESKTOP-NAVIGATION-SEARCH",
+      "description": "Qt desktop can filter local chats and search within the selected conversation with previous/next navigation and rich timeline highlighting",
+      "type": "functional",
+      "created_at_utc": "2026-04-26T06:20:00+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-DESKTOP-MESSAGE-ACTIONS",
+      "description": "Qt desktop supports message replies, forwards, reaction toggles and pin/unpin state through protocol, server persistence, incremental sync, ControlPlaneClient and local cache rendering",
+      "type": "functional",
+      "created_at_utc": "2026-04-26T15:11:23+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-DESKTOP-MESSAGE-ACTION-UX",
+      "description": "Qt desktop makes message-action targets discoverable from timeline/search instead of requiring manual message_id entry",
+      "type": "functional",
+      "created_at_utc": "2026-04-26T15:33:45+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-SERVER-MESSAGE-SEARCH",
+      "description": "Authenticated users can search accessible conversation messages server-side, with optional conversation scope and attachment filename matches",
+      "type": "functional",
+      "created_at_utc": "2026-04-26T15:33:46+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-DESKTOP-DEVICE-POLISH",
+      "description": "Qt desktop device-management actions include safer UX polish for destructive revoke operations",
+      "type": "functional",
+      "created_at_utc": "2026-04-26T15:34:18+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-PRODUCTION-HISTORY-PAGING",
+      "description": "conversation_sync and message search support bounded production-style paging so clients can load history/search results without full dataset sync",
+      "type": "functional",
+      "created_at_utc": "2026-04-27T01:45:17+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-LINUX-DOCKER-DEPLOYMENT",
+      "description": "Server has a Linux Docker deployment boundary with compose-managed persistence volumes and optional PostgreSQL development service",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-27T01:45:24+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-POSTGRES-REPOSITORY-BOUNDARY",
+      "description": "Server supports an optional PostgreSQL repository-backed persistence path while retaining SQLite as the default local-test backend",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-27T02:44:37+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-WINDOWS-PACKAGE-STAGING",
+      "description": "Windows desktop executables can be staged into a repeatable package directory with optional Qt runtime deployment and zip output",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-27T10:10:03+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-PRODUCTION-SESSION-TTL",
+      "description": "Server login sessions can be bounded by configurable TTL, heartbeats refresh active sessions, and expired sessions are rejected and cleaned up",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-27T10:10:11+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-POSTGRES-SCHEMA-BACKUP",
+      "description": "PostgreSQL repository path records schema version evidence and has a backup/restore validation path for core runtime state",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-27T10:10:36+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-TLS-CONTROL-PLANE",
+      "description": "Python TCP control plane can run with native TLS when certificate and key material are configured together, while plaintext local development remains default",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-27T10:14:26+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-WINDOWS-PACKAGE-CHECKSUMS",
+      "description": "Windows desktop package output includes verifiable SHA256 checksums for staged files and zip artifacts",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-27T10:21:32+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-TLS-HANDSHAKE-SMOKE",
+      "description": "Native TLS control-plane mode has an automated smoke that performs a real TLS login round trip",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-27T10:32:40+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-TLS-TERMINATION-PROFILE",
+      "description": "Docker deployment includes a TLS termination profile that exposes 8443 and forwards to the plaintext control-plane service",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-27T10:32:45+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-TLS-DEV-CERT",
+      "description": "Local development TLS profile has a script to generate ignored self-signed PEM certificate and key material",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-27T11:02:50+00:00",
+      "state": "open"
+    },
+    {
+      "id": "REQ-TLS-PROXY-SMOKE",
+      "description": "Docker TLS termination profile can be started locally and verified with a real TLS login through port 8443",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-04-27T11:02:56+00:00",
+      "state": "open"
+    }
+  ]
+}

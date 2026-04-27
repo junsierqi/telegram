@@ -1,0 +1,15 @@
+sequenceDiagram
+    participant C as Client
+    participant G as Gateway
+    participant F as File Metadata Service
+    participant O as Object Storage
+    participant M as Chat Service
+
+    C->>G: Request upload intent
+    G->>F: Create upload metadata
+    F-->>C: Upload target and file id
+    C->>O: Upload binary
+    C->>G: Submit attachment metadata
+    G->>M: Send message with attachment ref
+    M-->>G: Stored message
+    G-->>C: Message accepted

@@ -1,0 +1,10 @@
+flowchart TD
+    Gateway["Gateway/API"] --> Auth["Auth Service"]
+    Gateway --> Chat["Chat Service"]
+    Gateway --> Presence["Presence Service"]
+    Gateway --> Files["File Metadata Service"]
+    Gateway -. future .-> Remote["Remote Session Coordination"]
+    Auth --> DB["PostgreSQL"]
+    Chat --> DB
+    Presence --> Redis["Redis"]
+    Remote -. future .-> Redis

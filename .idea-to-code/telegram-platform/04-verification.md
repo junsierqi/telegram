@@ -1,0 +1,394 @@
+# Verification
+
+## Coverage Expectations
+
+- Build:
+- Unit/Integration:
+- End-to-end flow:
+- Remaining gaps:
+
+## Verification History
+
+## Artifact-driven skill upgrade
+
+- Timestamp: 2026-04-20T05:26:28.072684+00:00
+- Verified: Ran the bundle script commands against the telegram repo and inspected the generated files plus status output.
+
+## Typed server request payloads
+
+- Timestamp: 2026-04-20T05:39:53.945849+00:00
+- Verified: Ran cmake --build build, python -m server.main, and a TCP end-to-end run with the Python server plus the C++ client executable.
+
+## Typed client response models
+
+- Timestamp: 2026-04-20T05:45:09.260611+00:00
+- Verified: Ran cmake --build build, python -m server.main, and a TCP end-to-end run with python -m server.main --tcp-server plus the built C++ client executable.
+
+## Protocol error handling and validation
+
+- Timestamp: 2026-04-20T05:50:46.084722+00:00
+- Verified: Ran cmake --build build, python -m server.main, a TCP end-to-end run with python -m server.main --tcp-server plus the C++ client executable, and a targeted Python validation script covering invalid login, empty message send, and unauthorized remote approval.
+
+## Lightweight server persistence
+
+- Timestamp: 2026-04-20T05:59:05.134820+00:00
+- Verified: Ran cmake --build build, python -m server.main, a TCP end-to-end run with python -m server.main --tcp-server --state-file <temp file> plus the C++ client executable, and a restart-focused Python validation script that verified message and remote-session state survive across app instances.
+
+## Remote session reject and cancel flows
+
+- Timestamp: 2026-04-20T06:16:32.660948+00:00
+- Verified: Ran cmake --build build, python -m server.main, a TCP end-to-end run with python -m server.main --tcp-server --state-file <temp file> plus the built C++ client executable, and a targeted Python lifecycle script covering reject, cancel, and invalid follow-up transitions.
+
+## Remote session terminate and disconnect flows (gate: pass)
+
+- Timestamp: 2026-04-20T08:31:02+00:00
+- Verified: Ran cmake --build build, started python -m server.main --tcp-server --state-file <temp>, exercised the C++ client which now ends with a terminate round-trip, and ran scripts/validate_terminate_disconnect.py covering 8 lifecycle scenarios (terminate by requester/target, disconnect with reason, pre-approval terminate -> not_active, double terminate -> already_terminal, non-participant -> invalid_session, actor mismatch -> session_actor_mismatch, disconnect-after-terminate -> already_terminal).
+- Covers: REQ-REMOTE-LIFECYCLE, REQ-TYPED-PROTO, REQ-VALIDATION
+
+## Robust state-file loading (gate: pass)
+
+- Timestamp: 2026-04-20T09:12:42+00:00
+- Verified: python scripts/validate_empty_state_file.py passes 4 scenarios: empty file, whitespace-only file, missing nested path (parent created on first save), and non-empty existing file (regression guard for persistence round-trip).
+- Covers: REQ-PERSISTENCE
+
+## Media-plane rendezvous handshake (Plan A) (gate: pass)
+
+- Timestamp: 2026-04-20T09:23:03+00:00
+- Verified: cmake --build build (clean); python scripts/validate_rendezvous.py 6/6 (approved->negotiating; idempotent in negotiating; awaiting_approval -> not_ready; terminated -> not_ready; actor mismatch -> session_actor_mismatch; unknown session -> unknown_remote_session); regression passes on validate_terminate_disconnect.py 8/8 and validate_empty_state_file.py 4/4; TCP end-to-end run shows rendezvous yielding 4 candidates with correct kinds and relay info, state transitioning approved->negotiating.
+- Covers: REQ-MEDIA-RENDEZVOUS, REQ-REMOTE-LIFECYCLE, REQ-TYPED-PROTO
+
+## Typed error codes (gate: pass)
+
+- Timestamp: 2026-04-20T09:51:08+00:00
+- Verified: cmake --build build clean. python scripts/validate_typed_errors.py 11/11 (invalid_credentials, invalid_session, session_actor_mismatch, unknown_conversation, empty_message, unknown_target_device, self_remote, remote_approval_denied, rendezvous_not_ready, unsupported_message_type, code-catalog completeness). Regressions pass: terminate_disconnect 8/8, rendezvous 6/6, empty_state_file 4/4. TCP end-to-end run unchanged on happy path; last_error_code field visible in client state prints.
+- Covers: REQ-TYPED-ERRORS, REQ-TYPED-PROTO, REQ-VALIDATION
+
+## Session persistence (gate: pass)
+
+- Timestamp: 2026-04-20T10:03:23+00:00
+- Verified: scripts/validate_session_persistence.py 5/5 (session survives restart, counter skips past persisted max, no-state-file keeps memory-only semantics, unknown session still returns typed INVALID_SESSION, cumulative persistence across conversations+remote_sessions+sessions). Regressions intact: typed_errors 11/11, terminate_disconnect 8/8, rendezvous 6/6, empty_state_file 4/4.
+- Covers: REQ-SESSION-PERSIST, REQ-PERSISTENCE
+
+## First UDP media-plane byte channel (gate: pass)
+
+- Timestamp: 2026-04-20T10:11:37+00:00
+- Verified: scripts/validate_udp_media.py 5/5 (basic echo, empty/small/near-MTU payloads, 3 distinct session ids don't corrupt each other, MAX_PACKET_SIZE constant present, thread shuts down cleanly). TCP+UDP end-to-end with --udp-port 9001 --state-file <tmp>: C++ client prints 'udp probe ack=yes bytes=39 text=ack:sess_1:hello from alice media plane'. Regressions all green: typed_errors 11/11, session_persistence 5/5, terminate_disconnect 8/8, rendezvous 6/6, empty_state_file 4/4.
+- Covers: REQ-MEDIA-BYTE-CHANNEL, REQ-MEDIA-RENDEZVOUS, REQ-TYPED-PROTO
+
+## Per-session UDP media-plane auth (gate: pass)
+
+- Timestamp: 2026-04-20T10:38:03+00:00
+- Verified: scripts/validate_udp_media_auth.py 5/5 (unknown session_id drops silently, logged-in-only drops, approved-participant echoes, terminate flips back to drop, no-authorizer keeps legacy accept-all behaviour). Full regression green: validate_udp_media 5/5, validate_typed_errors 11/11, validate_session_persistence 5/5, validate_terminate_disconnect 8/8, validate_rendezvous 6/6, validate_empty_state_file 4/4.
+- Covers: REQ-MEDIA-AUTH, REQ-MEDIA-BYTE-CHANNEL, REQ-REMOTE-LIFECYCLE
+
+## Structured frame_chunk stream (gate: pass)
+
+- Timestamp: 2026-04-20T10:52:18+00:00
+- Verified: scripts/validate_media_frames.py 6/6 (subscribe N=5 returns seq 1..5 with exact payload bytes, subscribe N=0 is silent, cookie round-trip, legacy echo still works, unauthorized subscribe silent-drops, MAX_FRAME_COUNT cap honored). Full regression 44/44: udp_media_auth 5/5, udp_media 5/5, typed_errors 11/11, session_persistence 5/5, terminate_disconnect 8/8, rendezvous 6/6, empty_state_file 4/4.
+- Covers: REQ-MEDIA-FRAME-STREAM, REQ-MEDIA-AUTH, REQ-MEDIA-BYTE-CHANNEL
+
+## Structured frame payload header (gate: pass)
+
+- Timestamp: 2026-04-20T11:02:45+00:00
+- Verified: scripts/validate_media_frames.py 7/7 including new parse_frame_payload round-trip scenario and field-level assertions in the basic stream scenario. Legacy cookie/echo/auth/cap regressions all still green.
+- Covers: REQ-FRAME-HEADER, REQ-MEDIA-FRAME-STREAM
+
+## C++ UDP frame_chunk consumer (gate: pass)
+
+- Timestamp: 2026-04-20T11:33:48+00:00
+- Verified: cmake --build clean. TCP+UDP end-to-end: C++ client prints 5 received frames with correct header fields (640x360, codec=1, ts=33ms*seq, body_bytes=12). Full regression 51/51 across 8 validators (media_frames 7/7, udp_media_auth 5/5, udp_media 5/5, typed_errors 11/11, session_persistence 5/5, terminate_disconnect 8/8, rendezvous 6/6, empty_state_file 4/4).
+- Covers: REQ-CPP-FRAME-CONSUMER, REQ-FRAME-HEADER, REQ-MEDIA-FRAME-STREAM
+
+## Synthetic screen capture source (gate: pass)
+
+- Timestamp: 2026-04-20T11:55:05+00:00
+- Verified: validate_screen_source 5/5 (gradient pixel pin, solid red, no-source regression, custom dims propagate, unknown pattern rejected). Full regression 56/56 across 9 validators. TCP+UDP end-to-end confirmed: C++ receives 24x16 codec=1 frames reflecting real source dims.
+- Covers: REQ-SCREEN-SOURCE, REQ-FRAME-HEADER, REQ-MEDIA-FRAME-STREAM
+
+## Input event injection (control plane) (gate: pass)
+
+- Timestamp: 2026-04-20T12:04:42+00:00
+- Verified: validate_input_injection 9/9: ack payload contents, seq monotonic across 4 kinds, target-user denied, unknown remote_session, pre-approval rejected, terminated rejected, unknown kind, missing-data fields, 4-kind log round-trip. Full regression 65/65 across 10 validators.
+- Covers: REQ-INPUT-INJECT, REQ-TYPED-PROTO, REQ-VALIDATION, REQ-TYPED-ERRORS
+
+## Server-side UDP relay (gate: pass)
+
+- Timestamp: 2026-04-20T12:11:03+00:00
+- Verified: validate_udp_relay 6/6: unidirectional A→B, bidirectional ping/pong, unknown target silent drop, unauthorized sender silent drop, malformed RELAY drop, registry refresh on ephemeral port change. Regression 71/71 across 11 validators.
+- Covers: REQ-UDP-RELAY, REQ-MEDIA-AUTH, REQ-MEDIA-BYTE-CHANNEL
+
+## UDP reliability layer (ReliableChannel) (gate: pass)
+
+- Timestamp: 2026-04-20T12:31:12+00:00
+- Verified: validate_reliable_stream 5/5 via lossy/reorder/duplicate fake transport: clean 10-pkt stream no NAKs, seq 3+7 drop triggers NAK+retx, seq 4/5 reorder buffered+drained in order, duplicate seq 2 silently dropped, 30% random loss on 20 packets delivers everything in order via NAK-driven retx + tick tail-loss recovery. Regression 76/76 across 12 validators.
+- Covers: REQ-UDP-RELIABILITY
+
+## Chat message fan-out (E1) (gate: pass)
+
+- Timestamp: 2026-04-20T12:49:40+00:00
+- Verified: validate_message_fanout.py 4/4 — push_to_other_participant (bob gets push with push_* correlation, alice gets only response), push_to_other_session_of_same_user (alice's session B gets push when she sends from session A), no_crash_when_participant_logged_out, multiple_messages_arrive_in_order (5 sequential sends arrive at receiver in-order). Regression sampled: session_persistence 5/5, typed_errors 11/11, input_injection 9/9 — no breakage from the SessionRecord field addition.
+- Covers: REQ-CHAT-FANOUT, REQ-CHAT-CORE, REQ-TYPED-PROTO
+
+## Presence heartbeat + TTL-based online (E4) (gate: pass)
+
+- Timestamp: 2026-04-20T12:52:57+00:00
+- Verified: validate_presence_heartbeat.py 6/6 via fake clock + ttl=5s: login_populates_last_seen (session.last_seen_at=1000.0, user/device online), stale_session_flips_offline (still online at 4.9s past TTL, offline at 5.1s past), heartbeat_refreshes_last_seen (heartbeat at t=4s keeps online at t=8.9s, offline at t=9.1s; ACK echoes client_ts and reports server_ts=1004000ms), presence_query_returns_typed_status (alice/bob online, ghost offline + last_seen_at_ms=0), device_list_active_mirrors_ttl (device.active flips after 6s stale), multi_session_user_online_if_any_fresh (user counts online if any session is within TTL). Full regression 86/86 across 14 validators — no breakage.
+- Covers: REQ-PRESENCE-HEARTBEAT, REQ-TYPED-PROTO, REQ-CHAT-CORE
+
+## Registration + password hashing (E2+F2) (gate: pass)
+
+- Timestamp: 2026-04-20T13:23:02+00:00
+- Verified: validate_registration.py 7/7 (seed users still login, register+login round-trip, password stored as pbkdf2_sha256$... not plaintext, duplicate username rejected, weak password rejected, duplicate device rejected, malformed usernames rejected incl empty/short/space/emoji/leading-dash, new account survives state-file restart). validate_typed_errors.py 11/11 — code-catalog completeness picked up the 4 new codes with human messages.
+- Covers: REQ-USER-REGISTRATION, REQ-PASSWORD-HASH, REQ-TYPED-PROTO, REQ-TYPED-ERRORS, REQ-PERSISTENCE
+
+## Group conversations (E5) (gate: pass)
+
+- Timestamp: 2026-04-20T13:26:33+00:00
+- Verified: validate_group_conversations.py 6/6 — create 3-person group, dedupe + unknown-user + too-few, add/remove lifecycle incl duplicate-add + missing-remove, non-participant cannot modify, fan-out on create + send + remove (kicked user still gets notified), persistence across restart. Regressions green: validate_message_fanout 4/4, validate_typed_errors 11/11 (new codes all have human messages), validate_session_persistence 5/5.
+- Covers: REQ-GROUP-CONVERSATIONS, REQ-TYPED-PROTO, REQ-TYPED-ERRORS, REQ-PERSISTENCE, REQ-CHAT-FANOUT
+
+## Read receipts (E6) (gate: pass)
+
+- Timestamp: 2026-04-20T13:28:45+00:00
+- Verified: validate_read_receipts.py 6/6: mark-read advances pointer + pushes to other participants (reader only gets response, no echo push), forward-only advancement (mark m3 then m1 stays at m3), unknown_message rejected, non-participant access_denied, read_markers surface in conversation_sync, markers persist across state-file restart.
+- Covers: REQ-READ-RECEIPTS, REQ-TYPED-PROTO, REQ-TYPED-ERRORS, REQ-PERSISTENCE, REQ-CHAT-FANOUT
+
+## Message edit + delete (E7) (gate: pass)
+
+- Timestamp: 2026-04-20T13:30:47+00:00
+- Verified: validate_message_edit_delete.py 8/8: edit own + push, edit others denied, edit empty rejected, delete own soft-deletes + push + sync sees it, double-delete rejected, edit after delete rejected, delete others denied, unknown message rejected. All existing validators should remain green — will sweep at end of arc.
+- Covers: REQ-MESSAGE-EDIT-DELETE, REQ-TYPED-PROTO, REQ-TYPED-ERRORS, REQ-CHAT-FANOUT, REQ-PERSISTENCE
+
+## Contacts (E8) (gate: pass)
+
+- Timestamp: 2026-04-20T13:32:28+00:00
+- Verified: validate_contacts.py 8/8: add-then-list shows contact + display_name, duplicate add rejected, self add rejected, unknown user rejected, remove without presence rejected then add+remove works, directed semantics (alice adds bob; bob's list stays empty), online flag flips with presence TTL (via injected FakeClock), contacts persist across state-file restart.
+- Covers: REQ-CONTACTS, REQ-TYPED-PROTO, REQ-TYPED-ERRORS, REQ-PERSISTENCE, REQ-PRESENCE-HEARTBEAT
+
+## Attachments (E3) (gate: pass)
+
+- Timestamp: 2026-04-20T13:34:54+00:00
+- Verified: validate_attachments.py 8/8: send+fanout (push has attachment_id but no content_b64) + fetch round-trip byte-exact, size cap enforced, declared/actual size mismatch rejected, invalid base64 rejected, non-participant fetch denied, unknown attachment rejected, content persists across restart (byte-exact round trip), message_descriptor in CONVERSATION_SYNC exposes attachment_id + caption as text.
+- Covers: REQ-ATTACHMENTS, REQ-TYPED-PROTO, REQ-TYPED-ERRORS, REQ-PERSISTENCE, REQ-CHAT-FANOUT
+
+## C++ net/ abstraction layer (B1) (gate: pass)
+
+- Timestamp: 2026-04-20T14:11:59+00:00
+- Verified: cmake --build build --config Debug green. Python server-side UDP validators unchanged: validate_udp_media 5/5 and validate_udp_media_auth 5/5. End-to-end app_shell against python server on 8787 (+ --udp-port 8787 --screen-source gradient:24x16) prints 'udp probe ack=yes bytes=39 text=ack:sess_1:hello from alice media plane' and 5 frame_chunks at 24x16 codec=1, ts=33/66/99/132/165ms body_bytes=1156 — byte-identical to pre-refactor behavior.
+- Covers: REQ-NET-ABSTRACTION, REQ-CPP-FRAME-CONSUMER, REQ-MEDIA-BYTE-CHANNEL
+
+## TcpLineClient primitive (A1) (gate: pass)
+
+- Timestamp: 2026-04-20T14:16:52+00:00
+- Verified: cmake --build build --config Debug — compiles clean on MSVC /W4 /permissive-. Runtime exercised through ControlPlaneClient (A2) and app_chat (A3) which depend on it.
+- Covers: REQ-TCP-LINE-CLIENT, REQ-NET-ABSTRACTION
+
+## ControlPlaneClient (A2) (gate: pass)
+
+- Timestamp: 2026-04-20T14:17:06+00:00
+- Verified: cmake --build build --config Debug — compiles clean after fixing (a) atomic fetch_add needing non-const method and (b) dead parse call discarding [[nodiscard]] return. Runtime exercised by app_chat (A3) end-to-end.
+- Covers: REQ-CPP-CONTROL-CLIENT, REQ-TYPED-PROTO, REQ-CHAT-FANOUT, REQ-PRESENCE-HEARTBEAT
+
+## C++ interactive chat demo (A3) (gate: pass)
+
+- Timestamp: 2026-04-20T14:22:03+00:00
+- Verified: validate_cpp_chat_e2e.py 3/3 — bob's push handler receives 'hello bob from C++ chat demo' sent by alice, both clients log in + show initial conv_alice_bob sync, /presence reports both users online. Full server-side regression 129/129 across 20 Python validators unchanged. cmake --build green.
+- Covers: REQ-CPP-CHAT-DEMO, REQ-CPP-CONTROL-CLIENT, REQ-TCP-LINE-CLIENT, REQ-NET-ABSTRACTION, REQ-CHAT-FANOUT
+
+## Qt desktop chat baseline (C1) (gate: pass)
+
+- Timestamp: 2026-04-24T14:10:20+00:00
+- Verified: Configured build-codex with Qt6 prefix, built all Debug targets, ran validate_desktop_smoke.py 1/1, validate_cpp_chat_e2e.py 3/3, validate_message_fanout.py 4/4, and validate_typed_errors.py 11/11.
+- Covers: REQ-C1-DESKTOP-GUI, REQ-CPP-CONTROL-CLIENT, REQ-CHAT-FANOUT
+
+## Desktop in-memory chat store (C2a) (gate: partial)
+
+- Timestamp: 2026-04-24T14:19:16+00:00
+- Verified: cmake --build build-codex --config Debug passed. app_desktop_store_test.exe passed 4/4. validate_desktop_smoke.py passed 1/1. validate_cpp_chat_e2e.py passed 3/3. validate_message_fanout.py passed 4/4.
+- Covers: REQ-C2A-INMEMORY-STORE, REQ-C2-CLIENT-CACHE, REQ-C1-DESKTOP-GUI
+
+## Desktop persistent cache and reconnect reconciliation (C2b) (gate: partial)
+
+- Timestamp: 2026-04-24T14:26:00+00:00
+- Verified: cmake --build build-codex --config Debug passed. app_desktop_store_test.exe passed 6/6 including cache round-trip and reconnect reconciliation. validate_desktop_smoke.py passed 1/1. validate_cpp_chat_e2e.py passed 3/3. validate_message_fanout.py passed 4/4.
+- Covers: REQ-C2B-PERSISTENT-CACHE, REQ-C2-CLIENT-CACHE, REQ-C2A-INMEMORY-STORE, REQ-C1-DESKTOP-GUI
+
+## Desktop conversation list and local cursor (C2c) (gate: partial)
+
+- Timestamp: 2026-04-24T14:29:36+00:00
+- Verified: cmake --build build-codex --config Debug passed. app_desktop_store_test.exe passed 7/7. validate_desktop_smoke.py passed 1/1. validate_cpp_chat_e2e.py passed 3/3. validate_message_fanout.py passed 4/4.
+- Covers: REQ-C2C-CONVERSATION-LIST, REQ-C2-CLIENT-CACHE, REQ-C2B-PERSISTENT-CACHE, REQ-C2A-INMEMORY-STORE, REQ-C1-DESKTOP-GUI
+
+## Production attachment path (C3) (gate: partial)
+
+- Timestamp: 2026-04-24T14:39:32+00:00
+- Verified: cmake --build build-codex --config Debug passed. validate_attachments.py passed 11/11 including metadata-vs-blob separation, blob restart, and legacy inline migration. validate_desktop_smoke.py passed 1/1 with attachment send/fetch. validate_cpp_chat_e2e.py passed 3/3. validate_message_fanout.py passed 4/4. app_desktop_store_test.exe passed 7/7.
+- Covers: REQ-C3A-BLOB-ATTACHMENTS, REQ-C3-ATTACHMENT-PATH, REQ-ATTACHMENTS, REQ-C1-DESKTOP-GUI
+
+## SQLite durable persistence boundary (C4a) (gate: partial)
+
+- Timestamp: 2026-04-24T14:44:29+00:00
+- Verified: validate_sqlite_persistence.py passed 2/2. validate_session_persistence.py passed 5/5. validate_attachments.py passed 11/11. validate_registration.py passed 7/7. validate_desktop_smoke.py passed 1/1. validate_cpp_chat_e2e.py passed 3/3. validate_message_fanout.py passed 4/4. validate_typed_errors.py passed 11/11.
+- Covers: REQ-C4A-SQLITE-PERSISTENCE, REQ-C4-DURABLE-PERSISTENCE, REQ-PERSISTENCE, REQ-SESSION-PERSIST
+
+## Desktop device management completeness (C5) (gate: pass)
+
+- Timestamp: 2026-04-24T14:55:55+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran app_desktop_store_test 7/7, validate_device_management 3/3, validate_desktop_smoke 1/1, validate_presence_heartbeat 6/6, validate_sqlite_persistence 2/2, validate_attachments 11/11, validate_cpp_chat_e2e 3/3, validate_message_fanout 4/4 and validate_typed_errors 11/11.
+- Covers: REQ-C5-DEVICE-MANAGEMENT, REQ-PRESENCE-HEARTBEAT, REQ-C4A-SQLITE-PERSISTENCE
+
+## C1-C5 acceptance sweep (gate: pass)
+
+- Timestamp: 2026-04-24T15:00:19+00:00
+- Verified: Full sweep passed: all scripts/validate_*.py validators green, 24 scripts / 141 scenarios. Targeted regressions also passed for validate_message_fanout 4/4, validate_cpp_chat_e2e 3/3, validate_desktop_smoke 1/1 and validate_device_management 3/3 after the race fix.
+- Covers: REQ-CHAT-FANOUT, REQ-C1-DESKTOP-GUI, REQ-C2-CLIENT-CACHE, REQ-C3-ATTACHMENT-PATH, REQ-C4-DURABLE-PERSISTENCE, REQ-C5-DEVICE-MANAGEMENT
+
+## Incremental conversation sync (C6a) (gate: pass)
+
+- Timestamp: 2026-04-25T09:07:47+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran validate_incremental_sync 4/4, app_desktop_store_test 8/8, validate_desktop_smoke 1/1, validate_cpp_chat_e2e 3/3, validate_message_fanout 4/4, validate_typed_errors 11/11, validate_sqlite_persistence 2/2, and a full scripts/validate_*.py sweep: 25 scripts / 145 scenarios all passed.
+- Covers: REQ-C6A-INCREMENTAL-SYNC, REQ-C2-CLIENT-CACHE, REQ-C2B-PERSISTENT-CACHE, REQ-C2C-CONVERSATION-LIST, REQ-CHAT-CORE
+
+## Durable conversation delta log (C6b) (gate: pass)
+
+- Timestamp: 2026-04-25T09:17:54+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran validate_incremental_sync 6/6, app_desktop_store_test 9/9, validate_desktop_smoke 1/1, validate_message_edit_delete 8/8, validate_read_receipts 6/6, validate_sqlite_persistence 2/2, validate_session_persistence 5/5, and a full scripts/validate_*.py sweep: 25 scripts / 147 scenarios all passed.
+- Covers: REQ-C6B-DURABLE-DELTA-LOG, REQ-C6A-INCREMENTAL-SYNC, REQ-READ-RECEIPTS, REQ-MESSAGE-EDIT-DELETE, REQ-C2-CLIENT-CACHE
+
+## Conversation metadata delta and compaction (C6c) (gate: pass)
+
+- Timestamp: 2026-04-25T09:32:20+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran validate_incremental_sync 8/8, app_desktop_store_test 10/10, validate_group_conversations 6/6, validate_desktop_smoke 1/1, validate_message_edit_delete 8/8, validate_read_receipts 6/6, validate_sqlite_persistence 2/2, and a full scripts/validate_*.py sweep: 25 scripts / 149 scenarios all passed.
+- Covers: REQ-C6C-METADATA-DELTA-COMPACTION, REQ-C6B-DURABLE-DELTA-LOG, REQ-GROUP-CONVERSATIONS, REQ-C2-CLIENT-CACHE
+
+## Desktop attachment save UI (C3b) (gate: pass)
+
+- Timestamp: 2026-04-25T09:40:06+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran app_desktop_store_test 11/11, validate_desktop_smoke 1/1 including attachment save marker and saved file byte check, validate_attachments 11/11, validate_cpp_chat_e2e 3/3, validate_incremental_sync 8/8, validate_sqlite_persistence 2/2, and a full scripts/validate_*.py sweep: 25 scripts / 149 scenarios all passed.
+- Covers: REQ-C3B-ATTACHMENT-SAVE-UI, REQ-C3-ATTACHMENT-PATH, REQ-C3A-BLOB-ATTACHMENTS, REQ-ATTACHMENTS
+
+## Desktop attachment metadata preview (C3c) (gate: pass)
+
+- Timestamp: 2026-04-25T09:48:21+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran app_desktop_store_test 11/11, validate_attachments 11/11, validate_desktop_smoke 1/1, and a full scripts/validate_*.py sweep: 25 scripts / 149 scenarios all passed.
+- Covers: REQ-C3C-ATTACHMENT-METADATA-PREVIEW, REQ-C3B-ATTACHMENT-SAVE-UI, REQ-C3-ATTACHMENT-PATH, REQ-C3A-BLOB-ATTACHMENTS, REQ-ATTACHMENTS
+
+## Desktop attachment transfer status (C3d) (gate: pass)
+
+- Timestamp: 2026-04-25T09:54:44+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran validate_desktop_smoke 1/1 with transfer-status markers, app_desktop_store_test 11/11, validate_attachments 11/11 and validate_incremental_sync 8/8.
+- Covers: REQ-C3D-ATTACHMENT-TRANSFER-STATUS, REQ-C3C-ATTACHMENT-METADATA-PREVIEW, REQ-C3B-ATTACHMENT-SAVE-UI, REQ-C3-ATTACHMENT-PATH, REQ-C3A-BLOB-ATTACHMENTS, REQ-ATTACHMENTS
+
+## Desktop attachment type previews (C3e) (gate: pass)
+
+- Timestamp: 2026-04-25T10:02:29+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran app_desktop_store_test 11/11 with preview assertions, validate_desktop_smoke 1/1, validate_attachments 11/11 and validate_incremental_sync 8/8.
+- Covers: REQ-C3E-ATTACHMENT-TYPE-PREVIEWS, REQ-C3D-ATTACHMENT-TRANSFER-STATUS, REQ-C3C-ATTACHMENT-METADATA-PREVIEW, REQ-C3B-ATTACHMENT-SAVE-UI, REQ-C3-ATTACHMENT-PATH, REQ-C3A-BLOB-ATTACHMENTS, REQ-ATTACHMENTS
+
+## Desktop registration UI (gate: pass)
+
+- Timestamp: 2026-04-25T10:35:35+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran validate_desktop_smoke 1/1 with desktop register smoke marker, validate_registration 7/7 and app_desktop_store_test 11/11.
+- Covers: REQ-DESKTOP-REGISTRATION-UI, REQ-USER-REGISTRATION, REQ-PASSWORD-HASH, REQ-C1-DESKTOP-GUI, REQ-CPP-CONTROL-CLIENT
+
+## Desktop contacts and groups UI (gate: pass)
+
+- Timestamp: 2026-04-26T04:50:59+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran validate_contacts 8/8, validate_group_conversations 6/6, validate_desktop_smoke 1/1 with contacts/groups markers, app_desktop_store_test 11/11, and a full scripts/validate_*.py sweep: 25 scripts / 149 scenarios all passed.
+- Covers: REQ-DESKTOP-CONTACTS-GROUPS-UI, REQ-CONTACTS, REQ-GROUP-CONVERSATIONS, REQ-CPP-CONTROL-CLIENT, REQ-C1-DESKTOP-GUI
+
+## Desktop message timeline polish (gate: pass)
+
+- Timestamp: 2026-04-26T05:00:37+00:00
+- Verified: Built Debug; ran app_desktop_store_test 12/12, validate_desktop_smoke 1/1, validate_read_receipts 6/6, validate_incremental_sync 8/8, validate_message_fanout 4/4, validate_attachments 11/11 and validate_message_edit_delete 8/8.
+- Covers: REQ-DESKTOP-MESSAGE-TIMELINE-POLISH, REQ-READ-RECEIPTS, REQ-C2-CLIENT-CACHE, REQ-C2A-INMEMORY-STORE, REQ-C2B-PERSISTENT-CACHE, REQ-C1-DESKTOP-GUI
+
+## Desktop timeline completion gaps (gate: pass)
+
+- Timestamp: 2026-04-26T05:09:47+00:00
+- Verified: Built Debug; ran app_desktop_store_test 16/16, validate_desktop_smoke 1/1, validate_read_receipts 6/6, validate_incremental_sync 8/8, validate_message_fanout 4/4 and validate_attachments 11/11.
+- Covers: REQ-DESKTOP-TIMELINE-COMPLETION, REQ-DESKTOP-MESSAGE-TIMELINE-POLISH, REQ-READ-RECEIPTS, REQ-C2-CLIENT-CACHE, REQ-C2A-INMEMORY-STORE, REQ-C2B-PERSISTENT-CACHE, REQ-C1-DESKTOP-GUI
+
+## Profile/account and user discovery (gate: pass)
+
+- Timestamp: 2026-04-26T06:00:00+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran validate_profile_search 5/5, validate_desktop_smoke 1/1 with profile/search markers, validate_contacts 8/8, validate_registration 7/7, app_desktop_store_test 16/16, and a full scripts/validate_*.py sweep: 26 scripts / 154 scenarios all passed.
+- Covers: REQ-DESKTOP-PROFILE-SEARCH, REQ-DESKTOP-REGISTRATION-UI, REQ-CONTACTS, REQ-PRESENCE-HEARTBEAT, REQ-CPP-CONTROL-CLIENT, REQ-C1-DESKTOP-GUI
+
+## Desktop navigation/search (gate: pass)
+
+- Timestamp: 2026-04-26T06:20:00+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran app_desktop_store_test 17/17 and validate_desktop_smoke 1/1 with navigation/search marker.
+- Covers: REQ-DESKTOP-NAVIGATION-SEARCH, REQ-DESKTOP-TIMELINE-COMPLETION, REQ-C2-CLIENT-CACHE, REQ-C1-DESKTOP-GUI
+## Message actions (gate: pass)
+
+- Timestamp: 2026-04-26T15:11:43+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran validate_message_actions 3/3, app_desktop_store_test 18/18, validate_desktop_smoke 1/1, targeted regressions and a full scripts/validate_*.py sweep: 27 scripts / 157 scenarios passed.
+- Covers: REQ-DESKTOP-MESSAGE-ACTIONS, REQ-C1-DESKTOP-GUI, REQ-C2-CLIENT-CACHE, REQ-C6B-DURABLE-DELTA-LOG, REQ-CHAT-FANOUT, REQ-TYPED-PROTO
+
+## Backlog tasks 1-5 verified slices (gate: pass)
+
+- Timestamp: 2026-04-26T15:34:30+00:00
+- Verified: Built Debug with cmake --build build-codex --config Debug; ran validate_message_search 5/5, validate_message_actions 4/4, validate_desktop_smoke 1/1, app_desktop_store_test 19/19, validate_incremental_sync 8/8 and validate_typed_errors 11/11.
+- Covers: REQ-DESKTOP-MESSAGE-ACTION-UX, REQ-SERVER-MESSAGE-SEARCH, REQ-DESKTOP-MESSAGE-ACTIONS, REQ-DESKTOP-NAVIGATION-SEARCH, REQ-C3C-ATTACHMENT-METADATA-PREVIEW, REQ-C4A-SQLITE-PERSISTENCE, REQ-DESKTOP-DEVICE-POLISH, REQ-C5-DEVICE-MANAGEMENT, REQ-CPP-CONTROL-CLIENT
+
+## Production history paging and Linux Docker boundary (gate: partial)
+
+- Timestamp: 2026-04-27T01:47:06+00:00
+- Verified: Built Debug with cmake; ran validate_history_paging 2/2, validate_desktop_smoke 1/1 with history-page marker, validate_message_search 5/5, validate_incremental_sync 8/8, app_desktop_store_test 19/19, validate_typed_errors 11/11 and validate_message_actions 4/4. WSL Docker Compose config passed for default and postgres profile; image build was blocked by Docker Hub timeout resolving python:3.12-slim.
+- Covers: REQ-PRODUCTION-HISTORY-PAGING, REQ-SERVER-MESSAGE-SEARCH, REQ-CPP-CONTROL-CLIENT, REQ-LINUX-DOCKER-DEPLOYMENT, REQ-C4A-SQLITE-PERSISTENCE
+
+## WSL Docker deployment smoke (gate: pass)
+
+- Timestamp: 2026-04-27T02:29:19+00:00
+- Verified: Docker Hub pulls now succeed through the daemon proxy; docker compose build telegram-server passed; docker compose up -d telegram-server produced a healthy container; validate_docker_deploy.py passed; deploy_wsl_docker.ps1 -NoBuild passed; deploy_wsl_docker.ps1 -Mode postgres -NoBuild -NoSmoke passed with postgres and telegram-server running.
+- Covers: REQ-LINUX-DOCKER-DEPLOYMENT, REQ-C4A-SQLITE-PERSISTENCE
+
+## PostgreSQL repository boundary first slice (gate: pass)
+
+- Timestamp: 2026-04-27T02:44:48+00:00
+- Verified: Built and started telegram-server-postgres with Docker Compose; ran container validate_postgres_repository.py 1/1; ran docker deploy smoke against port 8788 and SQLite port 8787; built Debug with CMake; ran validate_desktop_smoke 1/1, validate_registration 7/7, validate_device_management 3/3, validate_sqlite_persistence 2/2 and validate_typed_errors 11/11.
+- Covers: REQ-POSTGRES-REPOSITORY-BOUNDARY, REQ-LINUX-DOCKER-DEPLOYMENT, REQ-C4A-SQLITE-PERSISTENCE, REQ-SESSION-PERSIST, REQ-PERSISTENCE
+
+## PostgreSQL conversation repository and desktop paging/search polish (gate: pass)
+
+- Timestamp: 2026-04-27T03:15:52+00:00
+- Verified: Built Debug with CMake; ran history paging 2/2, message search 5/5, desktop store 20/20, desktop smoke 1/1, incremental sync 8/8, SQLite persistence 2/2, typed errors 11/11, message actions 4/4, Docker PG deploy smoke on 8788 and container validate_postgres_repository 2/2.
+- Covers: REQ-POSTGRES-REPOSITORY-BOUNDARY, REQ-PRODUCTION-HISTORY-PAGING, REQ-SERVER-MESSAGE-SEARCH, REQ-C2-CLIENT-CACHE, REQ-C4A-SQLITE-PERSISTENCE
+
+## PostgreSQL remaining domain repository migration (gate: pass)
+
+- Timestamp: 2026-04-27T09:36:56+00:00
+- Verified: Ran py_compile for repository and PG validator; ran validate_sqlite_persistence 2/2, validate_contacts 8/8, validate_attachments 11/11, validate_rendezvous 6/6, rebuilt/restarted Docker telegram-server-postgres and ran validate_postgres_repository 3/3, plus Docker PG deploy smoke on 8788, desktop smoke 1/1, incremental sync 8/8, typed errors 11/11 and session persistence 5/5.
+- Covers: REQ-POSTGRES-REPOSITORY-BOUNDARY, REQ-C4-DURABLE-PERSISTENCE, REQ-C4A-SQLITE-PERSISTENCE, REQ-CONTACTS, REQ-ATTACHMENTS, REQ-REMOTE-LIFECYCLE
+
+## PostgreSQL schema/versioning, backup/restore, session TTL and package staging (gate: pass)
+
+- Timestamp: 2026-04-27T10:10:52+00:00
+- Verified: py_compile passed; Docker PostgreSQL repository validator 3/3; Docker PostgreSQL backup/restore validator 1/1; session hardening 3/3; session persistence 5/5; typed errors 11/11; package staging smoke created a Windows desktop artifact directory.
+- Covers: REQ-POSTGRES-REPOSITORY-BOUNDARY, REQ-C4-DURABLE-PERSISTENCE, REQ-POSTGRES-SCHEMA-BACKUP, REQ-PRODUCTION-SESSION-TTL, REQ-SESSION-PERSIST, REQ-WINDOWS-PACKAGE-STAGING, REQ-VALIDATION
+
+## Native TLS control-plane configuration (gate: pass)
+
+- Timestamp: 2026-04-27T10:14:34+00:00
+- Verified: py_compile passed; validate_tls_config.py passed 3/3; validate_session_hardening.py passed 3/3.
+- Covers: REQ-TLS-CONTROL-PLANE, REQ-VALIDATION
+
+## Checksummed Windows package output and TLS delivery notes (gate: pass)
+
+- Timestamp: 2026-04-27T10:21:45+00:00
+- Verified: validate_windows_package.ps1 passed and produced package directory, zip and .sha256; validate_tls_config.py passed 3/3; validate_session_hardening.py passed 3/3; py_compile passed for Python validators.
+- Covers: REQ-WINDOWS-PACKAGE-STAGING, REQ-WINDOWS-PACKAGE-CHECKSUMS, REQ-TLS-CONTROL-PLANE, REQ-VALIDATION
+
+## TLS handshake smoke and Docker TLS termination profile (gate: pass)
+
+- Timestamp: 2026-04-27T10:32:56+00:00
+- Verified: py_compile passed; validate_tls_handshake.py passed 1/1; validate_tls_deployment_config.py passed 2/2; validate_tls_config.py passed 3/3.
+- Covers: REQ-TLS-CONTROL-PLANE, REQ-TLS-HANDSHAKE-SMOKE, REQ-TLS-TERMINATION-PROFILE, REQ-VALIDATION
+
+## Dev cert generation and live TLS proxy smoke (gate: pass)
+
+- Timestamp: 2026-04-27T11:03:05+00:00
+- Verified: py_compile passed; validate_tls_dev_cert.py 2/2; validate_tls_handshake.py 1/1; validate_tls_deployment_config.py 2/2; docker compose --profile tls config passed; docker compose --profile tls up for telegram-server and telegram-tls-proxy passed; validate_tls_proxy_smoke.py passed; validate_docker_deploy.py passed on 8787.
+- Covers: REQ-TLS-CONTROL-PLANE, REQ-TLS-TERMINATION-PROFILE, REQ-TLS-DEV-CERT, REQ-TLS-PROXY-SMOKE, REQ-VALIDATION
+

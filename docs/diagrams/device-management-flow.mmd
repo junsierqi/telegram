@@ -1,0 +1,7 @@
+flowchart TD
+    A["Open settings"] --> B["Open device list"]
+    B --> C["Inspect active devices"]
+    C --> D{"Action"}
+    D -- Revoke --> E["Invalidate device session"]
+    D -- Trust --> F["Mark trusted device"]
+    D -- Rename --> G["Update device label"]
