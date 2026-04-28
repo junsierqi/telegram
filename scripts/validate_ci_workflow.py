@@ -48,7 +48,7 @@ def _t1():
 def _t2():
     doc = _load()
     text = doc.get("_raw") or WORKFLOW.read_text(encoding="utf-8")
-    for job in ("validators:", "linux-cpp:", "linux-desktop:", "bundle-verify:"):
+    for job in ("validators:", "linux-cpp:", "linux-desktop:", "macos-build:", "bundle-verify:"):
         assert job in text, f"workflow missing job: {job}"
 
 

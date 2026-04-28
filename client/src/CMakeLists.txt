@@ -49,6 +49,17 @@ target_link_libraries(app_chat
 
 find_package(Qt6 QUIET COMPONENTS Widgets Quick QuickControls2 Qml)
 if(Qt6_FOUND)
+    # Apple platform detection. Qt's iOS toolchain (qt-cmake from a Qt-for-iOS
+    # install) sets the IOS variable directly, but a hand-rolled toolchain
+    # may only set CMAKE_SYSTEM_NAME=iOS. Accept either so we don't depend
+    # on a specific toolchain wrapper. The local TELEGRAM_LIKE_TARGET_IS_IOS
+    # boolean is what every Apple guard below switches on.
+    set(TELEGRAM_LIKE_TARGET_IS_IOS FALSE)
+    if(APPLE)
+        if(CMAKE_SYSTEM_NAME STREQUAL "iOS" OR IOS)
+            set(TELEGRAM_LIKE_TARGET_IS_IOS TRUE)
+        endif()
+    endif()
     # qt_add_executable is the modern Qt 6 API that knows how to package the
     # binary differently per platform (plain .exe on Windows, .so wrapped in
     # an APK on Android). Falls back to add_executable on older Qt builds.
@@ -78,6 +89,22 @@ if(Qt6_FOUND)
             QT_ANDROID_TARGET_SDK_VERSION 33
             QT_ANDROID_VERSION_NAME "0.1.0-dev"
             QT_ANDROID_VERSION_CODE 1
+        )
+    endif()
+
+    # macOS .app bundle properties — only fires on real macOS, not iOS.
+    # Strictly additive: existing target sources / link libraries / Android
+    # / Windows blocks above stay untouched. `APPLE AND NOT IOS` is the
+    # canonical CMake test for "macOS host build".
+    if(APPLE AND NOT TELEGRAM_LIKE_TARGET_IS_IOS)
+        set_target_properties(app_desktop PROPERTIES
+            MACOSX_BUNDLE TRUE
+            MACOSX_BUNDLE_BUNDLE_NAME "Telegram-like"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.telegramlike.desktop"
+            MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0-dev"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+            MACOSX_BUNDLE_COPYRIGHT "Telegram-like Project"
+            MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/deploy/macos/Info.plist.in"
         )
     endif()
 
@@ -162,6 +189,36 @@ if(Qt6_FOUND)
                 QT_ANDROID_TARGET_SDK_VERSION 33
                 QT_ANDROID_VERSION_NAME "0.1.0-dev"
                 QT_ANDROID_VERSION_CODE 1
+            )
+        endif()
+
+        # macOS .app for app_mobile (Qt Quick runs as a desktop preview on macOS).
+        if(APPLE AND NOT TELEGRAM_LIKE_TARGET_IS_IOS)
+            set_target_properties(app_mobile PROPERTIES
+                MACOSX_BUNDLE TRUE
+                MACOSX_BUNDLE_BUNDLE_NAME "Telegram-like Mobile"
+                MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.telegramlike.mobile"
+                MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0-dev"
+                MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+                MACOSX_BUNDLE_COPYRIGHT "Telegram-like Project"
+                MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/deploy/macos/Info.plist.in"
+            )
+        endif()
+
+        # iOS .app bundle. Generated via -G Xcode on macOS using qt-cmake
+        # from the Qt-for-iOS install (see deploy/ios/README.md). Block is
+        # gated on the local boolean so non-Apple / macOS-only builds never
+        # see it regardless of which toolchain wrapper drove configure.
+        if(TELEGRAM_LIKE_TARGET_IS_IOS)
+            set_target_properties(app_mobile PROPERTIES
+                MACOSX_BUNDLE TRUE
+                MACOSX_BUNDLE_BUNDLE_NAME "Telegram-like"
+                MACOSX_BUNDLE_GUI_IDENTIFIER "com.example.telegramlike.mobile"
+                MACOSX_BUNDLE_BUNDLE_VERSION "0.1.0-dev"
+                MACOSX_BUNDLE_SHORT_VERSION_STRING "0.1.0"
+                MACOSX_BUNDLE_INFO_PLIST "${PROJECT_SOURCE_DIR}/deploy/ios/Info.plist.in"
+                XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+                XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER "com.example.telegramlike.mobile"
             )
         endif()
 

@@ -117,7 +117,46 @@ jobs:
           ./build-linux/client/src/json_parser_test
           ./build-linux/client/src/app_desktop_store_test
 
-  # 4. Bundle integrity — every requirement still has a covering milestone
+  # 4. macOS desktop + mobile-preview build via Homebrew Qt 6.
+  #    Qt for iOS is NOT in Homebrew (it's only in the official Qt online
+  #    installer for macOS hosts), so this job builds desktop macOS .app
+  #    bundles only — iOS remains a hand-off (see deploy/ios/README.md).
+  macos-build:
+    name: macOS Qt desktop + mobile build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6 via Homebrew
+        run: |
+          brew update
+          brew install qt@6 cmake ninja
+
+      - name: Configure
+        run: |
+          export PATH="$(brew --prefix qt@6)/bin:$PATH"
+          cmake -S . -B build-macos -GNinja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix qt@6)"
+
+      - name: Build Qt desktop + mobile + portable targets
+        run: |
+          cmake --build build-macos --target \
+            chat_client_core json_parser_test app_desktop_store_test \
+            app_chat telegram_like_client remote_session_smoke \
+            app_desktop app_mobile
+
+      - name: Run portable C++ tests
+        run: |
+          ./build-macos/client/src/json_parser_test
+          ./build-macos/client/src/app_desktop_store_test
+
+      - name: Confirm .app bundles materialised
+        run: |
+          test -d build-macos/client/src/app_desktop.app
+          test -d build-macos/client/src/app_mobile.app
+
+  # 5. Bundle integrity — every requirement still has a covering milestone
   #    and there are no stale fail-gates.
   bundle-verify:
     name: Idea-to-code bundle verify

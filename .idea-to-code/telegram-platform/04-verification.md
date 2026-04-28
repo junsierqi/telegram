@@ -560,3 +560,15 @@
 - Verified: validate_account_lifecycle.py 5/5; full sweep 50/50 in-process validators (added phone_otp + observability + rate_limiting + two_fa + account_lifecycle this round); bundle ok 72 reqs.
 - Covers: REQ-CHAT-CORE, REQ-VALIDATION, REQ-PERSISTENCE
 
+## macOS + iOS build path scaffolding (M96) (gate: pass)
+
+- Timestamp: 2026-04-28T15:41:31+00:00
+- Verified: validate_apple_build_path.py 8/8; validate_ci_workflow.py 7/7; full sweep 51/51 in-process (added apple_build_path); Windows full reconfigure + 8-target build clean; json_parser_test 9/9 + app_desktop_store_test 20/20 on Win + Linux; WSL Ubuntu 24.04 full reconfigure + 8-target build clean (gates verified: APPLE blocks invisible to Linux, IOS block invisible everywhere); Android arm64 reconfigure + chat_client_core + app_desktop + app_mobile shared libs all build clean (verifies APPLE/IOS blocks don't leak to NDK build either). APK build in flight.
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## macOS + iOS build path scaffolding (M96, post-review) (gate: pass)
+
+- Timestamp: 2026-04-28T16:02:51+00:00
+- Verified: validate_apple_build_path.py 9/9 (was 8); validate_ci_workflow.py 7/7; full sweep 51/51 in-process. Triple-platform reconfigure-and-build regression repeated POST review: Windows MSVC + Qt 6.11 8/8 targets clean + json_parser 9/9 + store 20/20; WSL Ubuntu 24.04 + Qt 6.4 8/8 targets clean + same C++ tests 9/9 + 20/20; Android NDK 30 + Qt 6.11 for Android full reconfigure + apk = 20,873,294 bytes (BYTE-IDENTICAL size to both pre-review build AND pre-Apple build, definitive proof the new local-boolean Apple guards stay invisible to NDK).
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+

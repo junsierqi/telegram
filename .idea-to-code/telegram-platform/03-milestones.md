@@ -3,8 +3,8 @@
 ## Current Phase
 
 - Status: in_progress
-- Current focus: Tier 1 release-readiness items M90/M92/M93/M94/M95 all shipped; remaining gaps are large arcs (iOS, voice/video, E2E) or external-dependency arcs (PA-005/008/009).
-- Next gate: Pick next major direction
+- Current focus: Apple paths shipped under audit-hardened guards; Windows/Linux/Android proven byte-equivalent before vs after Apple addition.
+- Next gate: Wait for upstream CI macOS verification
 
 ## Milestone History
 
@@ -758,4 +758,20 @@
 - Verified: validate_account_lifecycle.py 5/5; full sweep 50/50 in-process validators (added phone_otp + observability + rate_limiting + two_fa + account_lifecycle this round); bundle ok 72 reqs.
 - Next: Push 3 commits + commit M86b-M95 / pick next direction (iOS, voice/video, E2E, Web client, etc.)
 - Covers: REQ-CHAT-CORE, REQ-VALIDATION, REQ-PERSISTENCE
+
+## macOS + iOS build path scaffolding (M96) (gate: pass)
+
+- Timestamp: 2026-04-28T15:41:31+00:00
+- Delivered: Strict additive Apple build path. New deploy/macos/Info.plist.in (configure_file template with @MACOSX_BUNDLE_*@ tokens, LSMinimumSystemVersion 11.0, NSHighResolutionCapable, dev TLS-friendly NSAppTransportSecurity). New deploy/ios/Info.plist.in (UIDeviceFamily 1+2 = iPhone+iPad, MinimumOSVersion 14.0, arm64 UIRequiredDeviceCapabilities, supported orientations, ATS allowing self-signed dev TLS). deploy/macos/README.md documents Homebrew Qt 6 install + cmake + targets; deploy/ios/README.md openly states the iOS path is untested-by-CI (Qt for iOS only ships in macOS Qt installer, not Homebrew, so GH Actions can't pull it without licensing/image-size cost) and gives the full xcodebuild + qt-cmake -G Xcode procedure for a future macOS host. client/src/CMakeLists.txt gains FOUR new strictly-guarded blocks (zero changes to existing target/source/link lines): if(APPLE AND NOT IOS) on app_desktop sets MACOSX_BUNDLE + bundle name/identifier/version/copyright/Info.plist; same on app_mobile; if(IOS) on app_mobile sets MACOSX_BUNDLE_INFO_PLIST -> ios plist + XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY 1,2 + PRODUCT_BUNDLE_IDENTIFIER. Existing if(ANDROID), if(WIN32), if(MSVC) blocks untouched. .github/workflows/ci.yml gains a 4th job macos-build (macos-latest runner, brew install qt@6, configure with CMAKE_PREFIX_PATH=, build chat_client_core + portable targets + app_desktop + app_mobile, run json_parser_test + app_desktop_store_test, assert .app bundles materialised) so every push validates the macOS path automatically. New scripts/validate_apple_build_path.py covers 8 static scenarios: Info.plist templating, READMEs document untested-iOS, CMake has Apple+iOS blocks for both targets, Apple-only properties (MACOSX_BUNDLE_INFO_PLIST + XCODE_ATTRIBUTE_*) ONLY appear inside if(APPLE...)/if(IOS) guards (regex-verified for leak-protection), no Cocoa/Foundation/UIKit/AppKit headers leaked into shared cross-platform sources without #if defined(__APPLE__) guard, ci.yml has macos-build job. validate_ci_workflow.py extended to expect 5 jobs (was 4).
+- Verified: validate_apple_build_path.py 8/8; validate_ci_workflow.py 7/7; full sweep 51/51 in-process (added apple_build_path); Windows full reconfigure + 8-target build clean; json_parser_test 9/9 + app_desktop_store_test 20/20 on Win + Linux; WSL Ubuntu 24.04 full reconfigure + 8-target build clean (gates verified: APPLE blocks invisible to Linux, IOS block invisible everywhere); Android arm64 reconfigure + chat_client_core + app_desktop + app_mobile shared libs all build clean (verifies APPLE/IOS blocks don't leak to NDK build either). APK build in flight.
+- Next: Live macOS / iOS build acceptance once a macOS host is available; until then the macos-build CI job is the ground-truth check on every push.
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## macOS + iOS build path scaffolding (M96, post-review) (gate: pass)
+
+- Timestamp: 2026-04-28T16:02:51+00:00
+- Delivered: Strict additive Apple build path with three audit-driven refinements vs the dropped first-pass commit. (1) Replaced bare 'if(IOS)' / 'if(APPLE AND NOT IOS)' guards with a local TELEGRAM_LIKE_TARGET_IS_IOS boolean computed from CMAKE_SYSTEM_NAME STREQUAL iOS OR IOS — works whether the toolchain wrapper is Qt's qt-cmake (sets IOS=TRUE) or a hand-rolled toolchain that only sets CMAKE_SYSTEM_NAME=iOS. (2) Extended validate_apple_build_path.py leak-check to include XCODE_ATTRIBUTE_PRODUCT_BUNDLE_IDENTIFIER alongside MACOSX_BUNDLE_INFO_PLIST + XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY, with a depth-tracking _find_blocks helper that handles nested if() correctly. (3) Documented macdeployqt as a pending milestone in deploy/macos/README.md — the .app emitted today depends on system Qt staying at the same path; for distribution to non-developer Macs macdeployqt must run POST_BUILD as the macOS analogue of the existing windeployqt step. New static scenario cmake_has_local_ios_boolean asserts the canonical detection. Plus original deliverables: deploy/macos/Info.plist.in + deploy/ios/Info.plist.in templates, deploy/macos/README.md + deploy/ios/README.md, .github/workflows/ci.yml macos-build job, validate_ci_workflow.py expects 5 jobs.
+- Verified: validate_apple_build_path.py 9/9 (was 8); validate_ci_workflow.py 7/7; full sweep 51/51 in-process. Triple-platform reconfigure-and-build regression repeated POST review: Windows MSVC + Qt 6.11 8/8 targets clean + json_parser 9/9 + store 20/20; WSL Ubuntu 24.04 + Qt 6.4 8/8 targets clean + same C++ tests 9/9 + 20/20; Android NDK 30 + Qt 6.11 for Android full reconfigure + apk = 20,873,294 bytes (BYTE-IDENTICAL size to both pre-review build AND pre-Apple build, definitive proof the new local-boolean Apple guards stay invisible to NDK).
+- Next: Pick next direction; macOS-build runs on first push to GitHub
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
 
