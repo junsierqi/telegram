@@ -63,6 +63,17 @@ class ErrorCode(StrEnum):
     UPLOAD_CHUNK_OUT_OF_ORDER = "upload_chunk_out_of_order"
     UPLOAD_SIZE_MISMATCH = "upload_size_mismatch"
     UPLOAD_LIMIT_REACHED = "upload_limit_reached"
+    INVALID_PHONE_NUMBER = "invalid_phone_number"
+    PHONE_OTP_RATE_LIMITED = "phone_otp_rate_limited"
+    INVALID_OTP_CODE = "invalid_otp_code"
+    OTP_EXPIRED = "otp_expired"
+    OTP_ATTEMPTS_EXHAUSTED = "otp_attempts_exhausted"
+    RATE_LIMITED = "rate_limited"
+    TWO_FA_ALREADY_ENABLED = "two_fa_already_enabled"
+    TWO_FA_NOT_ENABLED = "two_fa_not_enabled"
+    INVALID_TWO_FA_CODE = "invalid_two_fa_code"
+    TWO_FA_REQUIRED = "two_fa_required"
+    ACCOUNT_DELETE_AUTH_FAILED = "account_delete_auth_failed"
 
 
 _ERROR_MESSAGES: dict[ErrorCode, str] = {
@@ -118,6 +129,17 @@ _ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.UPLOAD_CHUNK_OUT_OF_ORDER: "Upload chunks must arrive in monotonically increasing sequence.",
     ErrorCode.UPLOAD_SIZE_MISMATCH: "Stitched chunk total does not match the declared upload size.",
     ErrorCode.UPLOAD_LIMIT_REACHED: "Maximum concurrent uploads per user reached.",
+    ErrorCode.INVALID_PHONE_NUMBER: "Phone number is missing or not in E.164 format.",
+    ErrorCode.PHONE_OTP_RATE_LIMITED: "Too many OTP requests for this phone number; wait before retrying.",
+    ErrorCode.INVALID_OTP_CODE: "OTP code does not match the most recent issued code.",
+    ErrorCode.OTP_EXPIRED: "OTP code has expired; request a new one.",
+    ErrorCode.OTP_ATTEMPTS_EXHAUSTED: "Too many OTP verification attempts; request a new code.",
+    ErrorCode.RATE_LIMITED: "Too many requests for this session; slow down and retry.",
+    ErrorCode.TWO_FA_ALREADY_ENABLED: "Two-factor authentication is already enabled for this account.",
+    ErrorCode.TWO_FA_NOT_ENABLED: "Two-factor authentication is not enabled for this account.",
+    ErrorCode.INVALID_TWO_FA_CODE: "TOTP code does not match; check the authenticator app and retry.",
+    ErrorCode.TWO_FA_REQUIRED: "Two-factor authentication is required; include two_fa_code on login.",
+    ErrorCode.ACCOUNT_DELETE_AUTH_FAILED: "Account delete must be confirmed with the current password (and TOTP if 2FA is enabled).",
 }
 
 
@@ -208,6 +230,23 @@ class MessageType(StrEnum):
     ATTACHMENT_UPLOAD_CHUNK_REQUEST = "attachment_upload_chunk_request"
     ATTACHMENT_UPLOAD_CHUNK_ACK = "attachment_upload_chunk_ack"
     ATTACHMENT_UPLOAD_COMPLETE_REQUEST = "attachment_upload_complete_request"
+    # Phone-number + OTP authentication (M90)
+    PHONE_OTP_REQUEST = "phone_otp_request"
+    PHONE_OTP_REQUEST_RESPONSE = "phone_otp_request_response"
+    PHONE_OTP_VERIFY_REQUEST = "phone_otp_verify_request"
+    PHONE_OTP_VERIFY_RESPONSE = "phone_otp_verify_response"
+    # M94 TOTP 2FA
+    TWO_FA_ENABLE_REQUEST = "two_fa_enable_request"
+    TWO_FA_ENABLE_RESPONSE = "two_fa_enable_response"
+    TWO_FA_VERIFY_REQUEST = "two_fa_verify_request"
+    TWO_FA_VERIFY_RESPONSE = "two_fa_verify_response"
+    TWO_FA_DISABLE_REQUEST = "two_fa_disable_request"
+    TWO_FA_DISABLE_RESPONSE = "two_fa_disable_response"
+    # M95 GDPR-style account lifecycle
+    ACCOUNT_EXPORT_REQUEST = "account_export_request"
+    ACCOUNT_EXPORT_RESPONSE = "account_export_response"
+    ACCOUNT_DELETE_REQUEST = "account_delete_request"
+    ACCOUNT_DELETE_RESPONSE = "account_delete_response"
     ERROR = "error"
 
 
@@ -276,6 +315,9 @@ class LoginRequestPayload:
     username: str
     password: str
     device_id: str
+    # M94: optional. When the user has 2FA enabled, login fails with
+    # TWO_FA_REQUIRED unless this carries a valid 6-digit TOTP code.
+    two_fa_code: str = ""
 
 
 @dataclass(slots=True)
@@ -790,6 +832,105 @@ class AttachmentUploadCompleteRequestPayload:
 
 
 @dataclass(slots=True)
+class PhoneOtpRequestPayload:
+    """Client asks the server to issue and 'send' an OTP to this phone number.
+    The actual SMS transport is pluggable (MockSender by default — code goes
+    to stderr/log + a test queue, perfect for first-party clients during
+    development; TwilioSender wires to a real gateway via PA-009)."""
+    phone_number: str  # E.164 format, e.g. "+15551234567"
+
+
+@dataclass(slots=True)
+class PhoneOtpRequestResponsePayload:
+    phone_number: str
+    code_length: int
+    expires_in_seconds: int
+
+
+@dataclass(slots=True)
+class PhoneOtpVerifyRequestPayload:
+    """Submit the 6-digit code the user typed in. Server creates / re-uses a
+    user keyed by phone number, mints a session, and returns the same shape
+    LOGIN_RESPONSE would produce so client code paths converge."""
+    phone_number: str
+    code: str
+    device_id: str
+    display_name: str = ""
+
+
+@dataclass(slots=True)
+class PhoneOtpVerifyResponsePayload:
+    session_id: str
+    user_id: str
+    display_name: str
+    device_id: str
+    new_account: bool
+
+
+# ---- M94 TOTP 2FA ----
+
+@dataclass(slots=True)
+class TwoFaEnableResponsePayload:
+    """Server-issued enrollment material. Client renders the URI as a QR
+    code, the user scans into an authenticator app, then submits the first
+    code via TWO_FA_VERIFY_REQUEST to flip 2FA on."""
+    secret: str          # base32-encoded TOTP secret
+    provisioning_uri: str  # otpauth://totp/...
+
+
+@dataclass(slots=True)
+class TwoFaVerifyRequestPayload:
+    code: str            # 6-digit TOTP code from the authenticator app
+
+
+@dataclass(slots=True)
+class TwoFaVerifyResponsePayload:
+    enabled: bool
+
+
+@dataclass(slots=True)
+class TwoFaDisableRequestPayload:
+    code: str            # require a fresh TOTP to turn 2FA off
+
+
+# ---- M95 account lifecycle ----
+
+@dataclass(slots=True)
+class AccountExportResponsePayload:
+    """User-readable JSON dump of everything the server keeps about this
+    account: profile, devices, sessions, contacts, push tokens, and the
+    messages this user authored (with conversation context). Treat as
+    PII-grade output: must only flow back to the requester themselves."""
+    exported_at_ms: int
+    user_id: str
+    profile: dict[str, Any]
+    devices: list[dict[str, Any]]
+    sessions: list[dict[str, Any]]
+    contacts: list[dict[str, Any]]
+    push_tokens: list[dict[str, Any]]
+    authored_messages: list[dict[str, Any]]
+
+
+@dataclass(slots=True)
+class AccountDeleteRequestPayload:
+    """Confirms the deletion intent: server verifies password (+ TOTP code
+    if 2FA is enabled). This is a two-factor confirmation by design — losing
+    the account is irreversible."""
+    password: str
+    two_fa_code: str = ""
+
+
+@dataclass(slots=True)
+class AccountDeleteResponsePayload:
+    user_id: str
+    sessions_revoked: int
+    devices_removed: int
+    push_tokens_removed: int
+    messages_tombstoned: int
+    contacts_removed: int
+
+
+@dataclass(slots=True)
 class PresenceUpdatePayload:
     """Pushed to peers (anyone sharing a conversation) when a user's online
     state transitions. Subscribers update their local presence cache without
@@ -837,6 +978,7 @@ def parse_request_payload(message_type: MessageType, payload: dict[str, Any]) ->
             username=payload["username"],
             password=payload["password"],
             device_id=payload["device_id"],
+            two_fa_code=payload.get("two_fa_code", ""),
         )
     if message_type == MessageType.CONVERSATION_CREATE:
         return ConversationCreateRequestPayload(
@@ -1027,6 +1169,30 @@ def parse_request_payload(message_type: MessageType, payload: dict[str, Any]) ->
         return AttachmentUploadCompleteRequestPayload(
             upload_id=payload.get("upload_id", ""),
             caption=payload.get("caption", ""),
+        )
+    if message_type == MessageType.PHONE_OTP_REQUEST:
+        return PhoneOtpRequestPayload(
+            phone_number=payload.get("phone_number", ""),
+        )
+    if message_type == MessageType.PHONE_OTP_VERIFY_REQUEST:
+        return PhoneOtpVerifyRequestPayload(
+            phone_number=payload.get("phone_number", ""),
+            code=payload.get("code", ""),
+            device_id=payload.get("device_id", ""),
+            display_name=payload.get("display_name", ""),
+        )
+    if message_type == MessageType.TWO_FA_ENABLE_REQUEST:
+        return {}
+    if message_type == MessageType.TWO_FA_VERIFY_REQUEST:
+        return TwoFaVerifyRequestPayload(code=payload.get("code", ""))
+    if message_type == MessageType.TWO_FA_DISABLE_REQUEST:
+        return TwoFaDisableRequestPayload(code=payload.get("code", ""))
+    if message_type == MessageType.ACCOUNT_EXPORT_REQUEST:
+        return {}
+    if message_type == MessageType.ACCOUNT_DELETE_REQUEST:
+        return AccountDeleteRequestPayload(
+            password=payload.get("password", ""),
+            two_fa_code=payload.get("two_fa_code", ""),
         )
     return payload
 

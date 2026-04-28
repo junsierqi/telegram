@@ -3,8 +3,8 @@
 ## Current Phase
 
 - Status: in_progress
-- Current focus: Push notification end-to-end is now real: server records intent, worker dispatches, transport sends. Real FCM POST is one credential away (PA-008).
-- Next gate: Pick next product gap
+- Current focus: Tier 1 release-readiness items M90/M92/M93/M94/M95 all shipped; remaining gaps are large arcs (iOS, voice/video, E2E) or external-dependency arcs (PA-005/008/009).
+- Next gate: Pick next major direction
 
 ## Milestone History
 
@@ -718,4 +718,44 @@
 - Verified: validate_push_dispatch.py 5/5; full sweep 45/45 in-process validators (added push_dispatch). Existing validate_push_tokens 6/6 still green; presence_push 6/6; cpp_chat_e2e 3/3; chunked_upload 5/5. Bundle ok 72 reqs.
 - Next: Phone-number OTP (M90) / FCM bearer token wiring (PA-008) / 2FA / observability
 - Covers: REQ-CHAT-CORE, REQ-VALIDATION
+
+## Phone-number + OTP login with mock SMS (M90) (gate: pass)
+
+- Timestamp: 2026-04-28T14:18:44+00:00
+- Delivered: 4 new MessageType + 4 typed payloads (PHONE_OTP_REQUEST/REQUEST_RESPONSE/VERIFY_REQUEST/VERIFY_RESPONSE). 6 new ErrorCodes (INVALID_PHONE_NUMBER/PHONE_OTP_RATE_LIMITED/INVALID_OTP_CODE/OTP_EXPIRED/OTP_ATTEMPTS_EXHAUSTED/RATE_LIMITED). New server/server/services/phone_otp.py with PhoneOtpService + Sender protocol + MockSender default (records every code in outbox + writes to stream — perfect for first-party clients during dev; tests just call sender.latest_for(phone)). Tunables: 6-digit codes, 5-min TTL, 30-second resend cooldown, 5 verify attempts before exhaustion. verify_code mints a SessionRecord shaped exactly like AuthService.login does + creates a synthetic 'phone:<E.164>' user transparently (so phone-OTP-only accounts can't password-login but the rest of the codebase reads .username/.user_id deterministically). ServerApplication wires the service, dispatches the 2 RPCs as pre-authenticated branches (alongside LOGIN/REGISTER), calls presence_service.notify_session_started after verify so the same offline->online transition push fires. New scripts/validate_phone_otp.py covers 5 scenarios: request->verify->new account + idempotent return for repeat phone, INVALID_PHONE_NUMBER for non-E.164, wrong-code 5x -> OTP_ATTEMPTS_EXHAUSTED + subsequent correct code still rejected, PHONE_OTP_RATE_LIMITED inside 30s + lifts after, OTP_EXPIRED past TTL.
+- Verified: validate_phone_otp.py 5/5; bundle verify ok 72 reqs.
+- Next: M92 observability (structured logs + /metrics + health)
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION, REQ-TYPED-PROTO
+
+## Observability — structured logs + Prometheus + healthz (M92) (gate: pass)
+
+- Timestamp: 2026-04-28T14:25:27+00:00
+- Delivered: New server/server/services/observability.py — stdlib-only (json/threading/http.server). Three components: StructuredLogger (JSON-line emission, configurable stream), MetricsRegistry (counters + gauges + histograms with default latency-friendly buckets, label-sorted Prometheus exposition), HealthAggregator (pluggable checks). Sidecar HTTP server on its own thread serves GET /metrics (Prometheus text/plain v0.0.4) and GET /healthz (200 with all-ok JSON, 503 with failing-check JSON). Default counters declared up-front: dispatch_requests_total, dispatch_request_duration_seconds, messages_sent_total, attachments_uploaded_total, phone_otp_requests_total, phone_otp_verifications_total, rate_limited_total, active_sessions. ServerApplication wraps dispatch() in _dispatch_inner so every inbound message increments the counter (labelled by type + outcome ok|error|exception) and observes latency in the histogram. Default health checks registered: state_loaded + active_session_count. New scripts/validate_observability.py covers 6 scenarios (counter+histogram emission, /metrics endpoint shape, /healthz 200, /healthz 503 on failing check, structured JSON-line logger, ok-vs-error outcome separation). NO_PROXY workaround for corporate-egress proxies that hairpin localhost traffic.
+- Verified: validate_observability.py 6/6; bundle ok 72 reqs.
+- Next: M93 rate limiting
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## Per-session / per-key rate limiting (M93) (gate: pass)
+
+- Timestamp: 2026-04-28T14:32:12+00:00
+- Delivered: New server/server/services/rate_limiter.py — thread-safe TokenBucket store keyed by (op, key). RateConfig has rate (tokens/sec) + burst (capacity) + per_minute() helper. DEFAULT_LIMITS covers message_send (5/s burst 10), register_request (3/min burst 5), phone_otp_request (2/min burst 3), phone_otp_verify_request (20/min burst 20), presence_query_request (5/s burst 10), message_send_attachment (2/s burst 4). Configurable at runtime via RateLimiter.configure(op, rate, burst). ServerApplication wires the limiter, exposes _rate_check helper that increments rate_limited_total{type=op} on rejection and returns a typed RATE_LIMITED ServiceError response. Hooks added pre-payload-handling on 6 dispatch sites: REGISTER_REQUEST (key=username), PHONE_OTP_REQUEST (key=phone), PHONE_OTP_VERIFY_REQUEST (key=phone), MESSAGE_SEND (key=session_id), MESSAGE_SEND_ATTACHMENT (key=session_id), PRESENCE_QUERY_REQUEST (key=session_id). New scripts/validate_rate_limiting.py covers 5 scenarios: message_send 10-burst then refill via FakeMonoClock, phone_otp per-phone isolation across both rate-limiter + OTP cooldown defenses, register_request burst per username, presence_query per-session bucket isolation, rate_limited_total counter increments per rejection.
+- Verified: validate_rate_limiting.py 5/5; bundle ok 72 reqs.
+- Next: M94 TOTP 2FA
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## TOTP 2FA (M94) (gate: pass)
+
+- Timestamp: 2026-04-28T14:38:51+00:00
+- Delivered: RFC 6238 TOTP 2FA, stdlib-only (hmac+hashlib+secrets+base64+struct). state.UserRecord gains two_fa_secret field (empty = disabled). New server/server/services/two_fa.py with TwoFAService.begin_enable / confirm_enable / verify_login_code / disable plus pure helpers generate_totp_code + verify_totp + provisioning_uri (otpauth://totp/...). 6 new MessageType (TWO_FA_ENABLE_REQUEST/RESPONSE, TWO_FA_VERIFY_REQUEST/RESPONSE, TWO_FA_DISABLE_REQUEST/RESPONSE) + 4 typed payloads + 4 ErrorCodes (TWO_FA_ALREADY_ENABLED, TWO_FA_NOT_ENABLED, INVALID_TWO_FA_CODE, TWO_FA_REQUIRED). LoginRequestPayload gains optional two_fa_code field. LOGIN_REQUEST dispatch verifies the password first, then if user has 2FA enabled requires + verifies the TOTP code with ±1 step (30s) tolerance — failed 2FA rolls back the freshly-issued session so the failed login doesn't pollute session counts. New scripts/validate_two_fa.py covers 4 scenarios: full enroll-verify-login-disable lifecycle (login flips between requires-code and not), double-enable rejected, disable without 2FA rejected, verify_enable without begin rejected.
+- Verified: validate_two_fa.py 4/4; bundle ok 72 reqs.
+- Next: M95 account delete + data export
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION, REQ-TYPED-PROTO
+
+## Account export + delete (M95) (gate: pass)
+
+- Timestamp: 2026-04-28T14:46:26+00:00
+- Delivered: GDPR-style account lifecycle. 4 new MessageType (ACCOUNT_EXPORT_REQUEST/RESPONSE, ACCOUNT_DELETE_REQUEST/RESPONSE) + 3 typed payloads (AccountExportResponsePayload + AccountDeleteRequestPayload + AccountDeleteResponsePayload). New ErrorCode ACCOUNT_DELETE_AUTH_FAILED with human message. New server/server/services/account_lifecycle.py with AccountLifecycleService.export and .delete: export emits user-readable JSON snapshot of profile/devices/sessions/contacts/push_tokens/authored_messages; delete verifies password (constant-time hmac.compare_digest via verify_password) plus TOTP if 2FA is enabled, then revokes sessions, removes devices, drops push tokens, scrubs contacts in BOTH directions, removes user from all conversation participant lists, tombstones authored messages (sender_user_id->u_deleted, text='', deleted=true — preserves conversation history for other peers, mirroring Telegram), then drops the user record. Returns counts so clients can show 'we removed N messages' UX. ServerApplication wires the service + dispatches both RPCs. New scripts/validate_account_lifecycle.py covers 5 scenarios: export populates all sections, wrong-password delete rejected with account intact, full delete tombstones + cleans up both contact directions + bob's session unaffected, post-delete login returns INVALID_CREDENTIALS, 2FA-protected delete requires fresh TOTP. PA-009 added for real Twilio SMS transport.
+- Verified: validate_account_lifecycle.py 5/5; full sweep 50/50 in-process validators (added phone_otp + observability + rate_limiting + two_fa + account_lifecycle this round); bundle ok 72 reqs.
+- Next: Push 3 commits + commit M86b-M95 / pick next direction (iOS, voice/video, E2E, Web client, etc.)
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION, REQ-PERSISTENCE
 

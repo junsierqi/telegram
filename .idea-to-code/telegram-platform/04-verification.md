@@ -530,3 +530,33 @@
 - Verified: validate_push_dispatch.py 5/5; full sweep 45/45 in-process validators (added push_dispatch). Existing validate_push_tokens 6/6 still green; presence_push 6/6; cpp_chat_e2e 3/3; chunked_upload 5/5. Bundle ok 72 reqs.
 - Covers: REQ-CHAT-CORE, REQ-VALIDATION
 
+## Phone-number + OTP login with mock SMS (M90) (gate: pass)
+
+- Timestamp: 2026-04-28T14:18:44+00:00
+- Verified: validate_phone_otp.py 5/5; bundle verify ok 72 reqs.
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION, REQ-TYPED-PROTO
+
+## Observability — structured logs + Prometheus + healthz (M92) (gate: pass)
+
+- Timestamp: 2026-04-28T14:25:27+00:00
+- Verified: validate_observability.py 6/6; bundle ok 72 reqs.
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## Per-session / per-key rate limiting (M93) (gate: pass)
+
+- Timestamp: 2026-04-28T14:32:12+00:00
+- Verified: validate_rate_limiting.py 5/5; bundle ok 72 reqs.
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## TOTP 2FA (M94) (gate: pass)
+
+- Timestamp: 2026-04-28T14:38:51+00:00
+- Verified: validate_two_fa.py 4/4; bundle ok 72 reqs.
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION, REQ-TYPED-PROTO
+
+## Account export + delete (M95) (gate: pass)
+
+- Timestamp: 2026-04-28T14:46:26+00:00
+- Verified: validate_account_lifecycle.py 5/5; full sweep 50/50 in-process validators (added phone_otp + observability + rate_limiting + two_fa + account_lifecycle this round); bundle ok 72 reqs.
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION, REQ-PERSISTENCE
+

@@ -49,6 +49,17 @@ from .protocol import (
     AttachmentUploadChunkRequestPayload,
     AttachmentUploadChunkAckPayload,
     AttachmentUploadCompleteRequestPayload,
+    PhoneOtpRequestPayload,
+    PhoneOtpRequestResponsePayload,
+    PhoneOtpVerifyRequestPayload,
+    PhoneOtpVerifyResponsePayload,
+    TwoFaEnableResponsePayload,
+    TwoFaVerifyRequestPayload,
+    TwoFaVerifyResponsePayload,
+    TwoFaDisableRequestPayload,
+    AccountExportResponsePayload,
+    AccountDeleteRequestPayload,
+    AccountDeleteResponsePayload,
     RemoteApproveRequestPayload,
     RemoteDisconnectRequestPayload,
     RemoteInputAckPayload,
@@ -70,6 +81,11 @@ from .services.attachment_store import AttachmentBlobStore
 from .services.chat import ChatService
 from .services.contacts import ContactsService
 from .services.input import InputService
+from .services.observability import Observability
+from .services.phone_otp import PhoneOtpService
+from .services.rate_limiter import RateLimiter
+from .services.account_lifecycle import AccountLifecycleService
+from .services.two_fa import TwoFAService
 from .services.presence import DEFAULT_TTL_SECONDS, PresenceService
 from .services.push_dispatch import PushDispatchWorker
 from .services.push_tokens import PushTokenService
@@ -106,6 +122,17 @@ class ServerApplication:
         self.input_service = InputService(self.state)
         self.contacts_service = ContactsService(self.state, self.presence_service)
         self.push_token_service = PushTokenService(self.state, clock=self.clock)
+        self.phone_otp_service = PhoneOtpService(self.state, clock=self.clock)
+        self.observability = Observability(clock=self.clock)
+        self.rate_limiter = RateLimiter()
+        self.two_fa_service = TwoFAService(self.state, clock=self.clock)
+        self.account_lifecycle_service = AccountLifecycleService(self.state, clock=self.clock)
+        # Cheap default health check: state file load completed if we got here.
+        self.observability.health.register("state_loaded", lambda: (True, "ok"))
+        self.observability.health.register(
+            "active_session_count",
+            lambda: (True, f"{len(self.state.sessions)}"),
+        )
         # Default worker uses the LogOnlyTransport for every platform —
         # safe in any environment, no credentials required. A future
         # M91 wiring (PA-008) supplies an FCMHttpTransport via
@@ -114,6 +141,33 @@ class ServerApplication:
         self.connection_registry = connection_registry or ConnectionRegistry()
 
     def dispatch(self, message: dict[str, Any]) -> dict[str, Any]:
+        # Wrap the real dispatcher so every inbound request gets a counter +
+        # latency histogram tagged by message_type + outcome (ok|error).
+        # Using the wall clock works because this is for monitoring, not
+        # security; FakeClock is fine in tests too.
+        start = time.time()
+        message_type = message.get("type") or "unknown"
+        try:
+            response = self._dispatch_inner(message)
+        except Exception:
+            self.observability.metrics.inc(
+                "dispatch_requests_total",
+                labels={"type": message_type, "outcome": "exception"},
+            )
+            raise
+        outcome = "error" if response.get("type") == "error" else "ok"
+        self.observability.metrics.inc(
+            "dispatch_requests_total",
+            labels={"type": message_type, "outcome": outcome},
+        )
+        self.observability.metrics.observe(
+            "dispatch_request_duration_seconds",
+            time.time() - start,
+            labels={"type": message_type},
+        )
+        return response
+
+    def _dispatch_inner(self, message: dict[str, Any]) -> dict[str, Any]:
         correlation_id = message.get("correlation_id", "corr_invalid_request")
         session_id = message.get("session_id", "")
         actor_user_id = message.get("actor_user_id", "")
@@ -140,6 +194,29 @@ class ServerApplication:
                 login_result = self.auth_service.login(
                     payload.username, payload.password, payload.device_id
                 )
+                # M94: if the user has 2FA on, require + verify the code
+                # before issuing the session. We do this AFTER password
+                # verification so we don't leak which usernames have 2FA.
+                user_id = login_result["user_id"]
+                if self.two_fa_service.is_enabled(user_id):
+                    if not payload.two_fa_code:
+                        # Roll back the freshly-issued session so the failed
+                        # login doesn't count against the session count.
+                        self.state.sessions.pop(login_result["session_id"], None)
+                        return self._error_response(
+                            correlation_id=correlation_id,
+                            session_id=session_id,
+                            actor_user_id=actor_user_id,
+                            message=ServiceError(ErrorCode.TWO_FA_REQUIRED),
+                        )
+                    if not self.two_fa_service.verify_login_code(user_id, payload.two_fa_code):
+                        self.state.sessions.pop(login_result["session_id"], None)
+                        return self._error_response(
+                            correlation_id=correlation_id,
+                            session_id=session_id,
+                            actor_user_id=actor_user_id,
+                            message=ServiceError(ErrorCode.INVALID_TWO_FA_CODE),
+                        )
                 self.presence_service.notify_session_started(login_result["session_id"])
                 return make_response(
                     MessageType.LOGIN_RESPONSE,
@@ -162,8 +239,15 @@ class ServerApplication:
                 )
 
         if message_type == MessageType.REGISTER_REQUEST:
+            assert isinstance(payload, RegisterRequestPayload)
+            limited = self._rate_check(
+                op="register_request", key=payload.username,
+                correlation_id=correlation_id,
+                session_id=session_id, actor_user_id=actor_user_id,
+            )
+            if limited is not None:
+                return limited
             try:
-                assert isinstance(payload, RegisterRequestPayload)
                 register_result = self.auth_service.register(
                     username=payload.username,
                     password=payload.password,
@@ -190,6 +274,77 @@ class ServerApplication:
                     correlation_id=correlation_id,
                     session_id=session_id,
                     actor_user_id=actor_user_id,
+                    message=exc,
+                )
+
+        # ---- Phone OTP (pre-authenticated) ----
+        if message_type == MessageType.PHONE_OTP_REQUEST:
+            assert isinstance(payload, PhoneOtpRequestPayload)
+            limited = self._rate_check(
+                op="phone_otp_request", key=payload.phone_number,
+                correlation_id=correlation_id,
+                session_id="", actor_user_id="",
+            )
+            if limited is not None:
+                return limited
+            try:
+                code_length, ttl = self.phone_otp_service.request_code(payload.phone_number)
+                return make_response(
+                    MessageType.PHONE_OTP_REQUEST_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id="",
+                    actor_user_id="",
+                    payload=PhoneOtpRequestResponsePayload(
+                        phone_number=payload.phone_number,
+                        code_length=code_length,
+                        expires_in_seconds=ttl,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id="",
+                    actor_user_id="",
+                    message=exc,
+                )
+
+        if message_type == MessageType.PHONE_OTP_VERIFY_REQUEST:
+            assert isinstance(payload, PhoneOtpVerifyRequestPayload)
+            limited = self._rate_check(
+                op="phone_otp_verify_request", key=payload.phone_number,
+                correlation_id=correlation_id,
+                session_id="", actor_user_id="",
+            )
+            if limited is not None:
+                return limited
+            try:
+                user, sid, new_account = self.phone_otp_service.verify_code(
+                    payload.phone_number, payload.code,
+                    device_id=payload.device_id,
+                    display_name=payload.display_name,
+                )
+                # New phone-registered users + new sessions both count as
+                # an offline -> online presence transition. Reuse the same
+                # hook AuthService.login already triggers.
+                self.presence_service.notify_session_started(sid)
+                return make_response(
+                    MessageType.PHONE_OTP_VERIFY_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=sid,
+                    actor_user_id=user.user_id,
+                    payload=PhoneOtpVerifyResponsePayload(
+                        session_id=sid,
+                        user_id=user.user_id,
+                        display_name=user.display_name,
+                        device_id=payload.device_id,
+                        new_account=new_account,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id="",
+                    actor_user_id="",
                     message=exc,
                 )
 
@@ -419,6 +574,13 @@ class ServerApplication:
             ).to_dict()
 
         if message_type == MessageType.MESSAGE_SEND:
+            limited = self._rate_check(
+                op="message_send", key=session_id,
+                correlation_id=correlation_id,
+                session_id=session_id, actor_user_id=session.user_id,
+            )
+            if limited is not None:
+                return limited
             try:
                 assert isinstance(payload, MessageSendRequestPayload)
                 message_result = self.chat_service.send_message(
@@ -456,6 +618,13 @@ class ServerApplication:
                 )
 
         if message_type == MessageType.MESSAGE_SEND_ATTACHMENT:
+            limited = self._rate_check(
+                op="message_send_attachment", key=session_id,
+                correlation_id=correlation_id,
+                session_id=session_id, actor_user_id=session.user_id,
+            )
+            if limited is not None:
+                return limited
             try:
                 assert isinstance(payload, MessageSendAttachmentRequestPayload)
                 message_result = self.chat_service.send_attachment_message(
@@ -1003,6 +1172,13 @@ class ServerApplication:
             ).to_dict()
 
         if message_type == MessageType.PRESENCE_QUERY_REQUEST:
+            limited = self._rate_check(
+                op="presence_query_request", key=session_id,
+                correlation_id=correlation_id,
+                session_id=session_id, actor_user_id=session.user_id,
+            )
+            if limited is not None:
+                return limited
             assert isinstance(payload, PresenceQueryRequestPayload)
             users = self.presence_service.query_users(payload.user_ids)
             return make_response(
@@ -1110,6 +1286,118 @@ class ServerApplication:
                 actor_user_id=session.user_id,
                 payload=PushTokenListResponsePayload(tokens=tokens),
             ).to_dict()
+
+        # ---- TOTP 2FA ----
+        if message_type == MessageType.TWO_FA_ENABLE_REQUEST:
+            try:
+                secret, uri = self.two_fa_service.begin_enable(session.user_id)
+                return make_response(
+                    MessageType.TWO_FA_ENABLE_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=TwoFaEnableResponsePayload(
+                        secret=secret,
+                        provisioning_uri=uri,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.TWO_FA_VERIFY_REQUEST:
+            try:
+                assert isinstance(payload, TwoFaVerifyRequestPayload)
+                self.two_fa_service.confirm_enable(session.user_id, payload.code)
+                return make_response(
+                    MessageType.TWO_FA_VERIFY_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=TwoFaVerifyResponsePayload(enabled=True),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.TWO_FA_DISABLE_REQUEST:
+            try:
+                assert isinstance(payload, TwoFaDisableRequestPayload)
+                self.two_fa_service.disable(session.user_id, payload.code)
+                return make_response(
+                    MessageType.TWO_FA_DISABLE_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=TwoFaVerifyResponsePayload(enabled=False),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        # ---- M95 Account lifecycle ----
+        if message_type == MessageType.ACCOUNT_EXPORT_REQUEST:
+            export = self.account_lifecycle_service.export(session.user_id)
+            return make_response(
+                MessageType.ACCOUNT_EXPORT_RESPONSE,
+                correlation_id=correlation_id,
+                session_id=session_id,
+                actor_user_id=session.user_id,
+                payload=AccountExportResponsePayload(
+                    exported_at_ms=export["exported_at_ms"],
+                    user_id=export["user_id"],
+                    profile=export["profile"],
+                    devices=export["devices"],
+                    sessions=export["sessions"],
+                    contacts=export["contacts"],
+                    push_tokens=export["push_tokens"],
+                    authored_messages=export["authored_messages"],
+                ),
+            ).to_dict()
+
+        if message_type == MessageType.ACCOUNT_DELETE_REQUEST:
+            try:
+                assert isinstance(payload, AccountDeleteRequestPayload)
+                # Capture the user id before delete() drops the record.
+                target_user_id = session.user_id
+                summary = self.account_lifecycle_service.delete(
+                    target_user_id,
+                    password=payload.password,
+                    two_fa_code=payload.two_fa_code,
+                )
+                return make_response(
+                    MessageType.ACCOUNT_DELETE_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id="",      # session was just revoked
+                    actor_user_id="",   # user no longer exists
+                    payload=AccountDeleteResponsePayload(
+                        user_id=summary["user_id"],
+                        sessions_revoked=summary["sessions_revoked"],
+                        devices_removed=summary["devices_removed"],
+                        push_tokens_removed=summary["push_tokens_removed"],
+                        messages_tombstoned=summary["messages_tombstoned"],
+                        contacts_removed=summary["contacts_removed"],
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
 
         if message_type == MessageType.ATTACHMENT_UPLOAD_INIT_REQUEST:
             try:
@@ -1268,6 +1556,30 @@ class ServerApplication:
                 if self.connection_registry.push(session.session_id, envelope):
                     delivered_to.append(session.session_id)
         return delivered_to
+
+    def _rate_check(
+        self,
+        *,
+        op: str,
+        key: str,
+        correlation_id: str,
+        session_id: str,
+        actor_user_id: str,
+    ) -> dict[str, Any] | None:
+        """Returns None when the request is allowed, or a typed RATE_LIMITED
+        error response when the bucket is empty. Increments
+        `rate_limited_total{type=op}` so operators see the rejections."""
+        if self.rate_limiter.try_acquire(op, key):
+            return None
+        self.observability.metrics.inc(
+            "rate_limited_total", labels={"type": op},
+        )
+        return self._error_response(
+            correlation_id=correlation_id,
+            session_id=session_id,
+            actor_user_id=actor_user_id,
+            message=ServiceError(ErrorCode.RATE_LIMITED),
+        )
 
     def _enqueue_mock_pushes_for_offline_recipients(
         self,

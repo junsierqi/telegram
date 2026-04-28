@@ -101,8 +101,21 @@ wsl bash -lc "docker compose -f deploy/docker/docker-compose.yml --profile postg
 ### Authentication / sessions
 
 - username + password (PBKDF2-SHA256 stdlib only); registration flow
+- **phone-number + OTP** sign-in (M90) — 6-digit codes, 5-min TTL, 30-sec
+  resend cooldown; pluggable Sender (MockSender default, real SMS via PA-009)
+- **TOTP 2FA** (M94) — RFC 6238 stdlib-only; opt-in per user; `LOGIN_REQUEST`
+  enforces `two_fa_code` once enabled, with rollback of partial sessions on
+  bad code
+- **rate limiting** on REGISTER / PHONE_OTP / MESSAGE_SEND / PRESENCE_QUERY /
+  attachment send (M93); per-session token buckets, configurable
 - `--session-ttl-seconds` bound + heartbeat refresh
 - device management: list / trust / untrust / revoke (with current-device guard)
+- **GDPR-style export + delete** (M95) — `ACCOUNT_EXPORT_REQUEST` returns the
+  user's full snapshot (profile / devices / sessions / contacts / push tokens
+  / authored messages); `ACCOUNT_DELETE_REQUEST` requires password + TOTP
+  (when 2FA is on), then revokes sessions, removes devices/push tokens,
+  scrubs contacts both directions, and tombstones authored messages so
+  conversation history stays intact for other peers
 
 ### Presence
 
@@ -151,10 +164,22 @@ wsl bash -lc "docker compose -f deploy/docker/docker-compose.yml --profile postg
 - Linux: cmake + system Qt 6 build (`deploy/linux/README.md`); .desktop entry
   shipped, packaging (.deb / .rpm / AppImage) deferred
 
+### Operations / observability
+
+- **Structured logging** (M92) — JSON-line emission to any stream; default
+  is stderr
+- **Prometheus metrics** (M92) — `/metrics` endpoint on a sidecar HTTP
+  server; default counters: `dispatch_requests_total{type,outcome}`,
+  `dispatch_request_duration_seconds` histogram, `messages_sent_total`,
+  `attachments_uploaded_total`, `phone_otp_requests_total`,
+  `phone_otp_verifications_total`, `rate_limited_total`, `active_sessions`
+- **Health probe** (M92) — `/healthz` endpoint with pluggable `HealthCheck`s;
+  200 with details when all pass, 503 when any fail (≠ port-open)
+
 ## Verification
 
-`scripts/_sweep_validators.py` runs every `validate_*.py` (~45 in-process
-validators, ~200 scenarios) and tags 4 external-state validators as
+`scripts/_sweep_validators.py` runs every `validate_*.py` (~50 in-process
+validators, ~250 scenarios) and tags 4 external-state validators as
 `SKIP_EXTERNAL`. CI runs the same sweep + a Linux C++ build + a Linux Qt
 desktop build + a bundle integrity check on every push.
 
@@ -181,6 +206,8 @@ items still gated on user action are credential/cost decisions:
   signed installer/APK distribution
 - **PA-008** — FCM service-account JSON / APNs token to flip
   `FCMHttpTransport.dry_run = False` and reach real device wake-up channels
+- **PA-009** — Twilio account SID + auth token (or Aliyun SMS) to replace
+  `MockSender` and deliver phone OTP codes via real SMS
 
 See [`.idea-to-code/telegram-platform/08-atlas-task-library.md`](.idea-to-code/telegram-platform/08-atlas-task-library.md)
 for the full backlog (Linux desktop ✅, mobile UI ✅, push wiring ✅, plus

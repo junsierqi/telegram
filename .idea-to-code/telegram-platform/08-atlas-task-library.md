@@ -28,15 +28,15 @@ Status date: 2026-04-28
 | ID | Priority | State | Requirement | Task | Verification | External side effects |
 |---|---:|---|---|---|---|---|
 | ATLAS-M71 | P2 | planned | REQ-REMOTE-LIFECYCLE | Resume remote-control runtime path: integrate ReliableChannel into media_plane.py UDP, add Qt UI for invite/approve/host/view. | New remote-session validators + Qt smoke once a multi-client harness exists. | None until live multi-client smoke. |
-| ATLAS-M87 | P1 | planned | REQ-VALIDATION (CI) | GitHub Actions workflow that runs `_sweep_validators.py` + Linux C++ build on every push. | Workflow file + green run on first push. | None. |
-| ATLAS-M88 | P1 | planned | REQ-ATTACHMENTS | Chunked attachment upload (>1 MB) via init/chunk/complete RPCs; AttachmentBlobStore stitches chunks. | New `validate_chunked_upload.py` round-tripping a multi-MB file. | None. |
+| ATLAS-M87 | P1 | done | REQ-VALIDATION (CI) | GitHub Actions workflow with 4 jobs (validators / linux-cpp / linux-desktop / bundle-verify); sweep extended with NEEDS_BINARY skip logic. | validate_ci_workflow.py 7/7. | None. |
+| ATLAS-M88 | P1 | done | REQ-ATTACHMENTS | Chunked attachment upload (≤64 MB) via init/chunk/complete RPCs; ChatService stitches via AttachmentBlobStore. | validate_chunked_upload.py 6/6 (incl. 5 MB byte-exact round-trip + empty-chunk + total cap). | None. |
 | ATLAS-M89 | P1 | done | REQ-VALIDATION (Linux desktop) | Real Linux build verified end-to-end on Ubuntu 24.04 (Qt 6.4 from apt). qt_policy + loadFromModule version compat fixes; deploy/linux scaffolding; ci.yml linux-desktop job. | validate_linux_desktop.py 5/5; WSL build of all 8 targets clean; json_parser_test 9/9 + app_desktop_store_test 20/20 on Linux. | None. |
-| ATLAS-M90 | P1 | planned | new REQ-PHONE-OTP | Phone-number + OTP authentication path (Telegram-style sign-in). Server-side mock SMS first, real Twilio/Aliyun gateway via PA. | New protocol RPCs + validator. | PA for SMS gateway credential + cost approval. |
+| ATLAS-M90 | P1 | done | REQ-CHAT-CORE (phone OTP) | Phone-OTP login with MockSender default + TwilioSender stub gated on PA-009. | validate_phone_otp.py 5/5. | PA-009 for real SMS gateway. |
 | ATLAS-M91 | P2 | done | REQ-CHAT-CORE | Pluggable PushDispatchWorker drains PushTokenService.pending_deliveries; LogOnlyTransport default + FakeTransport for tests + FCMHttpTransport stub (dry_run, urllib-based). | validate_push_dispatch.py 5/5 covering empty/per-platform/fallback/dry_run/end-to-end. | PA-008 only for the bearer token flow (real FCM POST); the worker itself ships now. |
-| ATLAS-M92 | P2 | planned | new REQ-OBSERVABILITY | Structured logging + `/metrics` endpoint (Prometheus exposition format) + health probe distinct from port-open. | New validator hitting `/metrics`. | None. |
-| ATLAS-M93 | P2 | planned | new REQ-RATE-LIMITING | Per-session rate limiting on MESSAGE_SEND / REGISTER_REQUEST / PRESENCE_QUERY. | Validator with synthetic burst. | None. |
-| ATLAS-M94 | P3 | planned | new REQ-2FA | TOTP-based 2FA over the existing auth flow. | Validator drives provision + verify. | None. |
-| ATLAS-M95 | P3 | planned | new REQ-ACCOUNT-DELETE | GDPR-style account deletion + data export. | Validator round-trips create → export → delete. | None. |
+| ATLAS-M92 | P2 | done | REQ-VALIDATION (observability) | Structured JSON logger + Prometheus exposition + sidecar /metrics + /healthz HTTP server. | validate_observability.py 6/6. | None. |
+| ATLAS-M93 | P2 | done | REQ-VALIDATION (rate limiting) | Token-bucket rate limiter on 6 dispatch sites; rate_limited_total counter. | validate_rate_limiting.py 5/5. | None. |
+| ATLAS-M94 | P3 | done | REQ-CHAT-CORE (2FA) | RFC 6238 TOTP, stdlib-only, optional on LOGIN_REQUEST. | validate_two_fa.py 4/4. | None. |
+| ATLAS-M95 | P3 | done | REQ-CHAT-CORE (account lifecycle) | GDPR-style export + tombstoning delete with password+TOTP gate. | validate_account_lifecycle.py 5/5. | None. |
 
 ## Pending Actions
 
@@ -48,6 +48,7 @@ Status date: 2026-04-28
 | PA-005 | 2026-04-28 | Acquire Authenticode certificate, then re-run `scripts\package_windows_desktop.ps1 -BuildDir build-verify -Installer` after uncommenting `SignTool=` in `deploy/windows/telegram_like_desktop.iss.template`. | Code-sign the Inno Setup installer so SmartScreen / Defender accept it without warning. | Yes — needs cert procurement + signtool config |
 | ~~PA-007~~ | 2026-04-28 → resolved 2026-04-28 | `powershell scripts\build_android_apk.ps1` (one-liner, wraps qt-cmake + cmake --target apk + manifest+gradle plumbing). | Produce a real Android APK. | DONE — toolchain found at D:\android\sdk (NDK 30, build-tools 37, platform android-37.0 → junctioned to android-37, JDK 21.0.11); 11.4 MB unsigned APK produced. |
 | PA-008 | 2026-04-28 | Acquire FCM service-account JSON (or APNs token), wire `httpx` POST in a new push delivery worker that drains `PushTokenService.pending_deliveries` on a tick. | Send the mock pushes the server already records to real device wake-up channels. | Yes — needs FCM/APNs credential procurement. |
+| PA-009 | 2026-04-28 | Acquire Twilio account SID + auth token (or Aliyun SMS), wire real HTTP POST in a TwilioSender that replaces MockSender in PhoneOtpService. | Deliver phone OTP codes via real SMS instead of stderr/log. | Yes — needs SMS gateway credential + cost approval. |
 
 ## Notes
 

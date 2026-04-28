@@ -24,6 +24,11 @@ class UserRecord:
     username: str
     password_hash: str
     display_name: str
+    # M94: TOTP 2FA. Empty string = 2FA disabled. When set, login requires
+    # `two_fa_code` to satisfy the time-based 6-digit code derived from
+    # this base32-encoded secret (RFC 6238). Persisted alongside the user
+    # so password + secret travel together.
+    two_fa_secret: str = ""
 
 
 @dataclass(slots=True)
