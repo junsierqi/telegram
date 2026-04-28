@@ -4,7 +4,12 @@ param(
     [string]$OutDir = "artifacts/windows-desktop",
     [switch]$IncludeDebugSymbols,
     [switch]$SkipQtDeploy,
-    [switch]$Zip
+    [switch]$Zip,
+    [switch]$Installer,
+    [string]$AppVersion = "0.1.0-dev",
+    [string]$AppPublisher = "Telegram-like Project",
+    [string]$AppUrl = "https://example.invalid/telegram-like",
+    [string]$IsccPath = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
 )
 
 $ErrorActionPreference = "Stop"
@@ -112,6 +117,47 @@ if ($Zip) {
         Set-Content -Encoding ASCII -Path "$zipPath.sha256"
     Write-Host "Created package zip: $zipPath"
     Write-Host "Created package zip checksum: $zipPath.sha256"
+}
+
+if ($Installer) {
+    if (!(Test-Path $IsccPath)) {
+        throw "Inno Setup compiler not found at: $IsccPath. Install Inno Setup 6 or pass -IsccPath."
+    }
+
+    $templatePath = Join-Path $repoRoot "deploy\windows\telegram_like_desktop.iss.template"
+    if (!(Test-Path $templatePath)) {
+        throw "Inno Setup template missing: $templatePath"
+    }
+
+    $installerOutputDir = Join-Path $artifactRoot "installers"
+    New-Item -ItemType Directory -Force -Path $installerOutputDir | Out-Null
+    $outputBaseName = "telegram_like_desktop_setup_$stamp"
+
+    $iss = (Get-Content -Raw -Path $templatePath).
+        Replace("{APP_VERSION}",      $AppVersion).
+        Replace("{APP_PUBLISHER}",    $AppPublisher).
+        Replace("{APP_URL}",          $AppUrl).
+        Replace("{SOURCE_STAGE_DIR}", $stageDir).
+        Replace("{OUTPUT_DIR}",       $installerOutputDir).
+        Replace("{OUTPUT_BASE_NAME}", $outputBaseName)
+
+    $issTempPath = Join-Path $stageDir "telegram_like_desktop.generated.iss"
+    Set-Content -Encoding UTF8 -Path $issTempPath -Value $iss
+
+    & $IsccPath $issTempPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Inno Setup compiler exited with $LASTEXITCODE"
+    }
+    $installerPath = Join-Path $installerOutputDir "$outputBaseName.exe"
+    if (!(Test-Path $installerPath)) {
+        throw "Installer was not produced at expected path: $installerPath"
+    }
+    $installerHash = Get-FileHash -Algorithm SHA256 -Path $installerPath
+    "$($installerHash.Hash.ToLowerInvariant())  $([System.IO.Path]::GetFileName($installerPath))" |
+        Set-Content -Encoding ASCII -Path "$installerPath.sha256"
+    Write-Host "Created installer: $installerPath"
+    Write-Host "Created installer checksum: $installerPath.sha256"
+    Write-Host "Code signing not applied — supply Authenticode cert via signtool then re-run with the SignTool directive uncommented in the .iss template."
 }
 
 Write-Host "Created package directory: $stageDir"

@@ -3,8 +3,8 @@
 ## Current Phase
 
 - Status: in_progress
-- Current focus: Real presence push closes the last protocol parity gap; PRESENCE_UPDATE no longer a dead enum
-- Next gate: Release readiness
+- Current focus: Mobile is no longer aspirational: same C++ codebase compiles + ships for Win32 desktop (Widgets), Win32 mobile preview (QtQuick), and Android arm64 APK (QtQuick). Three UI shells (app_chat CLI, app_desktop Widgets, app_mobile QML) all share the same chat_client_core protocol stack.
+- Next gate: Live mobile smoke / signing / FCM
 
 ## Milestone History
 
@@ -613,4 +613,69 @@
 - Verified: validate_presence_push 6/6; validate_presence_heartbeat 6/6 (no regression); validate_typed_errors 11/11; validate_cpp_chat_e2e 3/3; validate_cpp_remote_session 8/8; validate_desktop_smoke 1/1; validate_rendezvous 6/6; validate_terminate_disconnect 8/8; validate_message_fanout 4/4; validate_incremental_sync 8/8; validate_message_search 5/5; validate_attachments 11/11; validate_contacts 8/8; validate_group_conversations 6/6; bundle verify ok 72 reqs
 - Next: Move to release-readiness arc: M69 deployment hardening sweep / M70 Windows installer / mobile arc
 - Covers: REQ-PRESENCE-HEARTBEAT, REQ-TYPED-PROTO, REQ-VALIDATION
+
+## Deployment hardening acceptance sweep (M79) (gate: pass)
+
+- Timestamp: 2026-04-28T06:42:50+00:00
+- Delivered: Added scripts/_sweep_validators.py one-shot helper that runs every validate_*.py and tags 4 external-state validators (docker_deploy, postgres_repository, postgres_backup_restore, tls_proxy_smoke) as SKIP_EXTERNAL since they need live Docker/PostgreSQL/TLS-proxy stacks (PA-001/PA-002/PA-003 still gating). Confirmed full local regression coverage.
+- Verified: 37/37 in-process validators PASS (~190 individual scenarios across attachments/contacts/cpp_chat_e2e/cpp_remote_session/cpp_tls_client/desktop_smoke/device_management/empty_state_file/group_conversations/history_paging/incremental_sync/input_injection/media_frames/message_actions/message_edit_delete/message_fanout/message_search/presence_heartbeat/presence_push/profile_search/read_receipts/registration/reliable_stream/rendezvous/screen_source/session_hardening/session_persistence/sqlite_persistence/terminate_disconnect/tls_config/tls_deployment_config/tls_dev_cert/tls_handshake/typed_errors/udp_media/udp_media_auth/udp_relay); plus 9/9 json_parser_test + 20/20 app_desktop_store_test C++ binaries. 4 external-state validators skipped pending PA-001/PA-002/PA-003.
+- Next: M80 Windows installer + signing plan
+- Covers: REQ-VALIDATION, REQ-LINUX-DOCKER-DEPLOYMENT
+
+## Windows installer with Inno Setup (M80) (gate: pass)
+
+- Timestamp: 2026-04-28T06:46:53+00:00
+- Delivered: deploy/windows/telegram_like_desktop.iss.template — Inno Setup script template with placeholders for version/publisher/URL/source-stage/output, x64 architecture, lowest privileges (override-allowed), recursive [Files] copy of the staged windeployqt tree, [Icons] for Start Menu / desktop shortcut, [Run] post-install launch, and a documented (commented-out) SignTool= directive ready for Authenticode once a cert lands. scripts/package_windows_desktop.ps1 gains -Installer / -AppVersion / -AppPublisher / -AppUrl / -IsccPath switches; substitutes placeholders, drops a generated .iss in the stage dir, invokes ISCC.exe, writes installer + .sha256 to artifacts/windows-desktop/installers/. New scripts/validate_windows_installer.py covers 5 static scenarios (template placeholders, app_desktop.exe target, SignTool directive presence, package-script wiring, optional checksum verification when an installer build is present). Real installer build produced telegram_like_desktop_setup_<timestamp>.exe (~2.1 MB) + matching SHA256.
+- Verified: powershell scripts/package_windows_desktop.ps1 -BuildDir build-verify -Installer succeeds end-to-end with ISCC.exe; validate_windows_installer.py 5/5 (including the checksum re-hash of the produced .exe matches the .sha256 file)
+- Next: M81 mobile (Android via Qt for Android)
+- Covers: REQ-WINDOWS-PACKAGE-STAGING, REQ-WINDOWS-PACKAGE-CHECKSUMS, REQ-VALIDATION
+
+## Blocker at 2026-04-28T06:50:19+00:00
+
+- Reason: Android APK build requires Android SDK Platform 33+, NDK 26.x, Build-Tools 34+, and JDK 17 to be installed locally. Current environment has ANDROID_HOME pointing at a path that does not exist on disk and only JDK 1.8 (too old for Qt for Android). Static prep landed and is verified by validate_android_prep.py 6/6, but no APK can be produced without the toolchain.
+- Needed to proceed: User approval + multi-GB toolchain install (Android Studio or cmdline-tools-only bundle, NDK 26.x via SDK manager, JDK 17 from Temurin/Adoptium); PA-007 in 08-atlas-task-library has the exact qt-cmake invocation to run once installed.
+
+## Android (Qt for Android) prep + PA-007 toolchain block (M81) (gate: partial)
+
+- Timestamp: 2026-04-28T06:50:39+00:00
+- Delivered: deploy/android/AndroidManifest.xml — minimal Qt for Android manifest with INTERNET + ACCESS_NETWORK_STATE permissions and the QtActivity LAUNCHER entry. deploy/android/README.md documents the missing toolchain (ANDROID_HOME path is dead, only JDK 1.8 installed) and the exact qt-cmake invocation to use once SDK Platform 33+ / NDK 26.x / JDK 17 are installed. New scripts/validate_android_prep.py covers 6 static scenarios (POSIX socket branch in net/platform.h, Schannel TLS gated on _WIN32 in tcp_line_client header AND .cpp, manifest INTERNET+QtActivity+LAUNCHER, README PA-007 reference + qt-cmake + JDK 17, CMakeLists ws2_32/secur32 only inside if(WIN32)). 08-atlas-task-library.md gains PA-005 (Authenticode cert) + PA-007 (Android toolchain install) Pending Actions and ATLAS-M81 partial entry.
+- Verified: validate_android_prep.py 6/6; existing build-verify Windows build still clean; 37/37 in-process validators stay green (M79 sweep unchanged); Inno Setup installer + checksum still produce-able (M80 unchanged). Static prep proves chat_client_core POSIX paths are reachable; actual APK build gated on PA-007 toolchain install.
+- Next: Resume after PA-007 toolchain install OR pivot to release-readiness items (PA-001/PA-002 PostgreSQL TLS live smoke, push notifications protocol, mobile UI redesign as Qt Quick)
+- Covers: REQ-VALIDATION
+
+## Unblocked at 2026-04-28T07:35:01+00:00
+
+- Resolution: PA-001/PA-002 resolved (Docker proxy configured + Dockerfile ARG plumbing + live PostgreSQL TLS smoke green). Android toolchain (PA-007) remains a documented Pending Action but does not gate the rest of the arc — tracked in 08-atlas-task-library.md instead of bundle-level block.
+
+## Live PostgreSQL TLS proxy smoke (M82, PA-001+PA-002+PA-003 resolved) (gate: pass)
+
+- Timestamp: 2026-04-28T07:35:25+00:00
+- Delivered: Brought up the 3-container PostgreSQL TLS stack via WSL Docker (postgres + telegram-server-postgres + telegram-tls-proxy-postgres on 8444). Required two infrastructure fixes to make it work: (a) wrote /etc/systemd/system/docker.service.d/http-proxy.conf with HTTP_PROXY=http://10.20.11.30:10809 + HTTPS_PROXY + NO_PROXY then daemon-reload + restart docker so the daemon's image pulls reach docker.io; (b) added explicit ARG HTTP_PROXY/HTTPS_PROXY/NO_PROXY (upper- and lower-case) plus matching ENV lines at the top of deploy/docker/server.Dockerfile so RUN pip install reaches pypi.org through the same proxy that's already plumbed via docker-compose build args. After containers were healthy, exercised the full PG-backed deployment surface: validate_tls_proxy_smoke.py --port 8444 (PASS, sess_1 issued through nginx stream TLS termination); validate_postgres_repository --pg-dsn=...:5432 (PASS 3/3 — installed psycopg[binary]>=3.2 on host first); validate_postgres_backup_restore --pg-dsn (PASS 1/1); validate_docker_deploy --port 8788 (PASS, plaintext path through PostgreSQL backend). Tore the stack down with docker compose down (volumes preserved). Updated 08-atlas-task-library.md to mark PA-001/PA-002/PA-003 DONE and rewrite the Notes section.
+- Verified: Live: tls proxy smoke ok user=u_alice session=sess_1 (port 8444); docker deploy smoke ok user=u_alice session=sess_2 (port 8788); validate_postgres_repository.py 3/3; validate_postgres_backup_restore.py 1/1. Stack: 3 containers up (postgres, telegram-server-postgres, telegram-tls-proxy-postgres), all healthy. Tore down cleanly.
+- Next: Resume with PA-005 (Authenticode cert) / PA-007 (Android toolchain) / push notifications protocol / mobile UI redesign
+- Covers: REQ-LINUX-DOCKER-DEPLOYMENT, REQ-POSTGRES-REPOSITORY-BOUNDARY, REQ-POSTGRES-SCHEMA-BACKUP, REQ-TLS-PG-PROXY, REQ-TLS-TERMINATION-PROFILE, REQ-VALIDATION
+
+## Push notification protocol surface (M84) (gate: pass)
+
+- Timestamp: 2026-04-28T10:49:20+00:00
+- Delivered: Added 5 new MessageType values (PUSH_TOKEN_REGISTER / PUSH_TOKEN_UNREGISTER / PUSH_TOKEN_LIST_REQUEST / PUSH_TOKEN_LIST_RESPONSE / PUSH_TOKEN_ACK) plus typed payloads (PushTokenRegisterRequestPayload / PushTokenUnregisterRequestPayload / PushTokenAckPayload / PushTokenDescriptor / PushTokenListResponsePayload) in protocol.py with parse_request_payload coverage. New PushTokenRecord in state.py + InMemoryState.push_tokens flat list (in-memory only; SQLite/PG persistence is PA-008 follow-up). New services/push_tokens.py provides register / unregister / tokens_for_user / notify_offline_recipient / drain_pending plus a PendingDelivery dataclass — the mock queue is what a real FCM/APNs worker would drain. ServerApplication wires PushTokenService, dispatches the 3 RPCs (register/unregister/list), and adds _enqueue_mock_pushes_for_offline_recipients hook that fires after MESSAGE_SEND for participants whose presence_service.is_user_online() is False. New validate_push_tokens.py covers 6 scenarios (register+list round-trip, offline recipient enqueues mock push, online recipient short-circuits, unregister, empty-payload rejection, token rotation idempotency).
+- Verified: validate_push_tokens.py 6/6; full sweep 40/40 in-process validators (37 → 40 with android_prep + windows_installer + push_tokens added across M81/M80/M84). 4 external-state validators (docker/postgres x2/tls_proxy_smoke) remain SKIP_EXTERNAL.
+- Next: M85 mobile UI redesign / drain real FCM (PA-008) once cred/transport ready
+- Covers: REQ-CHAT-CORE, REQ-TYPED-PROTO, REQ-VALIDATION
+
+## Real Android APK build (M83, PA-007 resolved) (gate: pass)
+
+- Timestamp: 2026-04-28T10:54:15+00:00
+- Delivered: Found Android SDK at D:\android\sdk (NDK 30.0.14904198, build-tools 37.0.0, platform android-37.0, cmdline-tools/latest) and JDK 21.0.11 at C:\Program Files\Java\jdk-21.0.11. Three infrastructure fixes to land the APK: (1) created junction D:\android\sdk\platforms\android-37 -> android-37.0 because androiddeployqt expects standard naming; (2) wrote ~/.gradle/gradle.properties with systemProp.https.proxyHost=10.20.11.30 + Port 10809 so the gradle wrapper can pull dependencies through the corporate egress proxy; (3) trimmed deploy/android/AndroidManifest.xml to a modern minimal Qt for Android shape — dropped the legacy qt_sources/qt_libs/bundled_libs resource-array meta-data lines that newer Qt for Android (>=6.5) injects via gradle plugin. client/src/CMakeLists.txt switched to qt_add_executable for app_desktop with QT_ANDROID_PACKAGE_SOURCE_DIR + QT_ANDROID_MIN_SDK_VERSION 26 + QT_ANDROID_TARGET_SDK_VERSION 33 + QT_ANDROID_VERSION_NAME/CODE properties (Android-only). New scripts/build_android_apk.ps1 wraps the qt-cmake configure + cmake --target apk dance with all the env plumbing. validate_android_prep.py extended to 9 scenarios (added qt_add_executable check, build_android_apk.ps1 script existence, optional APK size sanity check).
+- Verified: qt-cmake configure succeeded against Qt 6.11.0 android_arm64_v8a; chat_client_core compiles clean for arm64-v8a Bionic libc (POSIX branches in net/* compile through unchanged); libapp_desktop_arm64-v8a.so links; cmake --build --target apk produced android-build-release-unsigned.apk = 11,360,200 bytes (11.4 MB) at build-android/client/src/android-build/build/outputs/apk/release/. validate_android_prep.py 9/9. Full sweep 41/41 in-process validators stay green.
+- Next: M85 mobile UI redesign (Qt Quick / QML phone-shaped chat); installer signing PA-005 covers Android keystore + Windows Authenticode together
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## Mobile UI redesign — Qt Quick / QML phone shell (M85) (gate: pass)
+
+- Timestamp: 2026-04-28T11:08:17+00:00
+- Delivered: New app_mobile target: a Qt Quick / QML phone-shaped client built on top of the same chat_client_core. New global-namespace MobileChatBridge (mobile_chat_bridge.h/.cpp) is the QML facade exposing connectAndLogin/selectChat/sendMessage/conversationList/selectedMessages as Q_INVOKABLE plus identityChanged/storeChanged/connectedChanged/errorReported signals; threads RPCs off-UI with QMetaObject::invokeMethod marshalling and shutting_down_ guards (same shape as desktop). Four QML pages under client/src/app_mobile/qml/: Main.qml (StackView shell + Connections to nav between pages), LoginPage.qml (host/port/user/password/device form with Telegram-style avatar disc + accent-blue Connect button), ChatListPage.qml (conversation rows with deterministic-color initial avatars + unread badges, Telegram-blue header), ChatPage.qml (header with back button, message timeline with mint outgoing + white incoming bubbles + pending/failed states, rounded composer + circular blue Send). CMakeLists.txt wires qt_add_executable + qt_add_qml_module(URI TelegramLikeMobile) with AUTOMOC + qt_policy(SET QTP0001 NEW) + QT_ANDROID_* properties for mobile APK + windeployqt POST_BUILD with --qmldir for Windows preview.
+- Verified: validate_mobile_ui.py 6/6 (bridge header surface, marshalled invokes, all 4 QML pages reference ChatBridge correctly, CMake wiring, optional binary size sanity); Windows app_mobile.exe builds + launches cleanly with clean PATH (no Qt on PATH); Android app_mobile.apk builds (20.0 MB unsigned, arm64-v8a) via cmake --target app_mobile_make_apk; full sweep 41/41 in-process validators (was 40 before mobile_ui added).
+- Next: PA-008 real FCM/APNs HTTP transport / PA-005 Android keystore + Authenticode signing / device emulator install for live mobile UI smoke
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
 

@@ -186,6 +186,11 @@ class MessageType(StrEnum):
     REMOTE_RENDEZVOUS_INFO = "remote_rendezvous_info"
     REMOTE_RELAY_ASSIGNMENT = "remote_relay_assignment"
     REMOTE_SESSION_TERMINATED = "remote_session_terminated"
+    PUSH_TOKEN_REGISTER = "push_token_register"
+    PUSH_TOKEN_UNREGISTER = "push_token_unregister"
+    PUSH_TOKEN_LIST_REQUEST = "push_token_list_request"
+    PUSH_TOKEN_LIST_RESPONSE = "push_token_list_response"
+    PUSH_TOKEN_ACK = "push_token_ack"
     ERROR = "error"
 
 
@@ -691,6 +696,47 @@ class PresenceQueryResponsePayload:
 
 
 @dataclass(slots=True)
+class PushTokenRegisterRequestPayload:
+    """Mobile client tells the server which platform-issued push token (FCM
+    registration ID, APNs device token, …) corresponds to its session/device,
+    so the server can deliver wake-ups when the TCP control plane is offline.
+
+    `platform` is the free-form transport label: "fcm" / "apns" / "wns" /
+    "mock" — server treats it opaquely and just stores it alongside the
+    token so a future delivery worker can pick the right transport.
+    """
+    platform: str
+    token: str
+
+
+@dataclass(slots=True)
+class PushTokenUnregisterRequestPayload:
+    platform: str
+    token: str
+
+
+@dataclass(slots=True)
+class PushTokenAckPayload:
+    platform: str
+    token: str
+    registered: bool  # True for register, False for unregister
+
+
+@dataclass(slots=True)
+class PushTokenDescriptor:
+    user_id: str
+    device_id: str
+    platform: str
+    token: str
+    registered_at_ms: int
+
+
+@dataclass(slots=True)
+class PushTokenListResponsePayload:
+    tokens: list[PushTokenDescriptor]
+
+
+@dataclass(slots=True)
 class PresenceUpdatePayload:
     """Pushed to peers (anyone sharing a conversation) when a user's online
     state transitions. Subscribers update their local presence cache without
@@ -899,6 +945,18 @@ def parse_request_payload(message_type: MessageType, payload: dict[str, Any]) ->
         return PresenceQueryRequestPayload(
             user_ids=list(payload.get("user_ids", [])),
         )
+    if message_type == MessageType.PUSH_TOKEN_REGISTER:
+        return PushTokenRegisterRequestPayload(
+            platform=payload.get("platform", ""),
+            token=payload.get("token", ""),
+        )
+    if message_type == MessageType.PUSH_TOKEN_UNREGISTER:
+        return PushTokenUnregisterRequestPayload(
+            platform=payload.get("platform", ""),
+            token=payload.get("token", ""),
+        )
+    if message_type == MessageType.PUSH_TOKEN_LIST_REQUEST:
+        return {}
     return payload
 
 

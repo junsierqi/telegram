@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AndroidManifest skeleton for the Qt for Android build of app_desktop.
+  Picked up automatically when CMake's app_desktop target is built with a
+  Qt for Android toolchain (see deploy/android/README.md).
+
+  Modern Qt for Android (>= 6.5) injects the lib_name and bundling resources
+  itself via the Gradle plugin, so we only declare app-level metadata here.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+          android:installLocation="auto">
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <supports-screens
+        android:largeScreens="true"
+        android:normalScreens="true"
+        android:anyDensity="true"
+        android:smallScreens="true" />
+
+    <application
+        android:name="org.qtproject.qt.android.bindings.QtApplication"
+        android:label="Telegram-like"
+        android:hardwareAccelerated="true"
+        android:requestLegacyExternalStorage="true"
+        android:allowNativeHeapPointerTagging="false">
+
+        <activity
+            android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:configChanges="orientation|uiMode|screenLayout|screenSize|smallestScreenSize|layoutDirection|locale|fontScale|keyboard|keyboardHidden|navigation|mcc|mnc|density"
+            android:label="Telegram-like"
+            android:launchMode="singleTop"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <meta-data android:name="android.app.lib_name" android:value="-- %%INSERT_APP_LIB_NAME%% --" />
+            <meta-data android:name="android.app.background_running" android:value="false" />
+            <meta-data android:name="android.app.auto_screen_scale_factor" android:value="false" />
+            <meta-data android:name="android.app.extract_android_style" android:value="default" />
+        </activity>
+    </application>
+</manifest>

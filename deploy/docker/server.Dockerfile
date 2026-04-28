@@ -1,6 +1,22 @@
 FROM python:3.12-slim
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
+# Proxy plumbing: docker-compose.yml passes HTTP_PROXY/HTTPS_PROXY/NO_PROXY
+# through as build args (lower- and upper-case) so RUN steps such as
+# `pip install` can reach pypi.org through the host's egress proxy.
+ARG HTTP_PROXY=""
+ARG HTTPS_PROXY=""
+ARG NO_PROXY=""
+ARG http_proxy=""
+ARG https_proxy=""
+ARG no_proxy=""
+
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=${NO_PROXY} \
+    http_proxy=${http_proxy} \
+    https_proxy=${https_proxy} \
+    no_proxy=${no_proxy} \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TELEGRAM_HOST=0.0.0.0 \
     TELEGRAM_PORT=8787 \

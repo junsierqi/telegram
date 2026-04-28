@@ -39,6 +39,11 @@ from .protocol import (
     PresenceQueryRequestPayload,
     PresenceQueryResponsePayload,
     PresenceUpdatePayload,
+    PushTokenAckPayload,
+    PushTokenDescriptor,
+    PushTokenListResponsePayload,
+    PushTokenRegisterRequestPayload,
+    PushTokenUnregisterRequestPayload,
     RemoteApproveRequestPayload,
     RemoteDisconnectRequestPayload,
     RemoteInputAckPayload,
@@ -61,6 +66,7 @@ from .services.chat import ChatService
 from .services.contacts import ContactsService
 from .services.input import InputService
 from .services.presence import DEFAULT_TTL_SECONDS, PresenceService
+from .services.push_tokens import PushTokenService
 from .services.remote_session import RemoteSessionService
 from .state import InMemoryState
 
@@ -93,6 +99,7 @@ class ServerApplication:
         self.remote_session_service = RemoteSessionService(self.state)
         self.input_service = InputService(self.state)
         self.contacts_service = ContactsService(self.state, self.presence_service)
+        self.push_token_service = PushTokenService(self.state, clock=self.clock)
         self.connection_registry = connection_registry or ConnectionRegistry()
 
     def dispatch(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -416,6 +423,11 @@ class ServerApplication:
                     message_type=MessageType.MESSAGE_DELIVER,
                     payload=message_result,
                     correlation_id=f"push_{message_result.message_id}",
+                )
+                self._enqueue_mock_pushes_for_offline_recipients(
+                    conversation_id=payload.conversation_id,
+                    sender_user_id=session.user_id,
+                    body_summary=message_result.text[:80],
                 )
                 return make_response(
                     MessageType.MESSAGE_DELIVER,
@@ -1021,6 +1033,73 @@ class ServerApplication:
                     message=exc,
                 )
 
+        if message_type == MessageType.PUSH_TOKEN_REGISTER:
+            try:
+                assert isinstance(payload, PushTokenRegisterRequestPayload)
+                self.push_token_service.register(
+                    user_id=session.user_id,
+                    device_id=session.device_id,
+                    platform=payload.platform,
+                    token=payload.token,
+                )
+                return make_response(
+                    MessageType.PUSH_TOKEN_ACK,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=PushTokenAckPayload(
+                        platform=payload.platform,
+                        token=payload.token,
+                        registered=True,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.PUSH_TOKEN_UNREGISTER:
+            assert isinstance(payload, PushTokenUnregisterRequestPayload)
+            self.push_token_service.unregister(
+                user_id=session.user_id,
+                device_id=session.device_id,
+                platform=payload.platform,
+                token=payload.token,
+            )
+            return make_response(
+                MessageType.PUSH_TOKEN_ACK,
+                correlation_id=correlation_id,
+                session_id=session_id,
+                actor_user_id=session.user_id,
+                payload=PushTokenAckPayload(
+                    platform=payload.platform,
+                    token=payload.token,
+                    registered=False,
+                ),
+            ).to_dict()
+
+        if message_type == MessageType.PUSH_TOKEN_LIST_REQUEST:
+            tokens = [
+                PushTokenDescriptor(
+                    user_id=r.user_id,
+                    device_id=r.device_id,
+                    platform=r.platform,
+                    token=r.token,
+                    registered_at_ms=r.registered_at_ms,
+                )
+                for r in self.push_token_service.tokens_for_user(session.user_id)
+            ]
+            return make_response(
+                MessageType.PUSH_TOKEN_LIST_RESPONSE,
+                correlation_id=correlation_id,
+                session_id=session_id,
+                actor_user_id=session.user_id,
+                payload=PushTokenListResponsePayload(tokens=tokens),
+            ).to_dict()
+
         return self._error_response(
             correlation_id=correlation_id,
             session_id=session_id,
@@ -1087,6 +1166,31 @@ class ServerApplication:
                 if self.connection_registry.push(session.session_id, envelope):
                     delivered_to.append(session.session_id)
         return delivered_to
+
+    def _enqueue_mock_pushes_for_offline_recipients(
+        self,
+        *,
+        conversation_id: str,
+        sender_user_id: str,
+        body_summary: str,
+    ) -> None:
+        """For every conversation participant that has NO fresh session, queue
+        a mock push delivery via PushTokenService. The actual FCM/APNs HTTP
+        transport is PA-008 — for now this just records intent so validators
+        can assert the wake-up surface fired."""
+        conversation = self.state.conversations.get(conversation_id)
+        if conversation is None:
+            return
+        for user_id in conversation.participant_user_ids:
+            if user_id == sender_user_id:
+                continue
+            if self.presence_service.is_user_online(user_id):
+                continue
+            self.push_token_service.notify_offline_recipient(
+                user_id=user_id,
+                kind="message_deliver",
+                body_summary=body_summary,
+            )
 
     def _fanout_presence_transition(self, user_id: str, online: bool) -> None:
         """Wired into PresenceService as transition_handler. Fans out

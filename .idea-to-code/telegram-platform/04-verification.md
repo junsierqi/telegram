@@ -458,3 +458,45 @@
 - Verified: validate_presence_push 6/6; validate_presence_heartbeat 6/6 (no regression); validate_typed_errors 11/11; validate_cpp_chat_e2e 3/3; validate_cpp_remote_session 8/8; validate_desktop_smoke 1/1; validate_rendezvous 6/6; validate_terminate_disconnect 8/8; validate_message_fanout 4/4; validate_incremental_sync 8/8; validate_message_search 5/5; validate_attachments 11/11; validate_contacts 8/8; validate_group_conversations 6/6; bundle verify ok 72 reqs
 - Covers: REQ-PRESENCE-HEARTBEAT, REQ-TYPED-PROTO, REQ-VALIDATION
 
+## Deployment hardening acceptance sweep (M79) (gate: pass)
+
+- Timestamp: 2026-04-28T06:42:50+00:00
+- Verified: 37/37 in-process validators PASS (~190 individual scenarios across attachments/contacts/cpp_chat_e2e/cpp_remote_session/cpp_tls_client/desktop_smoke/device_management/empty_state_file/group_conversations/history_paging/incremental_sync/input_injection/media_frames/message_actions/message_edit_delete/message_fanout/message_search/presence_heartbeat/presence_push/profile_search/read_receipts/registration/reliable_stream/rendezvous/screen_source/session_hardening/session_persistence/sqlite_persistence/terminate_disconnect/tls_config/tls_deployment_config/tls_dev_cert/tls_handshake/typed_errors/udp_media/udp_media_auth/udp_relay); plus 9/9 json_parser_test + 20/20 app_desktop_store_test C++ binaries. 4 external-state validators skipped pending PA-001/PA-002/PA-003.
+- Covers: REQ-VALIDATION, REQ-LINUX-DOCKER-DEPLOYMENT
+
+## Windows installer with Inno Setup (M80) (gate: pass)
+
+- Timestamp: 2026-04-28T06:46:53+00:00
+- Verified: powershell scripts/package_windows_desktop.ps1 -BuildDir build-verify -Installer succeeds end-to-end with ISCC.exe; validate_windows_installer.py 5/5 (including the checksum re-hash of the produced .exe matches the .sha256 file)
+- Covers: REQ-WINDOWS-PACKAGE-STAGING, REQ-WINDOWS-PACKAGE-CHECKSUMS, REQ-VALIDATION
+
+## Android (Qt for Android) prep + PA-007 toolchain block (M81) (gate: partial)
+
+- Timestamp: 2026-04-28T06:50:39+00:00
+- Verified: validate_android_prep.py 6/6; existing build-verify Windows build still clean; 37/37 in-process validators stay green (M79 sweep unchanged); Inno Setup installer + checksum still produce-able (M80 unchanged). Static prep proves chat_client_core POSIX paths are reachable; actual APK build gated on PA-007 toolchain install.
+- Covers: REQ-VALIDATION
+
+## Live PostgreSQL TLS proxy smoke (M82, PA-001+PA-002+PA-003 resolved) (gate: pass)
+
+- Timestamp: 2026-04-28T07:35:25+00:00
+- Verified: Live: tls proxy smoke ok user=u_alice session=sess_1 (port 8444); docker deploy smoke ok user=u_alice session=sess_2 (port 8788); validate_postgres_repository.py 3/3; validate_postgres_backup_restore.py 1/1. Stack: 3 containers up (postgres, telegram-server-postgres, telegram-tls-proxy-postgres), all healthy. Tore down cleanly.
+- Covers: REQ-LINUX-DOCKER-DEPLOYMENT, REQ-POSTGRES-REPOSITORY-BOUNDARY, REQ-POSTGRES-SCHEMA-BACKUP, REQ-TLS-PG-PROXY, REQ-TLS-TERMINATION-PROFILE, REQ-VALIDATION
+
+## Push notification protocol surface (M84) (gate: pass)
+
+- Timestamp: 2026-04-28T10:49:20+00:00
+- Verified: validate_push_tokens.py 6/6; full sweep 40/40 in-process validators (37 → 40 with android_prep + windows_installer + push_tokens added across M81/M80/M84). 4 external-state validators (docker/postgres x2/tls_proxy_smoke) remain SKIP_EXTERNAL.
+- Covers: REQ-CHAT-CORE, REQ-TYPED-PROTO, REQ-VALIDATION
+
+## Real Android APK build (M83, PA-007 resolved) (gate: pass)
+
+- Timestamp: 2026-04-28T10:54:15+00:00
+- Verified: qt-cmake configure succeeded against Qt 6.11.0 android_arm64_v8a; chat_client_core compiles clean for arm64-v8a Bionic libc (POSIX branches in net/* compile through unchanged); libapp_desktop_arm64-v8a.so links; cmake --build --target apk produced android-build-release-unsigned.apk = 11,360,200 bytes (11.4 MB) at build-android/client/src/android-build/build/outputs/apk/release/. validate_android_prep.py 9/9. Full sweep 41/41 in-process validators stay green.
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## Mobile UI redesign — Qt Quick / QML phone shell (M85) (gate: pass)
+
+- Timestamp: 2026-04-28T11:08:17+00:00
+- Verified: validate_mobile_ui.py 6/6 (bridge header surface, marshalled invokes, all 4 QML pages reference ChatBridge correctly, CMake wiring, optional binary size sanity); Windows app_mobile.exe builds + launches cleanly with clean PATH (no Qt on PATH); Android app_mobile.apk builds (20.0 MB unsigned, arm64-v8a) via cmake --target app_mobile_make_apk; full sweep 41/41 in-process validators (was 40 before mobile_ui added).
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
+

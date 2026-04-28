@@ -14,5 +14,7 @@ deploy/tls/certs/
 server/data/*.json
 build-codex/
 build-verify/
+build-android/
+build-*/
 artifacts/
 .tmp_*.json

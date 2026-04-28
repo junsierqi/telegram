@@ -81,6 +81,19 @@ class AttachmentRecord:
     storage_key: str = ""
 
 
+@dataclass(slots=True)
+class PushTokenRecord:
+    """Mobile push registration: maps (user_id, device_id) to a platform-issued
+    token (FCM/APNs/WNS). The server uses these to wake mobile clients when
+    their TCP control plane is offline. Persisted in-memory for now; future
+    work can add SQLite/Postgres rows alongside SessionRecord."""
+    user_id: str
+    device_id: str
+    platform: str
+    token: str
+    registered_at_ms: int = 0
+
+
 class InMemoryState:
     def __init__(
         self,
@@ -136,6 +149,11 @@ class InMemoryState:
         self.remote_sessions: dict[str, RemoteSessionRecord] = {}
         self.contacts: dict[str, list[str]] = {}
         self.attachments: dict[str, AttachmentRecord] = {}
+        # Push tokens are kept in a flat list because (user_id, device_id) can
+        # have multiple tokens (e.g., FCM rotates tokens) and we want fan-out
+        # to be O(N) anyway. Not persisted to JSON/SQLite/PG yet — see M84
+        # checkpoint and PA-008 in 08-atlas-task-library.md.
+        self.push_tokens: list[PushTokenRecord] = []
         self._load_runtime_state()
 
     @property

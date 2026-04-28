@@ -47,17 +47,39 @@ target_link_libraries(app_chat
         chat_client_core
 )
 
-find_package(Qt6 QUIET COMPONENTS Widgets)
+find_package(Qt6 QUIET COMPONENTS Widgets Quick QuickControls2 Qml)
 if(Qt6_FOUND)
-    add_executable(app_desktop
-        app_desktop/main.cpp
-    )
+    # qt_add_executable is the modern Qt 6 API that knows how to package the
+    # binary differently per platform (plain .exe on Windows, .so wrapped in
+    # an APK on Android). Falls back to add_executable on older Qt builds.
+    if(COMMAND qt_add_executable)
+        qt_add_executable(app_desktop
+            app_desktop/main.cpp
+        )
+    else()
+        add_executable(app_desktop
+            app_desktop/main.cpp
+        )
+    endif()
 
     target_link_libraries(app_desktop
         PRIVATE
             chat_client_core
             Qt6::Widgets
     )
+
+    # Android-specific packaging: point at deploy/android/ so the
+    # AndroidManifest.xml lives where Qt for Android expects.
+    if(ANDROID)
+        set_target_properties(app_desktop PROPERTIES
+            QT_ANDROID_PACKAGE_SOURCE_DIR
+                "${PROJECT_SOURCE_DIR}/deploy/android"
+            QT_ANDROID_MIN_SDK_VERSION 26
+            QT_ANDROID_TARGET_SDK_VERSION 33
+            QT_ANDROID_VERSION_NAME "0.1.0-dev"
+            QT_ANDROID_VERSION_CODE 1
+        )
+    endif()
 
     if(MSVC)
         target_compile_options(app_desktop PRIVATE /W4 /permissive-)
@@ -90,6 +112,69 @@ if(Qt6_FOUND)
         else()
             message(STATUS "windeployqt not found; double-click launch will require Qt bin on PATH")
         endif()
+    endif()
+
+    # ---- app_mobile (Qt Quick / QML, phone-shaped UI) ----
+    if(TARGET Qt6::Quick AND TARGET Qt6::QuickControls2)
+        qt_add_executable(app_mobile
+            app_mobile/main.cpp
+            app_mobile/mobile_chat_bridge.cpp
+            app_mobile/mobile_chat_bridge.h
+        )
+        # AUTOMOC is required for the Q_OBJECT / QML_ELEMENT / Q_INVOKABLE
+        # plumbing in mobile_chat_bridge.h; CMake's qt6_extract_metatypes
+        # explicitly errors if it's off.
+        set_target_properties(app_mobile PROPERTIES
+            AUTOMOC ON
+            AUTORCC ON
+        )
+        qt_policy(SET QTP0001 NEW)
+        qt_add_qml_module(app_mobile
+            URI TelegramLikeMobile
+            VERSION 1.0
+            QML_FILES
+                app_mobile/qml/Main.qml
+                app_mobile/qml/LoginPage.qml
+                app_mobile/qml/ChatListPage.qml
+                app_mobile/qml/ChatPage.qml
+        )
+        target_link_libraries(app_mobile
+            PRIVATE
+                chat_client_core
+                Qt6::Qml
+                Qt6::Quick
+                Qt6::QuickControls2
+        )
+        target_include_directories(app_mobile PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_CURRENT_SOURCE_DIR}/app_mobile  # so the qmltyperegistrations.cpp autogen finds <mobile_chat_bridge.h>
+        )
+
+        if(ANDROID)
+            set_target_properties(app_mobile PROPERTIES
+                QT_ANDROID_PACKAGE_SOURCE_DIR
+                    "${PROJECT_SOURCE_DIR}/deploy/android"
+                QT_ANDROID_MIN_SDK_VERSION 26
+                QT_ANDROID_TARGET_SDK_VERSION 33
+                QT_ANDROID_VERSION_NAME "0.1.0-dev"
+                QT_ANDROID_VERSION_CODE 1
+            )
+        endif()
+
+        if(WIN32 AND NOT TELEGRAM_LIKE_SKIP_WINDEPLOYQT AND TELEGRAM_LIKE_WINDEPLOYQT)
+            add_custom_command(TARGET app_mobile POST_BUILD
+                COMMAND "${TELEGRAM_LIKE_WINDEPLOYQT}"
+                        --no-translations
+                        --no-system-d3d-compiler
+                        --no-opengl-sw
+                        --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/app_mobile/qml"
+                        "$<TARGET_FILE:app_mobile>"
+                COMMENT "Deploying Qt Quick runtime next to app_mobile.exe"
+                VERBATIM
+            )
+        endif()
+    else()
+        message(STATUS "Qt6 Quick / QuickControls2 not found; app_mobile target disabled")
     endif()
 else()
     message(STATUS "Qt6 Widgets not found; app_desktop target disabled")

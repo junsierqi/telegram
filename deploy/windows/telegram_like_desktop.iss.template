@@ -1,0 +1,69 @@
+; Inno Setup script template for the telegram-like desktop installer.
+;
+; Variables (substituted by scripts/package_windows_desktop.ps1):
+;   {APP_VERSION}        - human version string (e.g. 0.1.0-dev)
+;   {APP_PUBLISHER}      - publisher name
+;   {APP_URL}            - support URL (placeholder until a real site)
+;   {SOURCE_STAGE_DIR}   - path to the staged build output (the dir
+;                          windeployqt + chat_client_core executables sit in)
+;   {OUTPUT_BASE_NAME}   - installer filename without extension
+;   {OUTPUT_DIR}         - where to drop the .exe installer
+;
+; Run with: ISCC.exe deploy/windows/telegram_like_desktop.iss
+; Or, more commonly, via scripts/package_windows_desktop.ps1 -Installer.
+
+#define MyAppName "Telegram-like Desktop"
+#define MyAppVersion "{APP_VERSION}"
+#define MyAppPublisher "{APP_PUBLISHER}"
+#define MyAppURL "{APP_URL}"
+#define MyAppExeName "app_desktop.exe"
+#define MySourceDir "{SOURCE_STAGE_DIR}"
+#define MyOutputDir "{OUTPUT_DIR}"
+#define MyOutputBaseName "{OUTPUT_BASE_NAME}"
+
+[Setup]
+; AppId: stable GUID so updates upgrade in place. Generated once for this
+; project; changing it would treat the installer as a new product.
+AppId={{8A7F4B6A-4E3C-4B2A-A1D7-7C8F2C8B1F4E}}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppPublisherURL={#MyAppURL}
+DefaultDirName={autopf}\TelegramLikeDesktop
+DefaultGroupName=Telegram-like Desktop
+DisableProgramGroupPage=yes
+OutputDir={#MyOutputDir}
+OutputBaseFilename={#MyOutputBaseName}
+Compression=lzma
+SolidCompression=yes
+ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64
+WizardStyle=modern
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=dialog
+; SignTool=signtool sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com $f
+;   ^ uncomment + supply the cert via signtool's machine config when a
+;     real Authenticode certificate is available (PA-005 in 08-atlas-task-library).
+
+[Languages]
+; Only English ships with the Inno Setup base install. To add other
+; languages download the .isl from jrsoftware.org/files/istrans/ into
+; "C:\Program Files (x86)\Inno Setup 6\Languages\" then add another
+; Name: line here.
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[Files]
+; Pull the entire staged tree (executables, Qt DLLs deployed by windeployqt,
+; platforms/, tls/, imageformats/, etc.) recursively.
+Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+
+[Icons]
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}"; Flags: nowait postinstall skipifsilent
