@@ -25,6 +25,40 @@ from .attachment_store import AttachmentBlobStore
 MAX_ATTACHMENT_SIZE_BYTES = 1_048_576  # 1 MB
 MAX_CONVERSATION_CHANGES = 512
 
+# Chunked upload tunables (M88).
+DEFAULT_CHUNK_SIZE_BYTES = 1_048_576       # 1 MB suggested chunk
+MAX_CHUNKED_UPLOAD_BYTES = 64 * 1_048_576  # 64 MB hard cap per upload
+MAX_ACTIVE_UPLOADS_PER_USER = 8
+# Server-wide cap so a 1000-user system can't OOM on 8000 concurrent
+# in-memory upload buffers. Hits before MAX_ACTIVE_UPLOADS_PER_USER for
+# users beyond ~125 concurrent uploaders. Operators can lift this once the
+# blob store gains a streaming write path.
+MAX_ACTIVE_UPLOADS_TOTAL = 256
+
+
+class _UploadSession:
+    """Per-upload state held in memory while the client streams chunks.
+
+    Lives only inside ChatService; not persisted. If the server restarts
+    mid-upload the client must restart from init — the same as Telegram's
+    own upload contract.
+    """
+    __slots__ = (
+        "upload_id", "user_id", "conversation_id", "filename", "mime_type",
+        "total_size_bytes", "next_sequence", "buffer",
+    )
+
+    def __init__(self, upload_id: str, user_id: str, conversation_id: str,
+                 filename: str, mime_type: str, total_size_bytes: int) -> None:
+        self.upload_id = upload_id
+        self.user_id = user_id
+        self.conversation_id = conversation_id
+        self.filename = filename
+        self.mime_type = mime_type
+        self.total_size_bytes = total_size_bytes
+        self.next_sequence = 0
+        self.buffer = bytearray()
+
 
 class ChatService:
     def __init__(self, state: InMemoryState, attachment_store: AttachmentBlobStore | None = None) -> None:
@@ -33,6 +67,8 @@ class ChatService:
         self._message_counter = self._next_message_counter()
         self._conversation_counter = self._next_conversation_counter()
         self._attachment_counter = self._next_attachment_counter()
+        self._upload_counter = 0
+        self._uploads: dict[str, _UploadSession] = {}
 
     def describe(self) -> str:
         return "chat service ready for conversation membership, message persistence and fan-out"
@@ -122,6 +158,130 @@ class ChatService:
             text=text,
             created_at_ms=int(message["created_at_ms"]),
             reply_to_message_id=reply_to_message_id,
+        )
+
+    # ---- chunked upload (M88) ----
+
+    def init_upload(
+        self,
+        *,
+        conversation_id: str,
+        user_id: str,
+        filename: str,
+        mime_type: str,
+        total_size_bytes: int,
+    ) -> tuple[str, int]:
+        self._require_participant(conversation_id, user_id)
+        if not filename.strip():
+            raise ServiceError(ErrorCode.INVALID_ATTACHMENT_PAYLOAD)
+        if total_size_bytes <= 0:
+            raise ServiceError(ErrorCode.INVALID_ATTACHMENT_PAYLOAD)
+        if total_size_bytes > MAX_CHUNKED_UPLOAD_BYTES:
+            raise ServiceError(ErrorCode.UPLOAD_TOO_LARGE)
+        if len(self._uploads) >= MAX_ACTIVE_UPLOADS_TOTAL:
+            raise ServiceError(ErrorCode.UPLOAD_LIMIT_REACHED)
+        active = sum(1 for s in self._uploads.values() if s.user_id == user_id)
+        if active >= MAX_ACTIVE_UPLOADS_PER_USER:
+            raise ServiceError(ErrorCode.UPLOAD_LIMIT_REACHED)
+        self._upload_counter += 1
+        upload_id = f"upl_{self._upload_counter}"
+        self._uploads[upload_id] = _UploadSession(
+            upload_id=upload_id,
+            user_id=user_id,
+            conversation_id=conversation_id,
+            filename=filename,
+            mime_type=mime_type or "application/octet-stream",
+            total_size_bytes=total_size_bytes,
+        )
+        return upload_id, DEFAULT_CHUNK_SIZE_BYTES
+
+    def accept_upload_chunk(
+        self,
+        *,
+        upload_id: str,
+        user_id: str,
+        sequence: int,
+        content_b64: str,
+    ) -> int:
+        session = self._uploads.get(upload_id)
+        if session is None or session.user_id != user_id:
+            raise ServiceError(ErrorCode.UNKNOWN_UPLOAD)
+        if sequence != session.next_sequence:
+            raise ServiceError(ErrorCode.UPLOAD_CHUNK_OUT_OF_ORDER)
+        if not content_b64:
+            # Empty body would silently no-op and force the client to
+            # eventually trip UPLOAD_SIZE_MISMATCH at complete time. Reject
+            # up-front so the client gets a useful, immediate error.
+            raise ServiceError(ErrorCode.INVALID_ATTACHMENT_PAYLOAD)
+        try:
+            chunk = base64.b64decode(content_b64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ServiceError(ErrorCode.INVALID_ATTACHMENT_PAYLOAD) from exc
+        if len(session.buffer) + len(chunk) > session.total_size_bytes:
+            # Refuse to over-fill the declared size; the upload as a whole
+            # would fail UPLOAD_SIZE_MISMATCH on complete anyway.
+            raise ServiceError(ErrorCode.UPLOAD_SIZE_MISMATCH)
+        session.buffer.extend(chunk)
+        session.next_sequence += 1
+        return len(session.buffer)
+
+    def complete_upload(
+        self,
+        *,
+        upload_id: str,
+        user_id: str,
+        caption: str,
+    ) -> MessageDeliverPayload:
+        session = self._uploads.get(upload_id)
+        if session is None or session.user_id != user_id:
+            raise ServiceError(ErrorCode.UNKNOWN_UPLOAD)
+        if len(session.buffer) != session.total_size_bytes:
+            # Tear down the session — client must restart from init.
+            self._uploads.pop(upload_id, None)
+            raise ServiceError(ErrorCode.UPLOAD_SIZE_MISMATCH)
+
+        # Same persistence path as the small-file send_attachment_message:
+        # write through the blob store when it has a backing root, otherwise
+        # keep the bytes inline so fetch_attachment can still serve them.
+        decoded = bytes(session.buffer)
+        attachment_id = f"att_{self._attachment_counter}"
+        self._attachment_counter += 1
+        storage_key = self._attachment_store.put(attachment_id, decoded)
+        inline_b64 = "" if storage_key else base64.b64encode(decoded).decode("ascii")
+        self._state.attachments[attachment_id] = AttachmentRecord(
+            attachment_id=attachment_id,
+            conversation_id=session.conversation_id,
+            uploader_user_id=user_id,
+            filename=session.filename,
+            mime_type=session.mime_type,
+            size_bytes=session.total_size_bytes,
+            content_b64=inline_b64,
+            storage_key=storage_key,
+        )
+        message_id = f"msg_{self._message_counter}"
+        self._message_counter += 1
+        message = {
+            "message_id": message_id,
+            "sender_user_id": user_id,
+            "text": caption,
+            "attachment_id": attachment_id,
+            "created_at_ms": self._now_ms(),
+        }
+        conversation = self._require_participant(session.conversation_id, user_id)
+        conversation.messages.append(message)
+        self._state.save_runtime_state()
+        # Session served its purpose; release memory.
+        self._uploads.pop(upload_id, None)
+        return MessageDeliverPayload(
+            conversation_id=session.conversation_id,
+            message_id=message_id,
+            sender_user_id=user_id,
+            text=caption,
+            created_at_ms=int(message["created_at_ms"]),
+            attachment_id=attachment_id,
+            filename=session.filename,
+            mime_type=session.mime_type,
+            size_bytes=session.total_size_bytes,
         )
 
     def send_attachment_message(

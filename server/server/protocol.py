@@ -58,6 +58,11 @@ class ErrorCode(StrEnum):
     INVALID_ATTACHMENT_PAYLOAD = "invalid_attachment_payload"
     UNKNOWN_ATTACHMENT = "unknown_attachment"
     ATTACHMENT_ACCESS_DENIED = "attachment_access_denied"
+    UNKNOWN_UPLOAD = "unknown_upload"
+    UPLOAD_TOO_LARGE = "upload_too_large"
+    UPLOAD_CHUNK_OUT_OF_ORDER = "upload_chunk_out_of_order"
+    UPLOAD_SIZE_MISMATCH = "upload_size_mismatch"
+    UPLOAD_LIMIT_REACHED = "upload_limit_reached"
 
 
 _ERROR_MESSAGES: dict[ErrorCode, str] = {
@@ -108,6 +113,11 @@ _ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.INVALID_ATTACHMENT_PAYLOAD: "Attachment payload is missing fields or malformed.",
     ErrorCode.UNKNOWN_ATTACHMENT: "No attachment matches that id.",
     ErrorCode.ATTACHMENT_ACCESS_DENIED: "You are not a participant of the attachment's conversation.",
+    ErrorCode.UNKNOWN_UPLOAD: "No active upload session matches that id.",
+    ErrorCode.UPLOAD_TOO_LARGE: "Upload exceeds the maximum allowed total size.",
+    ErrorCode.UPLOAD_CHUNK_OUT_OF_ORDER: "Upload chunks must arrive in monotonically increasing sequence.",
+    ErrorCode.UPLOAD_SIZE_MISMATCH: "Stitched chunk total does not match the declared upload size.",
+    ErrorCode.UPLOAD_LIMIT_REACHED: "Maximum concurrent uploads per user reached.",
 }
 
 
@@ -191,6 +201,13 @@ class MessageType(StrEnum):
     PUSH_TOKEN_LIST_REQUEST = "push_token_list_request"
     PUSH_TOKEN_LIST_RESPONSE = "push_token_list_response"
     PUSH_TOKEN_ACK = "push_token_ack"
+    # Chunked attachment upload (M88) — for files >1 MB the small-file
+    # MESSAGE_SEND_ATTACHMENT path is bypassed in favour of init/chunk/complete.
+    ATTACHMENT_UPLOAD_INIT_REQUEST = "attachment_upload_init_request"
+    ATTACHMENT_UPLOAD_INIT_RESPONSE = "attachment_upload_init_response"
+    ATTACHMENT_UPLOAD_CHUNK_REQUEST = "attachment_upload_chunk_request"
+    ATTACHMENT_UPLOAD_CHUNK_ACK = "attachment_upload_chunk_ack"
+    ATTACHMENT_UPLOAD_COMPLETE_REQUEST = "attachment_upload_complete_request"
     ERROR = "error"
 
 
@@ -737,6 +754,42 @@ class PushTokenListResponsePayload:
 
 
 @dataclass(slots=True)
+class AttachmentUploadInitRequestPayload:
+    """Begin a chunked upload. The 1 MB inline send-attachment path is still
+    fast for small files; this path lifts the cap up to 64 MB by streaming."""
+    conversation_id: str
+    filename: str
+    mime_type: str
+    total_size_bytes: int
+
+
+@dataclass(slots=True)
+class AttachmentUploadInitResponsePayload:
+    upload_id: str
+    chunk_size: int  # server-suggested max chunk byte size for the client
+
+
+@dataclass(slots=True)
+class AttachmentUploadChunkRequestPayload:
+    upload_id: str
+    sequence: int      # 0-based monotonic chunk index
+    content_b64: str
+
+
+@dataclass(slots=True)
+class AttachmentUploadChunkAckPayload:
+    upload_id: str
+    sequence: int
+    received_bytes: int  # cumulative bytes received so far
+
+
+@dataclass(slots=True)
+class AttachmentUploadCompleteRequestPayload:
+    upload_id: str
+    caption: str = ""
+
+
+@dataclass(slots=True)
 class PresenceUpdatePayload:
     """Pushed to peers (anyone sharing a conversation) when a user's online
     state transitions. Subscribers update their local presence cache without
@@ -957,6 +1010,24 @@ def parse_request_payload(message_type: MessageType, payload: dict[str, Any]) ->
         )
     if message_type == MessageType.PUSH_TOKEN_LIST_REQUEST:
         return {}
+    if message_type == MessageType.ATTACHMENT_UPLOAD_INIT_REQUEST:
+        return AttachmentUploadInitRequestPayload(
+            conversation_id=payload.get("conversation_id", ""),
+            filename=payload.get("filename", ""),
+            mime_type=payload.get("mime_type", ""),
+            total_size_bytes=int(payload.get("total_size_bytes", 0)),
+        )
+    if message_type == MessageType.ATTACHMENT_UPLOAD_CHUNK_REQUEST:
+        return AttachmentUploadChunkRequestPayload(
+            upload_id=payload.get("upload_id", ""),
+            sequence=int(payload.get("sequence", 0)),
+            content_b64=payload.get("content_b64", ""),
+        )
+    if message_type == MessageType.ATTACHMENT_UPLOAD_COMPLETE_REQUEST:
+        return AttachmentUploadCompleteRequestPayload(
+            upload_id=payload.get("upload_id", ""),
+            caption=payload.get("caption", ""),
+        )
     return payload
 
 

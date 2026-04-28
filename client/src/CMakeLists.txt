@@ -128,7 +128,11 @@ if(Qt6_FOUND)
             AUTOMOC ON
             AUTORCC ON
         )
-        qt_policy(SET QTP0001 NEW)
+        # qt_policy was added in Qt 6.5. Older Qt (e.g. Ubuntu 24.04 ships 6.4.2)
+        # falls back to the default ':/qt/qml/' resource prefix without it.
+        if(COMMAND qt_policy)
+            qt_policy(SET QTP0001 NEW)
+        endif()
         qt_add_qml_module(app_mobile
             URI TelegramLikeMobile
             VERSION 1.0

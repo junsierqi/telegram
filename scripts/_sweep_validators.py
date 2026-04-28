@@ -3,6 +3,9 @@
 Usage: python scripts/_sweep_validators.py
 Skips validators that require external services (Docker, PostgreSQL, live
 TLS proxy) — those are tracked as Pending Actions in 08-atlas-task-library.
+Also skips validators whose backing C++ binary isn't built on this host
+(useful for Linux CI where only chat_client_core + non-Qt test exes ship
+without Qt).
 """
 from __future__ import annotations
 
@@ -21,6 +24,34 @@ EXTERNAL_ONLY = {
     "validate_tls_proxy_smoke.py",
 }
 
+# Validator -> list of binary stems (any one present is enough) that must
+# exist somewhere under build-*/client/src/{Debug,Release,}/ for the
+# validator to be runnable.
+NEEDS_BINARY = {
+    "validate_cpp_chat_e2e.py":         ["app_chat"],
+    "validate_cpp_tls_client.py":       ["app_chat"],
+    "validate_cpp_remote_session.py":   ["remote_session_smoke"],
+    "validate_desktop_smoke.py":        ["app_desktop"],
+    "validate_windows_installer.py":    [],   # static; built artifact optional
+}
+
+
+def _has_built_binary(stem: str) -> bool:
+    """True if any build-* directory contains <stem>(.exe)? somewhere under
+    client/src/. Walks build-verify, build-codex, build, build-linux, build-android."""
+    candidates = [
+        f"client/src/{cfg}/{stem}{ext}"
+        for cfg in ("", "Debug", "Release")
+        for ext in ("", ".exe")
+    ]
+    for build_root in REPO.glob("build*"):
+        if not build_root.is_dir():
+            continue
+        for rel in candidates:
+            if (build_root / rel).exists():
+                return True
+    return False
+
 env = os.environ.copy()
 env["PATH"] = r"C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
 
@@ -38,6 +69,12 @@ for path in scripts:
         print(f"[--] {name:46s} SKIP_EXTERNAL")
         skipped += 1
         continue
+    needed = NEEDS_BINARY.get(name)
+    if needed:
+        if not any(_has_built_binary(stem) for stem in needed):
+            print(f"[--] {name:46s} SKIP_NO_BINARY ({', '.join(needed)})")
+            skipped += 1
+            continue
     try:
         r = subprocess.run(
             [sys.executable, path],

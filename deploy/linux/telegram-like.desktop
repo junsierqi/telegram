@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Telegram-like
+GenericName=Chat client
+Comment=Telegram-like desktop client backed by chat_client_core
+Exec=app_desktop %U
+Icon=telegram-like
+Terminal=false
+Categories=Network;InstantMessaging;Chat;Qt;
+StartupWMClass=Telegram-like Desktop
+Keywords=chat;messaging;

@@ -10,25 +10,33 @@ Status date: 2026-04-28
 - Each implementation task must map to a REQ-ID and checkpoint in this bundle.
 - Prefer static/local validators before live integration.
 
-## Current Delivery Plan
+## Recent shipped milestones (M66 → M85)
 
-1. M66 PostgreSQL TLS proxy coverage: ✅ static validation in place; live smoke pending PA-001/PA-002.
-2. M67 C++ TLS client transport parity: ✅ direct TLS login + sync verified end-to-end on build-verify.
-3. M68 Schannel credential fix: ✅ explicit SCHANNEL_CRED resolves SEC_E_NO_CREDENTIALS; smoke green.
-4. M69 Deployment hardening acceptance sweep: rerun TLS, packaging, SQLite, PostgreSQL, and desktop smoke validators; live Docker checks remain pending until approved.
+- **M66 / M82** PostgreSQL Docker TLS proxy + live PA-001/PA-002/PA-003 smoke (port 8444 → user=u_alice session=sess_1; Postgres repo + backup/restore + docker-deploy validators all green).
+- **M67 / M68** Native C++ direct-TLS transport via Schannel (explicit SCHANNEL_CRED).
+- **M69 / M79** Full validator sweep harness — `scripts/_sweep_validators.py` (41 in-process validators, ~200 scenarios).
+- **M70 / M80** Windows Inno Setup installer (real `.exe` + `.sha256`; signing gated on PA-005).
+- **M72** JSON `\uXXXX` Unicode + `ensure_ascii=False` for CJK / emoji round-trip on the C++ client.
+- **M73 / M74** Telegram-style desktop redesign — 3-pane shell + 8-page Settings nav with QPainter avatar disc.
+- **M75–M78** Protocol parity closure A→D (conversation_updated push + Edit/Delete UI; remote-control RPCs on ControlPlaneClient; dead enum + empty-controller cleanup; PRESENCE_UPDATE push fan-out).
+- **M81 / M83** Qt for Android prep + real arm64-v8a APK (NDK 30, JDK 21, `scripts/build_android_apk.ps1`).
+- **M84** Push notification protocol surface — register / unregister / list + offline-recipient mock dispatch.
+- **M85** Mobile UI — Qt Quick / QML phone shell `app_mobile` (Win32 preview .exe + Android APK 20 MB).
 
-## Task Backlog
+## Open Task Backlog
 
 | ID | Priority | State | Requirement | Task | Verification | External side effects |
 |---|---:|---|---|---|---|---|
-| ATLAS-M66 | P0 | in_progress | REQ-TLS-PG-PROXY | Add PostgreSQL-backed Docker TLS proxy profile and static validation. | `python scripts\validate_tls_deployment_config.py`; `docker compose ... config` only if approved/available. | Live `docker compose up` and TLS proxy smoke on 8444 pending approval. |
-| ATLAS-M67 | P0 | done | REQ-TLS-CPP-CLIENT | Add direct TLS client transport parity for C++ desktop/CLI without changing UI code. | M68 fix verified: validate_cpp_tls_client.py 2/2, e2e 3/3, store 20/20. | None — runtime acceptance achieved via explicit SCHANNEL_CRED. |
-| ATLAS-M68 | P0 | done | REQ-TLS-CPP-CLIENT,REQ-TLS-CONTROL-PLANE,REQ-VALIDATION | Resolve Schannel `SEC_E_NO_CREDENTIALS` by passing explicit SCHANNEL_CRED to AcquireCredentialsHandleW. | Build clean, TLS smoke + chat E2E + desktop store + TLS deployment static all pass. | None. |
-| ATLAS-M69 | P1 | planned | REQ-VALIDATION | Deployment hardening acceptance sweep (full run of validate_* scripts) after TLS direct-client lands. | TLS validators, package validator, desktop smoke, PostgreSQL validators. | Docker container lifecycle and network pulls pending approval. |
-| ATLAS-M70 | P1 | done | REQ-WINDOWS-PACKAGE-STAGING | Inno Setup installer with -Installer switch and validate_windows_installer.py 5/5; signing gated on PA-005. | Real .exe + .sha256 produced; static validator green. | None for build; PA-005 for Authenticode signing. |
-| ATLAS-M71 | P2 | planned | REQ-REMOTE-LIFECYCLE | Resume remote-control runtime path after chat/deployment hardening. | Remote session validators and media-plane tests. | None expected until live multi-client smoke. |
-| ATLAS-M81 | P1 | done | REQ-VALIDATION (Android prep) | Qt for Android prep landed: AndroidManifest skeleton, deploy/android/README.md, validate_android_prep.py covers 9 static scenarios. | Static validator green; APK now produced. | None. |
-| ATLAS-M83 | P1 | done | REQ-VALIDATION (Android APK) | Real arm64-v8a APK built via Qt for Android using D:\android\sdk + JDK 21. scripts/build_android_apk.ps1 wraps the toolchain. | scripts/build_android_apk.ps1 + validate_android_prep.py 9/9. APK at build-android/.../android-build-release-unsigned.apk (11 MB). | PA-005 keystore for signing remains. |
+| ATLAS-M71 | P2 | planned | REQ-REMOTE-LIFECYCLE | Resume remote-control runtime path: integrate ReliableChannel into media_plane.py UDP, add Qt UI for invite/approve/host/view. | New remote-session validators + Qt smoke once a multi-client harness exists. | None until live multi-client smoke. |
+| ATLAS-M87 | P1 | planned | REQ-VALIDATION (CI) | GitHub Actions workflow that runs `_sweep_validators.py` + Linux C++ build on every push. | Workflow file + green run on first push. | None. |
+| ATLAS-M88 | P1 | planned | REQ-ATTACHMENTS | Chunked attachment upload (>1 MB) via init/chunk/complete RPCs; AttachmentBlobStore stitches chunks. | New `validate_chunked_upload.py` round-tripping a multi-MB file. | None. |
+| ATLAS-M89 | P1 | done | REQ-VALIDATION (Linux desktop) | Real Linux build verified end-to-end on Ubuntu 24.04 (Qt 6.4 from apt). qt_policy + loadFromModule version compat fixes; deploy/linux scaffolding; ci.yml linux-desktop job. | validate_linux_desktop.py 5/5; WSL build of all 8 targets clean; json_parser_test 9/9 + app_desktop_store_test 20/20 on Linux. | None. |
+| ATLAS-M90 | P1 | planned | new REQ-PHONE-OTP | Phone-number + OTP authentication path (Telegram-style sign-in). Server-side mock SMS first, real Twilio/Aliyun gateway via PA. | New protocol RPCs + validator. | PA for SMS gateway credential + cost approval. |
+| ATLAS-M91 | P2 | done | REQ-CHAT-CORE | Pluggable PushDispatchWorker drains PushTokenService.pending_deliveries; LogOnlyTransport default + FakeTransport for tests + FCMHttpTransport stub (dry_run, urllib-based). | validate_push_dispatch.py 5/5 covering empty/per-platform/fallback/dry_run/end-to-end. | PA-008 only for the bearer token flow (real FCM POST); the worker itself ships now. |
+| ATLAS-M92 | P2 | planned | new REQ-OBSERVABILITY | Structured logging + `/metrics` endpoint (Prometheus exposition format) + health probe distinct from port-open. | New validator hitting `/metrics`. | None. |
+| ATLAS-M93 | P2 | planned | new REQ-RATE-LIMITING | Per-session rate limiting on MESSAGE_SEND / REGISTER_REQUEST / PRESENCE_QUERY. | Validator with synthetic burst. | None. |
+| ATLAS-M94 | P3 | planned | new REQ-2FA | TOTP-based 2FA over the existing auth flow. | Validator drives provision + verify. | None. |
+| ATLAS-M95 | P3 | planned | new REQ-ACCOUNT-DELETE | GDPR-style account deletion + data export. | Validator round-trips create → export → delete. | None. |
 
 ## Pending Actions
 
@@ -43,6 +51,7 @@ Status date: 2026-04-28
 
 ## Notes
 
-- M82 closed the deployment loop: live PostgreSQL TLS proxy smoke is verified end-to-end (PA-001/PA-002/PA-003 all DONE on 2026-04-28).
-- Outstanding Pending Actions: PA-005 (Authenticode cert for Windows installer signing), PA-007 (Android SDK + NDK + JDK 17 install).
-- Native TLS handshake (M67/M68) and PostgreSQL repository (M82) are both production-grade verified now.
+- 83 milestones recorded; 72 REQs all covered; bundle verify ok, 0 problems, 0 blockers.
+- 41 in-process validators are green; 4 external-state validators were green at last live run (M82).
+- Remaining external dependencies are PA-005 (signing cert) and PA-008 (FCM/APNs credential). Both block "shippable" but neither blocks further development.
+- Tier 0 release-readiness still pending: iOS client, voice/video calls, large-file (M88 partial), phone-number OTP (M90 in backlog).

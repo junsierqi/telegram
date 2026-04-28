@@ -3,8 +3,8 @@
 ## Current Phase
 
 - Status: in_progress
-- Current focus: Mobile is no longer aspirational: same C++ codebase compiles + ships for Win32 desktop (Widgets), Win32 mobile preview (QtQuick), and Android arm64 APK (QtQuick). Three UI shells (app_chat CLI, app_desktop Widgets, app_mobile QML) all share the same chat_client_core protocol stack.
-- Next gate: Live mobile smoke / signing / FCM
+- Current focus: Push notification end-to-end is now real: server records intent, worker dispatches, transport sends. Real FCM POST is one credential away (PA-008).
+- Next gate: Pick next product gap
 
 ## Milestone History
 
@@ -677,5 +677,45 @@
 - Delivered: New app_mobile target: a Qt Quick / QML phone-shaped client built on top of the same chat_client_core. New global-namespace MobileChatBridge (mobile_chat_bridge.h/.cpp) is the QML facade exposing connectAndLogin/selectChat/sendMessage/conversationList/selectedMessages as Q_INVOKABLE plus identityChanged/storeChanged/connectedChanged/errorReported signals; threads RPCs off-UI with QMetaObject::invokeMethod marshalling and shutting_down_ guards (same shape as desktop). Four QML pages under client/src/app_mobile/qml/: Main.qml (StackView shell + Connections to nav between pages), LoginPage.qml (host/port/user/password/device form with Telegram-style avatar disc + accent-blue Connect button), ChatListPage.qml (conversation rows with deterministic-color initial avatars + unread badges, Telegram-blue header), ChatPage.qml (header with back button, message timeline with mint outgoing + white incoming bubbles + pending/failed states, rounded composer + circular blue Send). CMakeLists.txt wires qt_add_executable + qt_add_qml_module(URI TelegramLikeMobile) with AUTOMOC + qt_policy(SET QTP0001 NEW) + QT_ANDROID_* properties for mobile APK + windeployqt POST_BUILD with --qmldir for Windows preview.
 - Verified: validate_mobile_ui.py 6/6 (bridge header surface, marshalled invokes, all 4 QML pages reference ChatBridge correctly, CMake wiring, optional binary size sanity); Windows app_mobile.exe builds + launches cleanly with clean PATH (no Qt on PATH); Android app_mobile.apk builds (20.0 MB unsigned, arm64-v8a) via cmake --target app_mobile_make_apk; full sweep 41/41 in-process validators (was 40 before mobile_ui added).
 - Next: PA-008 real FCM/APNs HTTP transport / PA-005 Android keystore + Authenticode signing / device emulator install for live mobile UI smoke
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
+
+## Atlas task library cleanup (M86) (gate: pass)
+
+- Timestamp: 2026-04-28T12:00:15+00:00
+- Delivered: Rewrote 08-atlas-task-library.md: dropped the stale Current Delivery Plan list (M66-M68 wording), replaced with a Recent shipped milestones rollup (M66->M85), and recreated the Open Task Backlog as M71 (remote-control), M87 (CI), M88 (chunked upload), M89 (Linux/macOS desktop), M90 (phone OTP), M91 (real FCM transport), M92 (observability), M93 (rate limiting), M94 (2FA), M95 (account delete + export). Updated Notes to reflect 83 milestones / 72 REQs / 0 blockers and the two remaining external Pending Actions (PA-005 signing, PA-008 FCM credential).
+- Verified: manage_delivery_bundle verify ok, 72 reqs, 0 problems
+- Next: M87 CI/CD via GitHub Actions
+- Covers: REQ-VALIDATION
+
+## CI/CD via GitHub Actions (M87) (gate: pass)
+
+- Timestamp: 2026-04-28T12:11:03+00:00
+- Delivered: .github/workflows/ci.yml with 3 jobs: (1) validators — runs scripts/_sweep_validators.py on ubuntu-latest with python 3.12 + cryptography for the TLS dev cert helper; (2) linux-cpp — installs build-essential/cmake/ninja, configures CMake with TELEGRAM_LIKE_SKIP_WINDEPLOYQT=ON, builds the 6 portable targets (chat_client_core, telegram_like_client, app_chat, app_desktop_store_test, json_parser_test, remote_session_smoke) Qt-free, runs json_parser_test + app_desktop_store_test inline, then re-runs the validator sweep with the just-built binaries to pick up cpp_chat_e2e / cpp_remote_session / desktop_smoke; (3) bundle-verify — vendored minimal status.json invariant check (every REQ has a covering milestone, no fail gates, required artifact files exist). Concurrency group cancels in-progress runs of the same branch. scripts/_sweep_validators.py extended with NEEDS_BINARY map + _has_built_binary probe so C++-binary-dependent validators report SKIP_NO_BINARY (vs FAIL) when their .exe / ELF is absent — makes the sweep CI-portable. New scripts/validate_ci_workflow.py covers 7 static scenarios (workflow parses, 3 expected jobs, sweep invocation, portable C++ targets, inline test exe runs, concurrency declaration, sweep skip-no-binary plumbing).
+- Verified: ci.yml YAML parses; validate_ci_workflow.py 7/7; full sweep 42/42 in-process validators (added ci_workflow); bundle-verify inline script reads status.json correctly (72 reqs, 0 missing, 0 fail gates).
+- Next: M88 chunked attachment upload
+- Covers: REQ-VALIDATION
+
+## Chunked attachment upload (M88) (gate: pass)
+
+- Timestamp: 2026-04-28T12:19:34+00:00
+- Delivered: 5 new MessageType values: ATTACHMENT_UPLOAD_INIT_REQUEST/INIT_RESPONSE/CHUNK_REQUEST/CHUNK_ACK/COMPLETE_REQUEST. 5 new typed payloads in protocol.py + parse_request_payload coverage. 5 new ErrorCodes (UNKNOWN_UPLOAD/UPLOAD_TOO_LARGE/UPLOAD_CHUNK_OUT_OF_ORDER/UPLOAD_SIZE_MISMATCH/UPLOAD_LIMIT_REACHED) with human messages. Server services/chat.py gains _UploadSession state-machine class + ChatService.init_upload / accept_upload_chunk / complete_upload methods. complete_upload writes through AttachmentBlobStore when configured, falls back to inline base64 (same contract as send_attachment_message), then reuses the existing message_deliver fan-out path so receivers see chunked uploads identically to small-file inline uploads. Tunables: DEFAULT_CHUNK_SIZE_BYTES=1MB, MAX_CHUNKED_UPLOAD_BYTES=64MB, MAX_ACTIVE_UPLOADS_PER_USER=8. ServerApplication dispatches the 3 new RPCs with ServiceError → typed-error mapping; complete also runs _enqueue_mock_pushes_for_offline_recipients so push notifications flow on chunked sends too. New scripts/validate_chunked_upload.py covers 5 scenarios: 5MB round-trip with byte-exact fetch, >64MB rejected at init, out-of-order chunk rejected, short complete rejected, 9th concurrent upload rejected.
+- Verified: validate_chunked_upload.py 5/5; full sweep 43/43 in-process validators (added chunked_upload + ci_workflow this round); bundle verify ok 72 reqs 0 problems.
+- Next: Linux desktop port (M89), real FCM transport (M91/PA-008), or signing certs (PA-005)
+- Covers: REQ-ATTACHMENTS, REQ-CHAT-CORE, REQ-VALIDATION
+
+## Linux desktop build path (M89) (gate: pass)
+
+- Timestamp: 2026-04-28T12:42:21+00:00
+- Delivered: Real Linux build verified end-to-end on Ubuntu 24.04 (WSL2): apt-installed Qt 6.4.2 + qt6-declarative-dev + Qt Quick QML modules; cmake -GNinja Release configure clean; all 8 targets compile (chat_client_core, telegram_like_client, app_chat, app_desktop_store_test, json_parser_test, remote_session_smoke, app_desktop, app_mobile); json_parser_test 9/9 + app_desktop_store_test 20/20 run green on Linux x86_64. Two source-level Qt-version compatibility fixes: (1) client/src/CMakeLists.txt guards qt_policy(SET QTP0001 NEW) behind if(COMMAND qt_policy) since Qt 6.4 doesn't ship that command; (2) client/src/app_mobile/main.cpp falls back to engine.load(QUrl("qrc:/qt/qml/TelegramLikeMobile/Main.qml")) under #if QT_VERSION < 6.5.0 since loadFromModule is Qt 6.5+. New deploy/linux/README.md documents apt deps + cmake invocation + Qt-version notes; deploy/linux/telegram-like.desktop is an XDG launcher entry. ci.yml gains a linux-desktop job that installs the Qt apt packages and builds + tests the same set; existing validate_ci_workflow.py updated to expect 4 jobs. New scripts/validate_linux_desktop.py covers 5 static scenarios (README, .desktop XDG entry, qt_policy guard, app_mobile fallback, CI job presence).
+- Verified: validate_linux_desktop.py 5/5; validate_ci_workflow.py 7/7; full sweep 44/44 in-process validators (added linux_desktop). Real WSL Linux build: 8 targets compile, json_parser_test 9/9 + app_desktop_store_test 20/20 pass on Ubuntu 24.04. Bundle verify ok 72 reqs.
+- Next: M91 real FCM/APNs delivery worker
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## Push delivery worker with pluggable transports (M91) (gate: pass)
+
+- Timestamp: 2026-04-28T12:47:39+00:00
+- Delivered: New server/server/services/push_dispatch.py: PushDispatchWorker drains PushTokenService.pending_deliveries and routes batches per platform via a Transport protocol. Three concrete transports — FakeTransport (records calls, used by tests), LogOnlyTransport (writes one line per delivery to any stream — safe default with no creds), and FCMHttpTransport (FCM v1 message-send shape; uses stdlib urllib so no extra dependency; dry_run=True by default and forced True when bearer_token is empty so CI never accidentally hits Google). PushDispatchWorker.tick() returns a DeliveryReport with successful/failed splits so future retry logic has a hook. ServerApplication wires a default LogOnlyTransport-backed worker as self.push_dispatch_worker so the pieces are reachable from outside without further setup. New scripts/validate_push_dispatch.py covers 5 scenarios — empty queue no-op, per-platform routing (fcm batch=2 + apns batch=1), default fallback when platform has no specific transport, FCMHttpTransport.dry_run records payload without POSTing, end-to-end offline send -> mock queue -> worker -> FakeTransport. PA-008 narrows from 'wire transport + creds' to just 'plumb bearer-token credential'.
+- Verified: validate_push_dispatch.py 5/5; full sweep 45/45 in-process validators (added push_dispatch). Existing validate_push_tokens 6/6 still green; presence_push 6/6; cpp_chat_e2e 3/3; chunked_upload 5/5. Bundle ok 72 reqs.
+- Next: Phone-number OTP (M90) / FCM bearer token wiring (PA-008) / 2FA / observability
 - Covers: REQ-CHAT-CORE, REQ-VALIDATION
 

@@ -44,6 +44,11 @@ from .protocol import (
     PushTokenListResponsePayload,
     PushTokenRegisterRequestPayload,
     PushTokenUnregisterRequestPayload,
+    AttachmentUploadInitRequestPayload,
+    AttachmentUploadInitResponsePayload,
+    AttachmentUploadChunkRequestPayload,
+    AttachmentUploadChunkAckPayload,
+    AttachmentUploadCompleteRequestPayload,
     RemoteApproveRequestPayload,
     RemoteDisconnectRequestPayload,
     RemoteInputAckPayload,
@@ -66,6 +71,7 @@ from .services.chat import ChatService
 from .services.contacts import ContactsService
 from .services.input import InputService
 from .services.presence import DEFAULT_TTL_SECONDS, PresenceService
+from .services.push_dispatch import PushDispatchWorker
 from .services.push_tokens import PushTokenService
 from .services.remote_session import RemoteSessionService
 from .state import InMemoryState
@@ -100,6 +106,11 @@ class ServerApplication:
         self.input_service = InputService(self.state)
         self.contacts_service = ContactsService(self.state, self.presence_service)
         self.push_token_service = PushTokenService(self.state, clock=self.clock)
+        # Default worker uses the LogOnlyTransport for every platform —
+        # safe in any environment, no credentials required. A future
+        # M91 wiring (PA-008) supplies an FCMHttpTransport via
+        # set_push_dispatch_worker / a custom transport_for callback.
+        self.push_dispatch_worker = PushDispatchWorker(self.push_token_service)
         self.connection_registry = connection_registry or ConnectionRegistry()
 
     def dispatch(self, message: dict[str, Any]) -> dict[str, Any]:
@@ -1099,6 +1110,97 @@ class ServerApplication:
                 actor_user_id=session.user_id,
                 payload=PushTokenListResponsePayload(tokens=tokens),
             ).to_dict()
+
+        if message_type == MessageType.ATTACHMENT_UPLOAD_INIT_REQUEST:
+            try:
+                assert isinstance(payload, AttachmentUploadInitRequestPayload)
+                upload_id, chunk_size = self.chat_service.init_upload(
+                    conversation_id=payload.conversation_id,
+                    user_id=session.user_id,
+                    filename=payload.filename,
+                    mime_type=payload.mime_type,
+                    total_size_bytes=payload.total_size_bytes,
+                )
+                return make_response(
+                    MessageType.ATTACHMENT_UPLOAD_INIT_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=AttachmentUploadInitResponsePayload(
+                        upload_id=upload_id, chunk_size=chunk_size,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.ATTACHMENT_UPLOAD_CHUNK_REQUEST:
+            try:
+                assert isinstance(payload, AttachmentUploadChunkRequestPayload)
+                received_bytes = self.chat_service.accept_upload_chunk(
+                    upload_id=payload.upload_id,
+                    user_id=session.user_id,
+                    sequence=payload.sequence,
+                    content_b64=payload.content_b64,
+                )
+                return make_response(
+                    MessageType.ATTACHMENT_UPLOAD_CHUNK_ACK,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=AttachmentUploadChunkAckPayload(
+                        upload_id=payload.upload_id,
+                        sequence=payload.sequence,
+                        received_bytes=received_bytes,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.ATTACHMENT_UPLOAD_COMPLETE_REQUEST:
+            try:
+                assert isinstance(payload, AttachmentUploadCompleteRequestPayload)
+                message_result = self.chat_service.complete_upload(
+                    upload_id=payload.upload_id,
+                    user_id=session.user_id,
+                    caption=payload.caption,
+                )
+                self._fanout_to_conversation(
+                    conversation_id=message_result.conversation_id,
+                    origin_session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message_type=MessageType.MESSAGE_DELIVER,
+                    payload=message_result,
+                    correlation_id=f"push_{message_result.message_id}",
+                )
+                self._enqueue_mock_pushes_for_offline_recipients(
+                    conversation_id=message_result.conversation_id,
+                    sender_user_id=session.user_id,
+                    body_summary=(message_result.text or message_result.filename or "")[:80],
+                )
+                return make_response(
+                    MessageType.MESSAGE_DELIVER,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=message_result,
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
 
         return self._error_response(
             correlation_id=correlation_id,

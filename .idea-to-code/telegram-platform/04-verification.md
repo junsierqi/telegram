@@ -500,3 +500,33 @@
 - Verified: validate_mobile_ui.py 6/6 (bridge header surface, marshalled invokes, all 4 QML pages reference ChatBridge correctly, CMake wiring, optional binary size sanity); Windows app_mobile.exe builds + launches cleanly with clean PATH (no Qt on PATH); Android app_mobile.apk builds (20.0 MB unsigned, arm64-v8a) via cmake --target app_mobile_make_apk; full sweep 41/41 in-process validators (was 40 before mobile_ui added).
 - Covers: REQ-CHAT-CORE, REQ-VALIDATION
 
+## Atlas task library cleanup (M86) (gate: pass)
+
+- Timestamp: 2026-04-28T12:00:15+00:00
+- Verified: manage_delivery_bundle verify ok, 72 reqs, 0 problems
+- Covers: REQ-VALIDATION
+
+## CI/CD via GitHub Actions (M87) (gate: pass)
+
+- Timestamp: 2026-04-28T12:11:03+00:00
+- Verified: ci.yml YAML parses; validate_ci_workflow.py 7/7; full sweep 42/42 in-process validators (added ci_workflow); bundle-verify inline script reads status.json correctly (72 reqs, 0 missing, 0 fail gates).
+- Covers: REQ-VALIDATION
+
+## Chunked attachment upload (M88) (gate: pass)
+
+- Timestamp: 2026-04-28T12:19:34+00:00
+- Verified: validate_chunked_upload.py 5/5; full sweep 43/43 in-process validators (added chunked_upload + ci_workflow this round); bundle verify ok 72 reqs 0 problems.
+- Covers: REQ-ATTACHMENTS, REQ-CHAT-CORE, REQ-VALIDATION
+
+## Linux desktop build path (M89) (gate: pass)
+
+- Timestamp: 2026-04-28T12:42:21+00:00
+- Verified: validate_linux_desktop.py 5/5; validate_ci_workflow.py 7/7; full sweep 44/44 in-process validators (added linux_desktop). Real WSL Linux build: 8 targets compile, json_parser_test 9/9 + app_desktop_store_test 20/20 pass on Ubuntu 24.04. Bundle verify ok 72 reqs.
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## Push delivery worker with pluggable transports (M91) (gate: pass)
+
+- Timestamp: 2026-04-28T12:47:39+00:00
+- Verified: validate_push_dispatch.py 5/5; full sweep 45/45 in-process validators (added push_dispatch). Existing validate_push_tokens 6/6 still green; presence_push 6/6; cpp_chat_e2e 3/3; chunked_upload 5/5. Bundle ok 72 reqs.
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
+
