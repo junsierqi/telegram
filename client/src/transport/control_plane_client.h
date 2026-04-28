@@ -255,6 +255,62 @@ struct AckResult {
     std::string error_message;
 };
 
+struct RemoteSessionStateResult {
+    bool ok {false};
+    std::string remote_session_id;
+    std::string state;
+    std::string target_user_id;
+    std::string target_device_id;
+    std::string error_code;
+    std::string error_message;
+};
+
+struct RemoteRelayAssignmentResult {
+    bool ok {false};
+    std::string remote_session_id;
+    std::string state;
+    std::string relay_region;
+    std::string relay_endpoint;
+    std::string error_code;
+    std::string error_message;
+};
+
+struct RemoteSessionTerminatedResult {
+    bool ok {false};
+    std::string remote_session_id;
+    std::string state;
+    std::string detail;
+    std::string error_code;
+    std::string error_message;
+};
+
+struct RemoteRendezvousCandidate {
+    std::string kind;
+    std::string address;
+    int port {0};
+    int priority {0};
+};
+
+struct RemoteRendezvousResult {
+    bool ok {false};
+    std::string remote_session_id;
+    std::string state;
+    std::vector<RemoteRendezvousCandidate> candidates;
+    std::string relay_region;
+    std::string relay_endpoint;
+    std::string error_code;
+    std::string error_message;
+};
+
+struct RemoteInputAckResult {
+    bool ok {false};
+    std::string remote_session_id;
+    int sequence {0};
+    std::string kind;
+    std::string error_code;
+    std::string error_message;
+};
+
 class ControlPlaneClient {
 public:
     using PushHandler = std::function<void(const std::string& type, const std::string& envelope_json)>;
@@ -266,6 +322,10 @@ public:
     ControlPlaneClient& operator=(const ControlPlaneClient&) = delete;
 
     [[nodiscard]] bool connect(const std::string& host, unsigned short port);
+    [[nodiscard]] bool connect_tls(const std::string& host,
+                                   unsigned short port,
+                                   bool insecure_skip_verify = false,
+                                   const std::string& server_name = {});
     void disconnect();
     [[nodiscard]] bool is_connected() const noexcept;
 
@@ -341,6 +401,30 @@ public:
     [[nodiscard]] DeviceListResult update_device_trust(const std::string& device_id, bool trusted);
     [[nodiscard]] PresenceResult presence_query(const std::vector<std::string>& user_ids);
     [[nodiscard]] AckResult heartbeat_ping();
+
+    // Remote-control RPCs (modern client). The legacy session_gateway_client
+    // covers the same surface for the scripted app_shell demo.
+    [[nodiscard]] RemoteSessionStateResult remote_invite(
+        const std::string& requester_device_id,
+        const std::string& target_device_id);
+    [[nodiscard]] RemoteRelayAssignmentResult remote_approve(
+        const std::string& remote_session_id);
+    [[nodiscard]] RemoteSessionTerminatedResult remote_reject(
+        const std::string& remote_session_id);
+    [[nodiscard]] RemoteSessionTerminatedResult remote_cancel(
+        const std::string& remote_session_id);
+    [[nodiscard]] RemoteSessionTerminatedResult remote_terminate(
+        const std::string& remote_session_id);
+    [[nodiscard]] RemoteSessionTerminatedResult remote_disconnect(
+        const std::string& remote_session_id,
+        const std::string& reason = "peer_disconnected");
+    [[nodiscard]] RemoteRendezvousResult remote_rendezvous_request(
+        const std::string& remote_session_id);
+    // data_json must be a JSON object literal like '{"key":"a"}'
+    [[nodiscard]] RemoteInputAckResult remote_input_event(
+        const std::string& remote_session_id,
+        const std::string& kind,
+        const std::string& data_json);
 
     [[nodiscard]] const std::string& session_id() const noexcept { return session_id_; }
     [[nodiscard]] const std::string& user_id() const noexcept { return user_id_; }

@@ -17,6 +17,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 APP_DESKTOP_CANDIDATES = [
+    REPO / "build-verify" / "client" / "src" / "Debug" / "app_desktop.exe",
     REPO / "build-codex" / "client" / "src" / "Debug" / "app_desktop.exe",
     REPO / "build" / "client" / "src" / "Debug" / "app_desktop.exe",
 ]

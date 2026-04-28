@@ -392,3 +392,69 @@
 - Verified: py_compile passed; validate_tls_dev_cert.py 2/2; validate_tls_handshake.py 1/1; validate_tls_deployment_config.py 2/2; docker compose --profile tls config passed; docker compose --profile tls up for telegram-server and telegram-tls-proxy passed; validate_tls_proxy_smoke.py passed; validate_docker_deploy.py passed on 8787.
 - Covers: REQ-TLS-CONTROL-PLANE, REQ-TLS-TERMINATION-PROFILE, REQ-TLS-DEV-CERT, REQ-TLS-PROXY-SMOKE, REQ-VALIDATION
 
+## PostgreSQL TLS proxy coverage (M66) (gate: pass)
+
+- Timestamp: 2026-04-28T02:35:00+00:00
+- Verified: python -m py_compile scripts\\validate_tls_deployment_config.py scripts\\validate_tls_proxy_smoke.py passed; python scripts\\validate_tls_deployment_config.py passed 4/4 scenarios.
+- Covers: REQ-ATLAS-TASK-LIBRARY, REQ-TLS-PG-PROXY, REQ-TLS-TERMINATION-PROFILE, REQ-VALIDATION
+
+## C++ direct TLS client transport parity (M67) (gate: partial)
+
+- Timestamp: 2026-04-28T02:53:23+00:00
+- Verified: python -m py_compile scripts\\validate_cpp_tls_client.py passed; cmake configure/build in build-verify passed; validate_cpp_chat_e2e.py passed 3/3; app_desktop_store_test.exe passed 20/20; validate_cpp_tls_client.py reached Schannel but failed with SEC_E_NO_CREDENTIALS before TLS login.
+- Covers: REQ-TLS-CPP-CLIENT, REQ-CPP-CONTROL-CLIENT, REQ-TCP-LINE-CLIENT, REQ-TLS-CONTROL-PLANE, REQ-VALIDATION
+
+## C++ direct TLS Schannel credential fix (M68) (gate: pass)
+
+- Timestamp: 2026-04-28T04:51:18+00:00
+- Verified: validate_cpp_tls_client.py 2/2; validate_cpp_chat_e2e.py 3/3; app_desktop_store_test.exe 20/20; validate_tls_deployment_config.py 4/4; bundle verify ok 72 reqs
+- Covers: REQ-TLS-CPP-CLIENT, REQ-TLS-CONTROL-PLANE, REQ-VALIDATION
+
+## JSON Unicode + non-ASCII frame fix (M72) (gate: pass)
+
+- Timestamp: 2026-04-28T05:15:49+00:00
+- Verified: json_parser_test 9/9; validate_cpp_chat_e2e.py 3/3; app_desktop_store_test.exe 20/20; validate_cpp_tls_client.py 2/2
+- Covers: REQ-CHAT-CORE, REQ-TYPED-PROTO, REQ-VALIDATION
+
+## Telegram-style desktop UI redesign (M73) (gate: pass)
+
+- Timestamp: 2026-04-28T05:24:28+00:00
+- Verified: build clean; app_desktop_store_test 20/20; validate_desktop_smoke 1/1 with all 16 smoke sub-stages green; live GUI launch survives >2s; cpp_chat_e2e 3/3; cpp_tls_client 2/2; tls_deployment_config 4/4; bundle verify ok 72 reqs
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
+
+## Auto-deploy Qt runtime so app_desktop.exe double-click works (M73a) (gate: pass)
+
+- Timestamp: 2026-04-28T05:32:15+00:00
+- Verified: windeployqt deployed Qt6Cored/Guid/Networkd/Svgd/Widgetsd + platforms/qwindowsd.dll + tls/qschannelbackendd next to app_desktop.exe; clean-PATH probe (only System32/Windows on PATH) launches app_desktop.exe successfully; validate_desktop_smoke.py passes 1/1 with clean PATH (no Qt bin)
+- Covers: REQ-VALIDATION, REQ-WINDOWS-PACKAGE-STAGING
+
+## Settings panel redesign + functional audit (M74) (gate: pass)
+
+- Timestamp: 2026-04-28T05:45:15+00:00
+- Verified: build clean; validate_desktop_smoke 1/1 (16 sub-stages); GUI launches with clean PATH and stays up; bundle verify ok 72 reqs
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
+
+## Parity gap A: conversation_updated push + Edit/Delete UI (M75) (gate: pass)
+
+- Timestamp: 2026-04-28T05:59:55+00:00
+- Verified: build clean; validate_desktop_smoke 1/1 (16 sub-stages); app_desktop_store_test 20/20
+- Covers: REQ-CHAT-CORE, REQ-MESSAGE-EDIT-DELETE, REQ-GROUP-CONVERSATIONS, REQ-VALIDATION
+
+## Parity gap B: remote-control RPCs on ControlPlaneClient (M76) (gate: pass)
+
+- Timestamp: 2026-04-28T06:07:51+00:00
+- Verified: build clean for all targets; new validate_cpp_remote_session.py PASS 8/8 (each new RPC returns typed error code through the new parser); validate_rendezvous 6/6, validate_terminate_disconnect 8/8, validate_input_injection 9/9 still green on server; validate_cpp_chat_e2e 3/3, validate_desktop_smoke 1/1 still green on existing client paths
+- Covers: REQ-REMOTE-LIFECYCLE, REQ-TYPED-PROTO, REQ-VALIDATION
+
+## Parity gap C: drop dead enums + empty controllers (M77) (gate: pass)
+
+- Timestamp: 2026-04-28T06:12:35+00:00
+- Verified: validate_typed_errors 11/11; validate_cpp_chat_e2e 3/3; validate_cpp_remote_session 8/8; validate_desktop_smoke 1/1; validate_rendezvous 6/6; validate_terminate_disconnect 8/8; build clean across chat_client_core / app_chat / app_desktop / telegram_like_client / app_desktop_store_test / json_parser_test / remote_session_smoke
+- Covers: REQ-TYPED-PROTO, REQ-VALIDATION
+
+## Parity gap D: PRESENCE_UPDATE push fan-out (M78) (gate: pass)
+
+- Timestamp: 2026-04-28T06:24:50+00:00
+- Verified: validate_presence_push 6/6; validate_presence_heartbeat 6/6 (no regression); validate_typed_errors 11/11; validate_cpp_chat_e2e 3/3; validate_cpp_remote_session 8/8; validate_desktop_smoke 1/1; validate_rendezvous 6/6; validate_terminate_disconnect 8/8; validate_message_fanout 4/4; validate_incremental_sync 8/8; validate_message_search 5/5; validate_attachments 11/11; validate_contacts 8/8; validate_group_conversations 6/6; bundle verify ok 72 reqs
+- Covers: REQ-PRESENCE-HEARTBEAT, REQ-TYPED-PROTO, REQ-VALIDATION
+

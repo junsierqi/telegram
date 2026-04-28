@@ -269,6 +269,21 @@ bool ControlPlaneClient::connect(const std::string& host, unsigned short port) {
     return true;
 }
 
+bool ControlPlaneClient::connect_tls(const std::string& host,
+                                     unsigned short port,
+                                     bool insecure_skip_verify,
+                                     const std::string& server_name) {
+    const auto verify_mode = insecure_skip_verify
+        ? net::TcpLineClient::TlsVerifyMode::InsecureSkipVerify
+        : net::TcpLineClient::TlsVerifyMode::SystemDefault;
+    if (!tcp_.connect_tls(host, port, verify_mode, server_name)) {
+        return false;
+    }
+    running_.store(true);
+    dispatcher_ = std::thread(&ControlPlaneClient::dispatcher_loop, this);
+    return true;
+}
+
 void ControlPlaneClient::disconnect() {
     running_.store(false);
     heartbeat_interval_ms_.store(0);
@@ -1182,6 +1197,180 @@ void ControlPlaneClient::heartbeat_loop() {
         if (!running_.load() || heartbeat_interval_ms_.load() == 0) break;
         (void)heartbeat_ping();
     }
+}
+
+// ---- Remote-control RPCs ----
+
+namespace {
+
+template <typename Result>
+void capture_error(Result& result, const JsonObject* payload_obj, const std::string& fallback) {
+    if (payload_obj == nullptr) {
+        result.error_code = fallback;
+        return;
+    }
+    result.error_code = extract_string(*payload_obj, "code");
+    result.error_message = extract_string(*payload_obj, "message");
+}
+
+}  // namespace
+
+RemoteSessionStateResult ControlPlaneClient::remote_invite(
+    const std::string& requester_device_id,
+    const std::string& target_device_id) {
+    RemoteSessionStateResult result;
+    const std::string payload =
+        "{\"requester_device_id\":" + quote(requester_device_id)
+        + ",\"target_device_id\":" + quote(target_device_id) + "}";
+    auto response = send_and_wait("remote_invite", payload);
+    if (!response) { result.error_code = "transport_error"; return result; }
+    auto payload_obj = parse_payload(*response);
+    const std::string type = extract_type(*response);
+    if (type != "remote_session_state" || !payload_obj) {
+        capture_error(result, payload_obj ? &*payload_obj : nullptr, "bad_response");
+        return result;
+    }
+    result.ok = true;
+    result.remote_session_id = extract_string(*payload_obj, "remote_session_id");
+    result.state = extract_string(*payload_obj, "state");
+    result.target_user_id = extract_string(*payload_obj, "target_user_id");
+    result.target_device_id = extract_string(*payload_obj, "target_device_id");
+    return result;
+}
+
+RemoteRelayAssignmentResult ControlPlaneClient::remote_approve(
+    const std::string& remote_session_id) {
+    RemoteRelayAssignmentResult result;
+    const std::string payload =
+        "{\"remote_session_id\":" + quote(remote_session_id) + "}";
+    auto response = send_and_wait("remote_approve", payload);
+    if (!response) { result.error_code = "transport_error"; return result; }
+    auto payload_obj = parse_payload(*response);
+    const std::string type = extract_type(*response);
+    if (type != "remote_relay_assignment" || !payload_obj) {
+        capture_error(result, payload_obj ? &*payload_obj : nullptr, "bad_response");
+        return result;
+    }
+    result.ok = true;
+    result.remote_session_id = extract_string(*payload_obj, "remote_session_id");
+    result.state = extract_string(*payload_obj, "state");
+    result.relay_region = extract_string(*payload_obj, "relay_region");
+    result.relay_endpoint = extract_string(*payload_obj, "relay_endpoint");
+    return result;
+}
+
+namespace {
+RemoteSessionTerminatedResult parse_terminated(const std::string& response) {
+    RemoteSessionTerminatedResult result;
+    auto payload_obj = parse_payload(response);
+    const std::string type = extract_type(response);
+    if (type != "remote_session_terminated" || !payload_obj) {
+        capture_error(result, payload_obj ? &*payload_obj : nullptr, "bad_response");
+        return result;
+    }
+    result.ok = true;
+    result.remote_session_id = extract_string(*payload_obj, "remote_session_id");
+    result.state = extract_string(*payload_obj, "state");
+    result.detail = extract_string(*payload_obj, "detail");
+    return result;
+}
+}  // namespace
+
+RemoteSessionTerminatedResult ControlPlaneClient::remote_reject(
+    const std::string& remote_session_id) {
+    const std::string payload =
+        "{\"remote_session_id\":" + quote(remote_session_id) + "}";
+    auto response = send_and_wait("remote_reject", payload);
+    if (!response) { RemoteSessionTerminatedResult r; r.error_code = "transport_error"; return r; }
+    return parse_terminated(*response);
+}
+
+RemoteSessionTerminatedResult ControlPlaneClient::remote_cancel(
+    const std::string& remote_session_id) {
+    const std::string payload =
+        "{\"remote_session_id\":" + quote(remote_session_id) + "}";
+    auto response = send_and_wait("remote_cancel", payload);
+    if (!response) { RemoteSessionTerminatedResult r; r.error_code = "transport_error"; return r; }
+    return parse_terminated(*response);
+}
+
+RemoteSessionTerminatedResult ControlPlaneClient::remote_terminate(
+    const std::string& remote_session_id) {
+    const std::string payload =
+        "{\"remote_session_id\":" + quote(remote_session_id) + "}";
+    auto response = send_and_wait("remote_terminate", payload);
+    if (!response) { RemoteSessionTerminatedResult r; r.error_code = "transport_error"; return r; }
+    return parse_terminated(*response);
+}
+
+RemoteSessionTerminatedResult ControlPlaneClient::remote_disconnect(
+    const std::string& remote_session_id,
+    const std::string& reason) {
+    const std::string payload =
+        "{\"remote_session_id\":" + quote(remote_session_id)
+        + ",\"reason\":" + quote(reason) + "}";
+    auto response = send_and_wait("remote_disconnect", payload);
+    if (!response) { RemoteSessionTerminatedResult r; r.error_code = "transport_error"; return r; }
+    return parse_terminated(*response);
+}
+
+RemoteRendezvousResult ControlPlaneClient::remote_rendezvous_request(
+    const std::string& remote_session_id) {
+    RemoteRendezvousResult result;
+    const std::string payload =
+        "{\"remote_session_id\":" + quote(remote_session_id) + "}";
+    auto response = send_and_wait("remote_rendezvous_request", payload);
+    if (!response) { result.error_code = "transport_error"; return result; }
+    auto payload_obj = parse_payload(*response);
+    const std::string type = extract_type(*response);
+    if (type != "remote_rendezvous_info" || !payload_obj) {
+        capture_error(result, payload_obj ? &*payload_obj : nullptr, "bad_response");
+        return result;
+    }
+    result.ok = true;
+    result.remote_session_id = extract_string(*payload_obj, "remote_session_id");
+    result.state = extract_string(*payload_obj, "state");
+    result.relay_region = extract_string(*payload_obj, "relay_region");
+    result.relay_endpoint = extract_string(*payload_obj, "relay_endpoint");
+    const auto* candidates = find_member(*payload_obj, "candidates");
+    if (candidates && candidates->is_array()) {
+        for (const auto& cand_val : *candidates->as_array()) {
+            if (!cand_val.is_object()) continue;
+            const auto* cand = cand_val.as_object();
+            RemoteRendezvousCandidate c;
+            c.kind = extract_string(*cand, "kind");
+            c.address = extract_string(*cand, "address");
+            c.port = static_cast<int>(extract_number(*cand, "port"));
+            c.priority = static_cast<int>(extract_number(*cand, "priority"));
+            result.candidates.push_back(std::move(c));
+        }
+    }
+    return result;
+}
+
+RemoteInputAckResult ControlPlaneClient::remote_input_event(
+    const std::string& remote_session_id,
+    const std::string& kind,
+    const std::string& data_json) {
+    RemoteInputAckResult result;
+    const std::string body = data_json.empty() ? std::string("{}") : data_json;
+    const std::string payload =
+        "{\"remote_session_id\":" + quote(remote_session_id)
+        + ",\"kind\":" + quote(kind)
+        + ",\"data\":" + body + "}";
+    auto response = send_and_wait("remote_input_event", payload);
+    if (!response) { result.error_code = "transport_error"; return result; }
+    auto payload_obj = parse_payload(*response);
+    const std::string type = extract_type(*response);
+    if (type != "remote_input_ack" || !payload_obj) {
+        capture_error(result, payload_obj ? &*payload_obj : nullptr, "bad_response");
+        return result;
+    }
+    result.ok = true;
+    result.remote_session_id = extract_string(*payload_obj, "remote_session_id");
+    result.sequence = static_cast<int>(extract_number(*payload_obj, "sequence"));
+    result.kind = extract_string(*payload_obj, "kind");
+    return result;
 }
 
 }  // namespace telegram_like::client::transport

@@ -24,6 +24,7 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
 APP_CHAT_CANDIDATES = [
+    REPO / "build-verify" / "client" / "src" / "Debug" / "app_chat.exe",
     REPO / "build-codex" / "client" / "src" / "Debug" / "app_chat.exe",
     REPO / "build" / "client" / "src" / "Debug" / "app_chat.exe",
 ]

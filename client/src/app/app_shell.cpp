@@ -2,10 +2,6 @@
 
 #include "app/client_session.h"
 #include "app/client_state.h"
-#include "auth/auth_controller.h"
-#include "chat/chat_controller.h"
-#include "contacts/contact_controller.h"
-#include "devices/device_controller.h"
 #include "remote_control/remote_session_controller.h"
 #include "transport/udp_media_probe.h"
 #include "transport/udp_frame_stream.h"
@@ -105,20 +101,12 @@ void print_state_summary(const std::string& label, const ClientViewState& state)
 
 int AppShell::start() const {
     transport::SessionGatewayClient gateway;
-    auth::AuthController auth;
-    contacts::ContactController contacts;
-    chat::ChatController chat;
-    devices::DeviceController devices;
     remote_control::RemoteSessionController remote;
     const bool state_changed =
         remote.apply_event(telegram_like::shared::protocol::RemoteSessionEvent::kSendInvite);
 
     std::cout << "[client] app shell starting\n";
     std::cout << "[client] " << gateway.describe() << '\n';
-    std::cout << "[client] " << auth.describe() << '\n';
-    std::cout << "[client] " << contacts.describe() << '\n';
-    std::cout << "[client] " << chat.describe() << '\n';
-    std::cout << "[client] " << devices.describe() << '\n';
     std::cout << "[client] remote session bootstrap changed_state="
               << (state_changed ? "true" : "false") << '\n';
     std::cout << "[client] " << remote.describe() << '\n';

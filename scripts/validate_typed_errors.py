@@ -216,11 +216,14 @@ def run_unsupported_message_type() -> None:
     scenario("unhandled message type reaches dispatch fallback -> UNSUPPORTED_MESSAGE_TYPE")
     app = ServerApplication()
     alice = login(app, "alice", "alice_pw", "dev_alice_win", 1)["payload"]
+    # A valid MessageType enum value that has no dispatch handler must reach
+    # the generic UNSUPPORTED_MESSAGE_TYPE fallback. HEARTBEAT_ACK is a
+    # response-direction type — the server only ever emits it, so dispatch
+    # has no inbound handler.
     response = app.dispatch(
         {
             **make_envelope(
-                MessageType.HEARTBEAT if hasattr(MessageType, "HEARTBEAT")
-                else MessageType.SESSION_REFRESH,
+                MessageType.HEARTBEAT_ACK,
                 correlation_id="corr_unh",
                 session_id=alice["session_id"],
                 actor_user_id=alice["user_id"],

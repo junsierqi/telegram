@@ -137,8 +137,7 @@ class MessageType(StrEnum):
     PROFILE_RESPONSE = "profile_response"
     USER_SEARCH_REQUEST = "user_search_request"
     USER_SEARCH_RESPONSE = "user_search_response"
-    SESSION_REFRESH = "session_refresh"
-    PRESENCE_UPDATE = "presence_update"
+    PRESENCE_UPDATE = "presence_update"  # fanned out by presence service on transitions
     PRESENCE_QUERY_REQUEST = "presence_query_request"
     PRESENCE_QUERY_RESPONSE = "presence_query_response"
     HEARTBEAT_PING = "heartbeat_ping"
@@ -150,7 +149,6 @@ class MessageType(StrEnum):
     CONVERSATION_UPDATED = "conversation_updated"
     MESSAGE_SEND = "message_send"
     MESSAGE_DELIVER = "message_deliver"
-    MESSAGE_ACK = "message_ack"
     MESSAGE_READ = "message_read"
     MESSAGE_READ_UPDATE = "message_read_update"
     MESSAGE_EDIT = "message_edit"
@@ -690,6 +688,16 @@ class PresenceUserStatus:
 class PresenceQueryResponsePayload:
     users: list[PresenceUserStatus]
     server_timestamp_ms: int
+
+
+@dataclass(slots=True)
+class PresenceUpdatePayload:
+    """Pushed to peers (anyone sharing a conversation) when a user's online
+    state transitions. Subscribers update their local presence cache without
+    needing to poll PRESENCE_QUERY_REQUEST."""
+    user_id: str
+    online: bool
+    last_seen_at_ms: int
 
 
 def make_envelope(

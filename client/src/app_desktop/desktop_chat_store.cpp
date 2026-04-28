@@ -572,6 +572,31 @@ void DesktopChatStore::apply_push(const std::string& type, const std::string& en
         apply_pin_state(conversation_id,
                         extract_payload_string(envelope_json, "message_id"),
                         pinned);
+        return;
+    }
+
+    if (type == "conversation_updated") {
+        // Server fans out CONVERSATION_UPDATED on conversation_create /
+        // add_participant / remove_participant. Refresh title + participants
+        // locally so a participant added by another client shows up without
+        // requiring a manual sync.
+        JsonParser parser(envelope_json);
+        JsonValue root;
+        if (!parser.parse(root) || !root.is_object()) return;
+        const auto* payload = find_member(*root.as_object(), "payload");
+        if (payload == nullptr || !payload->is_object()) return;
+        auto& conversation = ensure_conversation(conversation_id);
+        const std::string title = string_or_empty(*payload->as_object(), "title");
+        if (!title.empty()) conversation.title = title;
+        if (const auto* participants = find_member(*payload->as_object(), "participant_user_ids");
+            participants && participants->is_array()) {
+            std::vector<std::string> ids;
+            for (const auto& value : *participants->as_array()) {
+                if (value.is_string()) ids.push_back(*value.as_string());
+            }
+            if (!ids.empty()) conversation.participant_user_ids = std::move(ids);
+        }
+        return;
     }
 }
 
@@ -672,19 +697,20 @@ std::string DesktopChatStore::render_selected_timeline_html(const std::string& s
 
     std::ostringstream out;
     out << "<html><head><style>"
-        << "body{background:#f3efe6;font-family:'Segoe UI',sans-serif;margin:12px;color:#1e2a28;}"
-        << ".title{font-weight:700;margin:0 0 12px 0;color:#38524a;}"
-        << ".row{clear:both;margin:8px 0;overflow:auto;}"
-        << ".bubble{max-width:72%;padding:8px 10px;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.10);}"
-        << ".out .bubble{float:right;background:#d7f3c9;border-bottom-right-radius:4px;}"
+        << "body{background:#e6ebee;font-family:'Segoe UI','Helvetica Neue',sans-serif;margin:0;padding:14px 18px;color:#0f1419;}"
+        << ".title{font-weight:600;margin:0 0 14px 0;color:#3390ec;font-size:14px;}"
+        << ".row{clear:both;margin:6px 0;overflow:auto;}"
+        << ".bubble{max-width:72%;padding:8px 12px;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.08);}"
+        << ".out .bubble{float:right;background:#eeffde;border-bottom-right-radius:4px;}"
         << ".in .bubble{float:left;background:#ffffff;border-bottom-left-radius:4px;}"
-        << ".meta{font-size:11px;color:#6d7b78;margin-bottom:4px;}"
-        << ".text{font-size:14px;line-height:1.35;}"
-        << ".attach{font-size:12px;margin-top:6px;color:#44635c;background:rgba(255,255,255,.45);padding:4px;border-radius:6px;}"
+        << ".meta{font-size:11px;color:#7c8a96;margin-bottom:3px;}"
+        << ".meta a{color:#3390ec;text-decoration:none;}"
+        << ".text{font-size:14px;line-height:1.4;color:#0f1419;}"
+        << ".attach{font-size:12px;margin-top:6px;color:#3a6e5d;background:rgba(255,255,255,.55);padding:4px 6px;border-radius:8px;}"
         << ".failed .bubble{background:#ffd7cf;}"
-        << ".pending .meta{color:#9a7a28;}"
-        << ".match .bubble{border:2px solid #d69d22;}"
-        << ".focused .bubble{border:3px solid #315c9c;}"
+        << ".pending .meta{color:#b88a16;}"
+        << ".match .bubble{border:2px solid #f6c344;}"
+        << ".focused .bubble{border:3px solid #3390ec;}"
         << "</style></head><body>";
     out << "<div class='title'>" << html_escape(conversation->conversation_id);
     if (!conversation->title.empty()) out << " - " << html_escape(conversation->title);

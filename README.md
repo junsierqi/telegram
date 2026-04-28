@@ -45,6 +45,7 @@ cmake -S . -B build-codex -DCMAKE_PREFIX_PATH=C:\Qt\6.11.0\msvc2022_64
 cmake --build build-codex --config Debug
 .\build-codex\client\src\Debug\telegram_like_client.exe
 .\build-codex\client\src\Debug\app_chat.exe --user alice --password alice_pw --device dev_alice_win
+.\build-codex\client\src\Debug\app_chat.exe --user alice --password alice_pw --device dev_alice_win --port 8443 --tls --tls-insecure --tls-server-name localhost
 .\build-codex\client\src\Debug\app_desktop.exe
 .\build-codex\client\src\Debug\app_desktop.exe --cache-file .tmp_app_desktop_cache.json
 python -m server.main
@@ -55,12 +56,15 @@ python -m server.main --tcp-server --session-ttl-seconds 86400
 python -m server.main --tcp-server --tls-cert-file server.crt --tls-key-file server.key
 wsl bash -lc "cd /mnt/d/code_codex/telegram && docker compose -f deploy/docker/docker-compose.yml up --build telegram-server"
 wsl bash -lc "cd /mnt/d/code_codex/telegram && docker compose -f deploy/docker/docker-compose.yml --profile postgres up postgres telegram-server-postgres"
+wsl bash -lc "cd /mnt/d/code_codex/telegram && docker compose -f deploy/docker/docker-compose.yml --profile postgres --profile tls up postgres telegram-server-postgres telegram-tls-proxy-postgres"
 powershell -ExecutionPolicy Bypass -File scripts\deploy_wsl_docker.ps1
 powershell -ExecutionPolicy Bypass -File scripts\deploy_wsl_docker.ps1 -Mode postgres
 python scripts\validate_tls_handshake.py
 python scripts\validate_tls_deployment_config.py
 python scripts\generate_tls_dev_cert.py --out-dir deploy\tls\certs --overwrite
 python scripts\validate_tls_proxy_smoke.py
+python scripts\validate_tls_proxy_smoke.py --port 8444 --device dev_tls_proxy_pg_smoke
+python scripts\validate_cpp_tls_client.py
 powershell -ExecutionPolicy Bypass -File scripts\package_windows_desktop.ps1 -SkipQtDeploy
 powershell -ExecutionPolicy Bypass -File scripts\package_windows_desktop.ps1 -SkipQtDeploy -Zip
 ```
@@ -85,7 +89,7 @@ The repository now contains a verified chat and remote-control control-plane pro
 - Linux Docker deployment files live under `deploy/docker`; the default server container persists SQLite state and attachments under `/data`, while the PostgreSQL compose profile also starts a PG-backed server on port 8788
 - the PostgreSQL repository path now stores users, devices, sessions, conversations, messages, conversation change logs, contacts, attachment metadata and remote sessions in dedicated tables, records schema version rows and has an app-level backup/restore round-trip validator
 - login sessions can be bounded with `--session-ttl-seconds` / `TELEGRAM_SESSION_TTL_SECONDS`; heartbeats refresh the active session age and expired sessions are removed
-- the TCP control plane can run native TLS when `--tls-cert-file` and `--tls-key-file` are configured together, with a real TLS login smoke validator; Docker also has a verified `nginx` stream TLS termination profile on port 8443; C++ direct TLS client transport remains the next TLS parity slice
+- the TCP control plane can run native TLS when `--tls-cert-file` and `--tls-key-file` are configured together, with a real TLS login smoke validator; Docker also has `nginx` stream TLS termination profiles for the SQLite-backed service on port 8443 and PostgreSQL-backed service on port 8444; the C++ control-plane client now has a Windows Schannel TLS transport entrypoint, but the local direct TLS smoke is blocked by Schannel credential acquisition in this environment
 - Windows desktop package staging is available through `scripts\package_windows_desktop.ps1`, with optional `windeployqt` runtime collection, zip output and SHA256 checksum files
 - desktop device management can list devices, toggle trust and revoke non-current device sessions, with confirmation before revoke
 - `app_chat.exe` is the native interactive C++ chat CLI
@@ -118,6 +122,8 @@ python scripts\validate_tls_handshake.py
 python scripts\validate_tls_deployment_config.py
 python scripts\validate_tls_dev_cert.py
 python scripts\validate_tls_proxy_smoke.py
+python scripts\validate_tls_proxy_smoke.py --port 8444 --device dev_tls_proxy_pg_smoke
+python scripts\validate_cpp_tls_client.py
 powershell -ExecutionPolicy Bypass -File scripts\package_windows_desktop.ps1 -SkipQtDeploy
 powershell -ExecutionPolicy Bypass -File scripts\validate_windows_package.ps1
 python scripts\validate_profile_search.py

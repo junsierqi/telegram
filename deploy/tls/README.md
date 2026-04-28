@@ -30,6 +30,13 @@ Direct C++ desktop-to-native-TLS support is still a follow-up transport slice.
 That work should add a TLS-capable client transport behind the existing
 `ControlPlaneClient` boundary so UI code remains unchanged.
 
+Current C++ builds expose that boundary through `ControlPlaneClient::connect_tls`
+and the `--tls` / `--tls-insecure` client flags. On Windows this path uses
+Schannel. In the current local validation environment the C++ code compiles,
+but the direct TLS runtime smoke is blocked by Schannel credential acquisition
+(`SEC_E_NO_CREDENTIALS`), so the Docker proxy smoke remains the verified TLS
+client path until the Windows TLS backend is completed or replaced.
+
 ## Docker TLS Termination Profile
 
 The Docker compose file includes an `nginx` TLS termination profile:
@@ -43,11 +50,21 @@ docker compose -f deploy/docker/docker-compose.yml --profile tls up -d telegram-
 The proxy listens on host port `8443` and forwards to the plaintext control
 plane service at `telegram-server:8787` using nginx `stream` TLS termination.
 
+For the PostgreSQL-backed profile, run the companion proxy:
+
+```bash
+docker compose -f deploy/docker/docker-compose.yml --profile postgres --profile tls up -d postgres telegram-server-postgres telegram-tls-proxy-postgres
+```
+
+The PostgreSQL proxy listens on host port `8444` and forwards to
+`telegram-server-postgres:8787`.
+
 Validation:
 
 ```powershell
 python scripts\validate_tls_deployment_config.py
 python scripts\validate_tls_proxy_smoke.py
+python scripts\validate_tls_proxy_smoke.py --port 8444 --device dev_tls_proxy_pg_smoke
 ```
 
 ## Certificate Handling

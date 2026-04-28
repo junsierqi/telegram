@@ -31,6 +31,9 @@ struct Args {
     std::string device;
     std::string host = "127.0.0.1";
     unsigned short port = 8787;
+    bool tls = false;
+    bool tls_insecure = false;
+    std::string tls_server_name;
     std::string conversation = "conv_alice_bob";
     unsigned heartbeat_ms = 10000;
 };
@@ -51,6 +54,9 @@ bool parse_args(int argc, char** argv, Args& out) {
         else if (a == "--host") { const char* v = next(a); if (!v) return false; out.host = v; }
         else if (a == "--port") { const char* v = next(a); if (!v) return false;
             out.port = static_cast<unsigned short>(std::atoi(v)); }
+        else if (a == "--tls") { out.tls = true; }
+        else if (a == "--tls-insecure") { out.tls = true; out.tls_insecure = true; }
+        else if (a == "--tls-server-name") { const char* v = next(a); if (!v) return false; out.tls_server_name = v; }
         else if (a == "--conversation") { const char* v = next(a); if (!v) return false; out.conversation = v; }
         else if (a == "--heartbeat") { const char* v = next(a); if (!v) return false;
             out.heartbeat_ms = static_cast<unsigned>(std::atoi(v)); }
@@ -154,12 +160,16 @@ int main(int argc, char** argv) {
     Args args;
     if (!parse_args(argc, argv, args)) {
         std::cerr << "usage: app_chat --user X --password X --device X [--host 127.0.0.1] "
-                     "[--port 8787] [--conversation conv_alice_bob] [--heartbeat 10000]\n";
+                     "[--port 8787] [--tls] [--tls-insecure] [--tls-server-name localhost] "
+                     "[--conversation conv_alice_bob] [--heartbeat 10000]\n";
         return 2;
     }
 
     telegram_like::client::transport::ControlPlaneClient client;
-    if (!client.connect(args.host, args.port)) {
+    const bool connected = args.tls
+        ? client.connect_tls(args.host, args.port, args.tls_insecure, args.tls_server_name)
+        : client.connect(args.host, args.port);
+    if (!connected) {
         std::cerr << "could not connect to " << args.host << ":" << args.port << "\n";
         return 1;
     }

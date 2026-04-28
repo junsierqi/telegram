@@ -2,8 +2,53 @@
 
 #include <cctype>
 #include <cstdlib>
+#include <string>
+#include <string_view>
 
 namespace telegram_like::client::transport {
+
+namespace {
+
+bool parse_hex4(std::string_view text, std::size_t& pos, unsigned& code_unit) {
+    if (pos + 4 > text.size()) {
+        return false;
+    }
+    code_unit = 0;
+    for (int i = 0; i < 4; ++i) {
+        const char c = text[pos++];
+        code_unit <<= 4;
+        if (c >= '0' && c <= '9') {
+            code_unit |= static_cast<unsigned>(c - '0');
+        } else if (c >= 'a' && c <= 'f') {
+            code_unit |= static_cast<unsigned>(c - 'a' + 10);
+        } else if (c >= 'A' && c <= 'F') {
+            code_unit |= static_cast<unsigned>(c - 'A' + 10);
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
+void append_utf8(std::string& out, unsigned code_point) {
+    if (code_point < 0x80) {
+        out += static_cast<char>(code_point);
+    } else if (code_point < 0x800) {
+        out += static_cast<char>(0xC0 | (code_point >> 6));
+        out += static_cast<char>(0x80 | (code_point & 0x3F));
+    } else if (code_point < 0x10000) {
+        out += static_cast<char>(0xE0 | (code_point >> 12));
+        out += static_cast<char>(0x80 | ((code_point >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (code_point & 0x3F));
+    } else {
+        out += static_cast<char>(0xF0 | (code_point >> 18));
+        out += static_cast<char>(0x80 | ((code_point >> 12) & 0x3F));
+        out += static_cast<char>(0x80 | ((code_point >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (code_point & 0x3F));
+    }
+}
+
+}  // namespace
 
 bool JsonValue::is_object() const {
     return std::holds_alternative<JsonObject>(storage);
@@ -169,6 +214,40 @@ bool JsonParser::parse_string(std::string& value) {
             case 't':
                 value += '\t';
                 break;
+            case 'b':
+                value += '\b';
+                break;
+            case 'f':
+                value += '\f';
+                break;
+            case 'u': {
+                unsigned high = 0;
+                if (!parse_hex4(text_, pos_, high)) {
+                    return false;
+                }
+                if (high >= 0xD800 && high <= 0xDBFF) {
+                    // high surrogate — expect a paired \uDC00..\uDFFF low surrogate
+                    if (pos_ + 2 > text_.size() ||
+                        text_[pos_] != '\\' || text_[pos_ + 1] != 'u') {
+                        return false;
+                    }
+                    pos_ += 2;
+                    unsigned low = 0;
+                    if (!parse_hex4(text_, pos_, low) ||
+                        low < 0xDC00 || low > 0xDFFF) {
+                        return false;
+                    }
+                    const unsigned code_point =
+                        0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00);
+                    append_utf8(value, code_point);
+                } else if (high >= 0xDC00 && high <= 0xDFFF) {
+                    // unpaired low surrogate
+                    return false;
+                } else {
+                    append_utf8(value, high);
+                }
+                break;
+            }
             default:
                 return false;
             }

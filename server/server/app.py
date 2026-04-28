@@ -38,6 +38,7 @@ from .protocol import (
     MessageType,
     PresenceQueryRequestPayload,
     PresenceQueryResponsePayload,
+    PresenceUpdatePayload,
     RemoteApproveRequestPayload,
     RemoteDisconnectRequestPayload,
     RemoteInputAckPayload,
@@ -88,6 +89,7 @@ class ServerApplication:
         self.presence_service = PresenceService(
             self.state, clock=self.clock, ttl_seconds=presence_ttl_seconds
         )
+        self.presence_service.set_transition_handler(self._fanout_presence_transition)
         self.remote_session_service = RemoteSessionService(self.state)
         self.input_service = InputService(self.state)
         self.contacts_service = ContactsService(self.state, self.presence_service)
@@ -120,6 +122,7 @@ class ServerApplication:
                 login_result = self.auth_service.login(
                     payload.username, payload.password, payload.device_id
                 )
+                self.presence_service.notify_session_started(login_result["session_id"])
                 return make_response(
                     MessageType.LOGIN_RESPONSE,
                     correlation_id=correlation_id,
@@ -151,6 +154,7 @@ class ServerApplication:
                     device_label=payload.device_label,
                     platform=payload.platform,
                 )
+                self.presence_service.notify_session_started(register_result["session_id"])
                 return make_response(
                     MessageType.REGISTER_RESPONSE,
                     correlation_id=correlation_id,
@@ -1083,6 +1087,36 @@ class ServerApplication:
                 if self.connection_registry.push(session.session_id, envelope):
                     delivered_to.append(session.session_id)
         return delivered_to
+
+    def _fanout_presence_transition(self, user_id: str, online: bool) -> None:
+        """Wired into PresenceService as transition_handler. Fans out
+        PRESENCE_UPDATE to every user who shares at least one conversation
+        with the transitioning user (the cheapest available subscriber set).
+        """
+        peer_ids: set[str] = set()
+        for conversation in self.state.conversations.values():
+            if user_id not in conversation.participant_user_ids:
+                continue
+            for pid in conversation.participant_user_ids:
+                if pid != user_id:
+                    peer_ids.add(pid)
+        if not peer_ids:
+            return
+        payload = PresenceUpdatePayload(
+            user_id=user_id,
+            online=online,
+            last_seen_at_ms=self.presence_service.last_seen_ms(user_id),
+        )
+        # origin_session_id="" so every peer session receives the push (the
+        # transitioning user themselves doesn't need it).
+        self._fanout_to_users(
+            user_ids=sorted(peer_ids),
+            origin_session_id="",
+            actor_user_id=user_id,
+            message_type=MessageType.PRESENCE_UPDATE,
+            payload=payload,
+            correlation_id=f"push_presence_{user_id}_{'on' if online else 'off'}",
+        )
 
     def _error_response(
         self,

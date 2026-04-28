@@ -85,6 +85,11 @@ public:
     void apply_pin_state(const std::string& conversation_id,
                          const std::string& message_id,
                          bool pinned);
+    void apply_message_edited(const std::string& conversation_id,
+                              const std::string& message_id,
+                              const std::string& text);
+    void apply_message_deleted(const std::string& conversation_id,
+                               const std::string& message_id);
 
     [[nodiscard]] const std::string& selected_conversation_id() const noexcept;
     [[nodiscard]] const DesktopConversation* selected_conversation() const;
@@ -109,10 +114,6 @@ public:
 private:
     [[nodiscard]] DesktopConversation& ensure_conversation(const std::string& conversation_id);
     void upsert_message(DesktopMessage message, bool count_unread);
-    void apply_message_deleted(const std::string& conversation_id, const std::string& message_id);
-    void apply_message_edited(const std::string& conversation_id,
-                              const std::string& message_id,
-                              const std::string& text);
     void apply_read_marker(const std::string& conversation_id,
                            const std::string& reader_user_id,
                            const std::string& last_read_message_id);

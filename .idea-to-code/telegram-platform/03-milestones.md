@@ -3,8 +3,8 @@
 ## Current Phase
 
 - Status: in_progress
-- Current focus: TLS deployment hardening
-- Next gate: Client TLS parity or PostgreSQL TLS proxy profile
+- Current focus: Real presence push closes the last protocol parity gap; PRESENCE_UPDATE no longer a dead enum
+- Next gate: Release readiness
 
 ## Milestone History
 
@@ -525,4 +525,92 @@
 - Verified: py_compile passed; validate_tls_dev_cert.py 2/2; validate_tls_handshake.py 1/1; validate_tls_deployment_config.py 2/2; docker compose --profile tls config passed; docker compose --profile tls up for telegram-server and telegram-tls-proxy passed; validate_tls_proxy_smoke.py passed; validate_docker_deploy.py passed on 8787.
 - Next: Implement C++ TLS client transport parity or add TLS proxy coverage for PostgreSQL-backed server profile.
 - Covers: REQ-TLS-CONTROL-PLANE, REQ-TLS-TERMINATION-PROFILE, REQ-TLS-DEV-CERT, REQ-TLS-PROXY-SMOKE, REQ-VALIDATION
+
+## PostgreSQL TLS proxy coverage (M66) (gate: pass)
+
+- Timestamp: 2026-04-28T02:35:00+00:00
+- Delivered: Established the Atlas task library and delivery plan, added a PostgreSQL-backed nginx stream TLS proxy profile on host port 8444, documented the run/smoke commands, and extended the TLS deployment validator to cover both SQLite and PostgreSQL proxy wiring. Live Docker actions were recorded as pending actions instead of executed.
+- Verified: python -m py_compile scripts\\validate_tls_deployment_config.py scripts\\validate_tls_proxy_smoke.py passed; python scripts\\validate_tls_deployment_config.py passed 4/4 scenarios.
+- Next: Implement C++ direct TLS client transport parity, or execute the pending PostgreSQL TLS proxy live smoke after user confirmation.
+- Covers: REQ-ATLAS-TASK-LIBRARY, REQ-TLS-PG-PROXY, REQ-TLS-TERMINATION-PROFILE, REQ-VALIDATION
+
+## C++ direct TLS client transport parity (M67) (gate: partial)
+
+- Timestamp: 2026-04-28T02:53:23+00:00
+- Delivered: Added Windows Schannel-backed TcpLineClient::connect_tls, ControlPlaneClient::connect_tls, CLI flags for app_chat, desktop TLS controls, and a validate_cpp_tls_client.py runtime validator. Updated docs and Atlas task status to show the runtime blocker.
+- Verified: python -m py_compile scripts\\validate_cpp_tls_client.py passed; cmake configure/build in build-verify passed; validate_cpp_chat_e2e.py passed 3/3; app_desktop_store_test.exe passed 20/20; validate_cpp_tls_client.py reached Schannel but failed with SEC_E_NO_CREDENTIALS before TLS login.
+- Next: Resolve Schannel credential acquisition or switch to a different local TLS backend, then rerun validate_cpp_tls_client.py.
+- Covers: REQ-TLS-CPP-CLIENT, REQ-CPP-CONTROL-CLIENT, REQ-TCP-LINE-CLIENT, REQ-TLS-CONTROL-PLANE, REQ-VALIDATION
+
+## C++ direct TLS Schannel credential fix (M68) (gate: pass)
+
+- Timestamp: 2026-04-28T04:51:18+00:00
+- Delivered: tcp_line_client.cpp tls_handshake now passes an explicit SCHANNEL_CRED (SCH_CRED_NO_DEFAULT_CREDS|SCH_USE_STRONG_CRYPTO + SCH_CRED_MANUAL_CRED_VALIDATION when insecure) so AcquireCredentialsHandleW no longer returns SEC_E_NO_CREDENTIALS on hosts without default outbound creds
+- Verified: validate_cpp_tls_client.py 2/2; validate_cpp_chat_e2e.py 3/3; app_desktop_store_test.exe 20/20; validate_tls_deployment_config.py 4/4; bundle verify ok 72 reqs
+- Next: Run deployment hardening acceptance sweep across remaining validators (TLS proxy live smoke pending PA-001/PA-002 confirmation), then resume M70 remote-control runtime
+- Covers: REQ-TLS-CPP-CLIENT, REQ-TLS-CONTROL-PLANE, REQ-VALIDATION
+
+## JSON Unicode + non-ASCII frame fix (M72) (gate: pass)
+
+- Timestamp: 2026-04-28T05:15:49+00:00
+- Delivered: json_value.cpp parse_string now handles \uXXXX (incl. surrogate pairs) plus \b/\f via a new parse_hex4+append_utf8 pair; control_plane.py emits json.dumps(..., ensure_ascii=False) so non-ASCII goes out as UTF-8; new json_parser_test.exe covers ascii/CJK/BMP-escape/mixed/ASCII-range/emoji-surrogate/\b\f and rejects unpaired surrogates
+- Verified: json_parser_test 9/9; validate_cpp_chat_e2e.py 3/3; app_desktop_store_test.exe 20/20; validate_cpp_tls_client.py 2/2
+- Next: M73 Telegram-style desktop UI redesign
+- Covers: REQ-CHAT-CORE, REQ-TYPED-PROTO, REQ-VALIDATION
+
+## Telegram-style desktop UI redesign (M73) (gate: pass)
+
+- Timestamp: 2026-04-28T05:24:28+00:00
+- Delivered: app_desktop main.cpp restructured into a 3-pane QSplitter shell (sidebar with chat search + chat list + Settings toggle, center chat pane with chat header / in-chat search / timeline / composer / message-action row, collapsible right details panel grouping all admin controls into QGroupBox sections); Telegram-like Qt stylesheet covers chat list rows, header, composer, primary blue buttons, ghost links, status bar, group boxes; desktop_chat_store timeline palette swapped to Telegram light theme (#e6ebee app bg, #eeffde outgoing mint, white incoming, #3390ec accent); store_test assertion updated to match the new outgoing color
+- Verified: build clean; app_desktop_store_test 20/20; validate_desktop_smoke 1/1 with all 16 smoke sub-stages green; live GUI launch survives >2s; cpp_chat_e2e 3/3; cpp_tls_client 2/2; tls_deployment_config 4/4; bundle verify ok 72 reqs
+- Next: M69 deployment hardening acceptance sweep, OR M70 Windows installer/signing, OR pivot to mobile/i18n/account-recovery per release-readiness gap report
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
+
+## Auto-deploy Qt runtime so app_desktop.exe double-click works (M73a) (gate: pass)
+
+- Timestamp: 2026-04-28T05:32:15+00:00
+- Delivered: client/src/CMakeLists.txt: post-build add_custom_command on app_desktop runs windeployqt (auto-detects debug/release from binary, --no-translations --no-system-d3d-compiler --no-opengl-sw); skippable via -DTELEGRAM_LIKE_SKIP_WINDEPLOYQT=ON for installer pipelines that prefer scripts/package_windows_desktop.ps1. Also updated scripts/validate_desktop_smoke.py to look in build-verify before build-codex/build so the canonical dev build dir is exercised.
+- Verified: windeployqt deployed Qt6Cored/Guid/Networkd/Svgd/Widgetsd + platforms/qwindowsd.dll + tls/qschannelbackendd next to app_desktop.exe; clean-PATH probe (only System32/Windows on PATH) launches app_desktop.exe successfully; validate_desktop_smoke.py passes 1/1 with clean PATH (no Qt bin)
+- Next: M69 deployment hardening acceptance sweep / M70 Windows installer signing / mobile arc per release-readiness gap report
+- Covers: REQ-VALIDATION, REQ-WINDOWS-PACKAGE-STAGING
+
+## Settings panel redesign + functional audit (M74) (gate: pass)
+
+- Timestamp: 2026-04-28T05:45:15+00:00
+- Delivered: Replaced flat scrollable groupbox stack with Settings header bar (title + close) + QListWidget category nav (Profile/Account/Connection/Devices/Contacts/Find Users/Groups/Attachments) + QStackedWidget per-page views; each page now has a clear heading, subtitle, and per-field uppercase labels; Profile page shows a 96px QPainter-rendered avatar disc with deterministic Telegram-style palette + initial(s) plus a 2-line identity label refreshed on every profile_get; render_profile feeds both helpers; Qt stylesheet extended with settingsHeader/settingsNav/pageHeading/fieldLabel/profileIdentity styles. Audited all 8 settings handlers (connect/register/refresh-save profile/refresh-manage devices/refresh-manage contacts/search users/create-manage group/save attachment) — every handler follows the same correct detach->API->QMetaObject::invokeMethod pattern with shutting_down_ guard; no bugs found.
+- Verified: build clean; validate_desktop_smoke 1/1 (16 sub-stages); GUI launches with clean PATH and stays up; bundle verify ok 72 reqs
+- Next: M69 deployment hardening sweep / M70 Windows installer / mobile arc per release-readiness gap report
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
+
+## Parity gap A: conversation_updated push + Edit/Delete UI (M75) (gate: pass)
+
+- Timestamp: 2026-04-28T05:59:55+00:00
+- Delivered: DesktopChatStore::apply_push gained conversation_updated branch (parses payload via JsonParser, refreshes title + participant_user_ids on the local conversation). Promoted apply_message_edited / apply_message_deleted to public so the actor's UI can apply locally on RPC success. app_desktop main.cpp adds Edit + Delete buttons to the message-action row (inline with Reply/Forward/React/Pin/Unpin), wired to ControlPlaneClient::edit_message / delete_message; Edit pops a QInputDialog for the new text, Delete pops a QMessageBox confirmation; both gated by set_message_action_enabled.
+- Verified: build clean; validate_desktop_smoke 1/1 (16 sub-stages); app_desktop_store_test 20/20
+- Next: B remote-control RPCs on ControlPlaneClient
+- Covers: REQ-CHAT-CORE, REQ-MESSAGE-EDIT-DELETE, REQ-GROUP-CONVERSATIONS, REQ-VALIDATION
+
+## Parity gap B: remote-control RPCs on ControlPlaneClient (M76) (gate: pass)
+
+- Timestamp: 2026-04-28T06:07:51+00:00
+- Delivered: Added 5 new result structs (RemoteSessionStateResult / RemoteRelayAssignmentResult / RemoteSessionTerminatedResult / RemoteRendezvousResult + RemoteRendezvousCandidate / RemoteInputAckResult) and 8 RPC methods (remote_invite / remote_approve / remote_reject / remote_cancel / remote_terminate / remote_disconnect / remote_rendezvous_request / remote_input_event) to client/src/transport/control_plane_client.{h,cpp}; new test exe remote_session_smoke + CMake target + scripts/validate_cpp_remote_session.py wrapper that pre-registers alice/dev_remote_smoke and drives 8 negative-path round-trips to verify request envelope serialization and typed-error parsers. legacy session_gateway_client.cpp is left untouched (still drives app_shell scripted demo).
+- Verified: build clean for all targets; new validate_cpp_remote_session.py PASS 8/8 (each new RPC returns typed error code through the new parser); validate_rendezvous 6/6, validate_terminate_disconnect 8/8, validate_input_injection 9/9 still green on server; validate_cpp_chat_e2e 3/3, validate_desktop_smoke 1/1 still green on existing client paths
+- Next: C drop dead enums + empty controllers
+- Covers: REQ-REMOTE-LIFECYCLE, REQ-TYPED-PROTO, REQ-VALIDATION
+
+## Parity gap C: drop dead enums + empty controllers (M77) (gate: pass)
+
+- Timestamp: 2026-04-28T06:12:35+00:00
+- Delivered: Removed two dead MessageType enum values (SESSION_REFRESH and MESSAGE_ACK — neither dispatched, emitted, nor sent by any client). PRESENCE_UPDATE retained for D. Deleted four empty C++ controller folders (client/src/{auth,chat,contacts,devices}) along with their CMakeLists entries; trimmed the matching describe() noise out of app_shell.cpp. Updated validate_typed_errors.py UNSUPPORTED_MESSAGE_TYPE probe to use MessageType.HEARTBEAT_ACK (a valid response-direction enum that has no inbound dispatch) since SESSION_REFRESH no longer exists.
+- Verified: validate_typed_errors 11/11; validate_cpp_chat_e2e 3/3; validate_cpp_remote_session 8/8; validate_desktop_smoke 1/1; validate_rendezvous 6/6; validate_terminate_disconnect 8/8; build clean across chat_client_core / app_chat / app_desktop / telegram_like_client / app_desktop_store_test / json_parser_test / remote_session_smoke
+- Next: D real PRESENCE_UPDATE push fan-out
+- Covers: REQ-TYPED-PROTO, REQ-VALIDATION
+
+## Parity gap D: PRESENCE_UPDATE push fan-out (M78) (gate: pass)
+
+- Timestamp: 2026-04-28T06:24:50+00:00
+- Delivered: Server now actively pushes online state changes instead of only answering pull queries. protocol.py has a new PresenceUpdatePayload (user_id, online, last_seen_at_ms). PresenceService accepts a transition_handler callback and exposes notify_session_started + a private _is_user_online_excluding helper; touch() detects offline->online by checking other sessions; revoke_device fires offline transition when removing the last fresh session. ServerApplication.__init__ wires PresenceService.set_transition_handler(self._fanout_presence_transition) which fans PRESENCE_UPDATE to every user sharing at least one conversation with the transitioning user via _fanout_to_users. LOGIN_REQUEST and REGISTER_REQUEST dispatch paths call presence_service.notify_session_started after the auth service creates the session. New validator scripts/validate_presence_push.py covers 6 scenarios via an in-process RecordingRegistry stub: login fan-out, no double-push for already-online user, stale->heartbeat re-online, transient revoke stays online, no false offline transition during multi-revoke, and shared-conversation gating (carol registered fresh sees no alice-presence push).
+- Verified: validate_presence_push 6/6; validate_presence_heartbeat 6/6 (no regression); validate_typed_errors 11/11; validate_cpp_chat_e2e 3/3; validate_cpp_remote_session 8/8; validate_desktop_smoke 1/1; validate_rendezvous 6/6; validate_terminate_disconnect 8/8; validate_message_fanout 4/4; validate_incremental_sync 8/8; validate_message_search 5/5; validate_attachments 11/11; validate_contacts 8/8; validate_group_conversations 6/6; bundle verify ok 72 reqs
+- Next: Move to release-readiness arc: M69 deployment hardening sweep / M70 Windows installer / mobile arc
+- Covers: REQ-PRESENCE-HEARTBEAT, REQ-TYPED-PROTO, REQ-VALIDATION
 

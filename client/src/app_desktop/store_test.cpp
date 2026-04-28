@@ -265,7 +265,7 @@ int main() {
                 && store.render_selected_transcript().find("u_alice | sent | msg_2") != std::string::npos,
             "rendered transcript missing outbound sent bubble state");
     require(store.render_selected_timeline_html().find("class='row out") != std::string::npos
-                && store.render_selected_timeline_html().find("d7f3c9") != std::string::npos,
+                && store.render_selected_timeline_html().find("eeffde") != std::string::npos,
             "rich timeline html missing outbound bubble styling");
     require(store.render_selected_timeline_html().find("href='msg://msg_2'") != std::string::npos,
             "rich timeline html missing clickable message action target link");

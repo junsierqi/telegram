@@ -2,10 +2,15 @@
 #include "transport/control_plane_client.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFont>
+#include <QFrame>
+#include <QGroupBox>
 #include <QHBoxLayout>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -15,10 +20,17 @@
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QPainter>
+#include <QPixmap>
+#include <QScrollArea>
+#include <QSizePolicy>
 #include <QSpinBox>
+#include <QSplitter>
+#include <QStackedWidget>
 #include <QStatusBar>
 #include <QString>
 #include <QTextBrowser>
+#include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -44,6 +56,9 @@ struct Args {
     std::string device = "dev_alice_qt";
     std::string host = "127.0.0.1";
     unsigned short port = 8787;
+    bool tls = false;
+    bool tls_insecure = false;
+    std::string tls_server_name;
     std::string conversation = "conv_alice_bob";
     std::string cache_file = ".tmp_app_desktop_cache.json";
     std::string smoke_save_dir;
@@ -91,6 +106,15 @@ bool parse_args(int argc, char** argv, Args& out) {
             const char* v = next("--port");
             if (!v) return false;
             out.port = static_cast<unsigned short>(std::atoi(v));
+        } else if (arg == "--tls") {
+            out.tls = true;
+        } else if (arg == "--tls-insecure") {
+            out.tls = true;
+            out.tls_insecure = true;
+        } else if (arg == "--tls-server-name") {
+            const char* v = next("--tls-server-name");
+            if (!v) return false;
+            out.tls_server_name = v;
         } else if (arg == "--conversation") {
             const char* v = next("--conversation");
             if (!v) return false;
@@ -134,7 +158,10 @@ std::string guess_mime_type(const QFileInfo& info) {
 
 int run_smoke(const Args& args) {
     ControlPlaneClient client;
-    if (!client.connect(args.host, args.port)) {
+    const bool connected = args.tls
+        ? client.connect_tls(args.host, args.port, args.tls_insecure, args.tls_server_name)
+        : client.connect(args.host, args.port);
+    if (!connected) {
         std::cerr << "desktop smoke: connect failed\n";
         return 1;
     }
@@ -401,125 +428,234 @@ class DesktopWindow final : public QMainWindow {
 public:
     explicit DesktopWindow(const Args& args, QWidget* parent = nullptr)
         : QMainWindow(parent), args_(args) {
-        auto* root = new QWidget(this);
-        auto* root_layout = new QVBoxLayout(root);
-
-        auto* server_row = new QHBoxLayout();
-        host_ = new QLineEdit(qstr(args.host), root);
-        port_ = new QSpinBox(root);
+        // ---- create every widget first; layout is assembled below ----
+        host_ = new QLineEdit(qstr(args.host));
+        port_ = new QSpinBox();
         port_->setRange(1, 65535);
         port_->setValue(args.port);
-        conversation_ = new QLineEdit(qstr(args.conversation), root);
-        server_row->addWidget(new QLabel("Host", root));
-        server_row->addWidget(host_);
-        server_row->addWidget(new QLabel("Port", root));
-        server_row->addWidget(port_);
-        server_row->addWidget(new QLabel("Conversation", root));
-        server_row->addWidget(conversation_);
-        root_layout->addLayout(server_row);
+        conversation_ = new QLineEdit(qstr(args.conversation));
+        tls_ = new QCheckBox("TLS");
+        tls_->setChecked(args.tls);
+        tls_insecure_ = new QCheckBox("Dev insecure");
+        tls_insecure_->setChecked(args.tls_insecure);
 
-        auto* login_row = new QHBoxLayout();
-        user_ = new QLineEdit(qstr(args.user), root);
-        password_ = new QLineEdit(qstr(args.password), root);
+        user_ = new QLineEdit(qstr(args.user));
+        password_ = new QLineEdit(qstr(args.password));
         password_->setEchoMode(QLineEdit::Password);
-        display_name_ = new QLineEdit(qstr(args.display_name.empty() ? args.user : args.display_name), root);
-        device_ = new QLineEdit(qstr(args.device), root);
-        connect_ = new QPushButton("Connect", root);
-        register_ = new QPushButton("Register", root);
-        login_row->addWidget(new QLabel("User", root));
-        login_row->addWidget(user_);
-        login_row->addWidget(new QLabel("Password", root));
-        login_row->addWidget(password_);
-        login_row->addWidget(new QLabel("Display", root));
-        login_row->addWidget(display_name_);
-        login_row->addWidget(new QLabel("Device", root));
-        login_row->addWidget(device_);
-        login_row->addWidget(connect_);
-        login_row->addWidget(register_);
-        root_layout->addLayout(login_row);
+        display_name_ = new QLineEdit(qstr(args.display_name.empty() ? args.user : args.display_name));
+        device_ = new QLineEdit(qstr(args.device));
+        connect_ = new QPushButton("Connect");
+        connect_->setObjectName("primary");
+        register_ = new QPushButton("Register");
 
-        auto* profile_row = new QHBoxLayout();
-        profile_display_name_ = new QLineEdit(root);
+        profile_display_name_ = new QLineEdit();
         profile_display_name_->setPlaceholderText("profile display name");
-        refresh_profile_ = new QPushButton("Refresh Profile", root);
-        save_profile_ = new QPushButton("Save Profile", root);
-        profile_ = new QPlainTextEdit(root);
+        refresh_profile_ = new QPushButton("Refresh");
+        save_profile_ = new QPushButton("Save");
+        profile_ = new QPlainTextEdit();
         profile_->setReadOnly(true);
         profile_->setMaximumHeight(72);
         profile_->setPlaceholderText("Profile appears here after connect.");
         set_profile_action_enabled(false);
-        profile_row->addWidget(new QLabel("Profile", root));
-        profile_row->addWidget(profile_display_name_, 1);
-        profile_row->addWidget(refresh_profile_);
-        profile_row->addWidget(save_profile_);
-        root_layout->addLayout(profile_row);
-        root_layout->addWidget(profile_);
 
-        messages_ = new QTextBrowser(root);
+        messages_ = new QTextBrowser();
         messages_->setReadOnly(true);
         messages_->setOpenLinks(false);
         messages_->setPlaceholderText("Connect to load recent messages. Incoming pushes appear here.");
-        chat_filter_ = new QLineEdit(root);
-        chat_filter_->setPlaceholderText("Filter chats by title, participant, message...");
-        message_search_ = new QLineEdit(root);
-        message_search_->setPlaceholderText("Search in selected conversation...");
-        prev_match_ = new QPushButton("Prev", root);
-        next_match_ = new QPushButton("Next", root);
-        load_older_ = new QPushButton("Load Older", root);
-        server_search_ = new QPushButton("Search Server", root);
+        messages_->setFrameShape(QFrame::NoFrame);
+
+        chat_filter_ = new QLineEdit();
+        chat_filter_->setPlaceholderText("Search chats");
+        chat_filter_->setClearButtonEnabled(true);
+
+        message_search_ = new QLineEdit();
+        message_search_->setPlaceholderText("Search in this chat");
+        message_search_->setClearButtonEnabled(true);
+        prev_match_ = new QPushButton("‹");
+        next_match_ = new QPushButton("›");
+        prev_match_->setMaximumWidth(28);
+        next_match_->setMaximumWidth(28);
+        load_older_ = new QPushButton("Older");
+        server_search_ = new QPushButton("Server");
         load_older_->setEnabled(false);
         server_search_->setEnabled(false);
-        search_status_ = new QLabel("No search", root);
-        message_search_results_ = new QPlainTextEdit(root);
+        search_status_ = new QLabel("No search");
+        search_status_->setObjectName("searchStatus");
+        message_search_results_ = new QPlainTextEdit();
         message_search_results_->setReadOnly(true);
-        message_search_results_->setMaximumHeight(110);
+        message_search_results_->setMaximumHeight(96);
         message_search_results_->setPlaceholderText("Server search results appear here.");
-        auto* nav_row = new QHBoxLayout();
-        nav_row->addWidget(new QLabel("Chats", root));
-        nav_row->addWidget(chat_filter_, 1);
-        nav_row->addWidget(new QLabel("Messages", root));
-        nav_row->addWidget(message_search_, 1);
-        nav_row->addWidget(prev_match_);
-        nav_row->addWidget(next_match_);
-        nav_row->addWidget(load_older_);
-        nav_row->addWidget(server_search_);
-        nav_row->addWidget(search_status_);
-        root_layout->addLayout(nav_row);
-        auto* content_row = new QHBoxLayout();
-        conversations_ = new QListWidget(root);
-        conversations_->setMinimumWidth(260);
-        conversations_->setMaximumWidth(360);
-        content_row->addWidget(conversations_);
-        content_row->addWidget(messages_, 1);
-        root_layout->addLayout(content_row, 1);
-        root_layout->addWidget(message_search_results_);
 
-        auto* send_row = new QHBoxLayout();
-        composer_ = new QLineEdit(root);
-        composer_->setPlaceholderText("Type a message...");
-        send_ = new QPushButton("Send", root);
-        attach_ = new QPushButton("Attach", root);
+        conversations_ = new QListWidget();
+        conversations_->setObjectName("chatList");
+        conversations_->setMinimumWidth(260);
+        conversations_->setSpacing(2);
+
+        composer_ = new QLineEdit();
+        composer_->setPlaceholderText("Message");
+        send_ = new QPushButton("Send");
+        send_->setObjectName("primary");
+        attach_ = new QPushButton("Attach");
         send_->setEnabled(false);
         attach_->setEnabled(false);
-        send_row->addWidget(composer_, 1);
-        send_row->addWidget(attach_);
-        send_row->addWidget(send_);
-        root_layout->addLayout(send_row);
 
-        auto* message_action_row = new QHBoxLayout();
-        message_action_id_ = new QLineEdit(root);
+        message_action_id_ = new QLineEdit();
         message_action_id_->setPlaceholderText("message_id");
-        reaction_emoji_ = new QLineEdit("+1", root);
+        reaction_emoji_ = new QLineEdit("+1");
         reaction_emoji_->setMaximumWidth(80);
-        reply_ = new QPushButton("Reply", root);
-        forward_ = new QPushButton("Forward", root);
-        react_ = new QPushButton("React", root);
-        pin_ = new QPushButton("Pin", root);
-        unpin_ = new QPushButton("Unpin", root);
-        use_match_ = new QPushButton("Use Match", root);
-        use_latest_ = new QPushButton("Use Latest", root);
+        reply_ = new QPushButton("Reply");
+        forward_ = new QPushButton("Forward");
+        react_ = new QPushButton("React");
+        pin_ = new QPushButton("Pin");
+        unpin_ = new QPushButton("Unpin");
+        edit_ = new QPushButton("Edit");
+        delete_ = new QPushButton("Delete");
+        use_match_ = new QPushButton("Use Match");
+        use_latest_ = new QPushButton("Use Latest");
         set_message_action_enabled(false);
-        message_action_row->addWidget(new QLabel("Message Action", root));
+
+        attachment_id_ = new QLineEdit();
+        attachment_id_->setPlaceholderText("attachment_id to save");
+        save_attachment_ = new QPushButton("Save Attachment");
+        save_attachment_->setEnabled(false);
+
+        transfer_status_ = new QLabel("Transfer idle");
+        transfer_progress_ = new QProgressBar();
+        transfer_progress_->setRange(0, 100);
+        transfer_progress_->setValue(0);
+        transfer_progress_->setTextVisible(true);
+
+        refresh_devices_ = new QPushButton("Refresh Devices");
+        refresh_devices_->setEnabled(false);
+        devices_ = new QPlainTextEdit();
+        devices_->setReadOnly(true);
+        devices_->setMaximumHeight(110);
+        devices_->setPlaceholderText("Connected devices appear here.");
+
+        device_action_id_ = new QLineEdit();
+        device_action_id_->setPlaceholderText("device_id to manage");
+        revoke_device_ = new QPushButton("Revoke");
+        trust_device_ = new QPushButton("Trust");
+        untrust_device_ = new QPushButton("Untrust");
+        set_device_action_enabled(false);
+
+        refresh_contacts_ = new QPushButton("Refresh Contacts");
+        refresh_contacts_->setEnabled(false);
+        contact_user_id_ = new QLineEdit();
+        contact_user_id_->setPlaceholderText("user_id");
+        add_contact_ = new QPushButton("Add");
+        remove_contact_ = new QPushButton("Remove");
+        contacts_ = new QPlainTextEdit();
+        contacts_->setReadOnly(true);
+        contacts_->setMaximumHeight(100);
+        contacts_->setPlaceholderText("Contacts appear here.");
+        set_contact_action_enabled(false);
+
+        user_search_query_ = new QLineEdit();
+        user_search_query_->setPlaceholderText("search username/display/user_id");
+        search_users_ = new QPushButton("Search Users");
+        user_search_results_ = new QPlainTextEdit();
+        user_search_results_->setReadOnly(true);
+        user_search_results_->setMaximumHeight(100);
+        user_search_results_->setPlaceholderText("User search results appear here.");
+        set_user_search_enabled(false);
+
+        group_title_ = new QLineEdit();
+        group_title_->setPlaceholderText("new group title");
+        group_participants_ = new QLineEdit();
+        group_participants_->setPlaceholderText("participant user_ids comma-separated");
+        create_group_ = new QPushButton("Create Group");
+        create_group_->setEnabled(false);
+
+        member_user_id_ = new QLineEdit();
+        member_user_id_->setPlaceholderText("member user_id");
+        add_member_ = new QPushButton("Add Member");
+        remove_member_ = new QPushButton("Remove Member");
+        set_group_action_enabled(false);
+
+        chat_header_title_ = new QLabel("No chat selected");
+        chat_header_title_->setObjectName("chatHeaderTitle");
+        chat_header_subtitle_ = new QLabel("");
+        chat_header_subtitle_->setObjectName("chatHeaderSubtitle");
+
+        // ---- sidebar (left) ----
+        auto* sidebar = new QWidget();
+        sidebar->setObjectName("sidebar");
+        auto* sidebar_layout = new QVBoxLayout(sidebar);
+        sidebar_layout->setContentsMargins(0, 0, 0, 0);
+        sidebar_layout->setSpacing(0);
+        auto* sidebar_search_wrap = new QWidget();
+        sidebar_search_wrap->setObjectName("sidebarSearch");
+        auto* sidebar_search_layout = new QHBoxLayout(sidebar_search_wrap);
+        sidebar_search_layout->setContentsMargins(10, 10, 10, 10);
+        sidebar_search_layout->addWidget(chat_filter_);
+        sidebar_layout->addWidget(sidebar_search_wrap);
+        sidebar_layout->addWidget(conversations_, 1);
+        toggle_details_ = new QPushButton("Settings ▸");
+        toggle_details_->setObjectName("ghost");
+        auto* sidebar_footer_wrap = new QWidget();
+        sidebar_footer_wrap->setObjectName("sidebarFooter");
+        auto* sidebar_footer_layout = new QHBoxLayout(sidebar_footer_wrap);
+        sidebar_footer_layout->setContentsMargins(10, 8, 10, 8);
+        sidebar_footer_layout->addWidget(toggle_details_, 1);
+        sidebar_layout->addWidget(sidebar_footer_wrap);
+
+        // ---- center pane ----
+        auto* center = new QWidget();
+        center->setObjectName("centerPane");
+        auto* center_layout = new QVBoxLayout(center);
+        center_layout->setContentsMargins(0, 0, 0, 0);
+        center_layout->setSpacing(0);
+        // chat header
+        auto* chat_header = new QWidget();
+        chat_header->setObjectName("chatHeader");
+        auto* chat_header_layout = new QHBoxLayout(chat_header);
+        chat_header_layout->setContentsMargins(16, 10, 16, 10);
+        auto* header_titles = new QVBoxLayout();
+        header_titles->setSpacing(0);
+        header_titles->addWidget(chat_header_title_);
+        header_titles->addWidget(chat_header_subtitle_);
+        chat_header_layout->addLayout(header_titles, 1);
+        chat_header_layout->addWidget(load_older_);
+        chat_header_layout->addWidget(server_search_);
+        center_layout->addWidget(chat_header);
+        // in-chat search row (under header)
+        auto* search_row_wrap = new QWidget();
+        search_row_wrap->setObjectName("inChatSearch");
+        auto* search_row = new QHBoxLayout(search_row_wrap);
+        search_row->setContentsMargins(16, 6, 16, 6);
+        search_row->addWidget(message_search_, 1);
+        search_row->addWidget(prev_match_);
+        search_row->addWidget(next_match_);
+        search_row->addWidget(search_status_);
+        center_layout->addWidget(search_row_wrap);
+        // timeline
+        center_layout->addWidget(messages_, 1);
+        // server search result panel (collapsible feel)
+        center_layout->addWidget(message_search_results_);
+        // transfer status
+        auto* transfer_wrap = new QWidget();
+        auto* transfer_row = new QHBoxLayout(transfer_wrap);
+        transfer_row->setContentsMargins(16, 4, 16, 4);
+        transfer_row->addWidget(transfer_status_);
+        transfer_row->addWidget(transfer_progress_, 1);
+        center_layout->addWidget(transfer_wrap);
+        // composer
+        auto* composer_wrap = new QWidget();
+        composer_wrap->setObjectName("composer");
+        auto* send_row = new QHBoxLayout(composer_wrap);
+        send_row->setContentsMargins(16, 10, 16, 12);
+        send_row->setSpacing(8);
+        send_row->addWidget(attach_);
+        send_row->addWidget(composer_, 1);
+        send_row->addWidget(send_);
+        center_layout->addWidget(composer_wrap);
+        // message-action row (advanced; stays visible under composer because smoke + power users use it)
+        auto* message_action_wrap = new QWidget();
+        message_action_wrap->setObjectName("messageActions");
+        auto* message_action_row = new QHBoxLayout(message_action_wrap);
+        message_action_row->setContentsMargins(16, 6, 16, 8);
+        message_action_row->addWidget(new QLabel("Action"));
         message_action_row->addWidget(message_action_id_, 1);
         message_action_row->addWidget(reaction_emoji_);
         message_action_row->addWidget(use_match_);
@@ -529,118 +665,294 @@ public:
         message_action_row->addWidget(react_);
         message_action_row->addWidget(pin_);
         message_action_row->addWidget(unpin_);
-        root_layout->addLayout(message_action_row);
+        message_action_row->addWidget(edit_);
+        message_action_row->addWidget(delete_);
+        center_layout->addWidget(message_action_wrap);
 
-        auto* attachment_row = new QHBoxLayout();
-        attachment_id_ = new QLineEdit(root);
-        attachment_id_->setPlaceholderText("attachment_id to save");
-        save_attachment_ = new QPushButton("Save Attachment", root);
-        save_attachment_->setEnabled(false);
-        attachment_row->addWidget(new QLabel("Attachment", root));
-        attachment_row->addWidget(attachment_id_, 1);
-        attachment_row->addWidget(save_attachment_);
-        root_layout->addLayout(attachment_row);
+        // ---- details panel (right, collapsible) ----
+        details_panel_ = new QScrollArea();
+        details_panel_->setObjectName("detailsPanel");
+        details_panel_->setWidgetResizable(true);
+        details_panel_->setFrameShape(QFrame::NoFrame);
+        auto* details_inner = new QWidget();
+        auto* details_root_layout = new QVBoxLayout(details_inner);
+        details_root_layout->setContentsMargins(0, 0, 0, 0);
+        details_root_layout->setSpacing(0);
 
-        auto* transfer_row = new QHBoxLayout();
-        transfer_status_ = new QLabel("Transfer idle", root);
-        transfer_progress_ = new QProgressBar(root);
-        transfer_progress_->setRange(0, 100);
-        transfer_progress_->setValue(0);
-        transfer_progress_->setTextVisible(true);
-        transfer_row->addWidget(transfer_status_);
-        transfer_row->addWidget(transfer_progress_, 1);
-        root_layout->addLayout(transfer_row);
+        // Settings header bar
+        auto* settings_header = new QWidget();
+        settings_header->setObjectName("settingsHeader");
+        auto* settings_header_layout = new QHBoxLayout(settings_header);
+        settings_header_layout->setContentsMargins(16, 12, 12, 12);
+        auto* settings_title = new QLabel("Settings");
+        settings_title->setObjectName("settingsTitle");
+        settings_header_layout->addWidget(settings_title, 1);
+        auto* settings_close = new QToolButton();
+        settings_close->setObjectName("settingsClose");
+        settings_close->setText("✕");
+        settings_close->setToolTip("Close settings");
+        settings_header_layout->addWidget(settings_close);
+        details_root_layout->addWidget(settings_header);
 
-        auto* device_row = new QHBoxLayout();
-        refresh_devices_ = new QPushButton("Refresh Devices", root);
-        refresh_devices_->setEnabled(false);
-        devices_ = new QPlainTextEdit(root);
-        devices_->setReadOnly(true);
-        devices_->setMaximumHeight(110);
-        devices_->setPlaceholderText("Connected devices appear here.");
-        device_row->addWidget(refresh_devices_);
-        device_row->addWidget(devices_, 1);
-        root_layout->addLayout(device_row);
+        // body: nav (left) + stacked pages (right)
+        auto* body_wrap = new QWidget();
+        auto* body_layout = new QHBoxLayout(body_wrap);
+        body_layout->setContentsMargins(0, 0, 0, 0);
+        body_layout->setSpacing(0);
 
-        auto* device_action_row = new QHBoxLayout();
-        device_action_id_ = new QLineEdit(root);
-        device_action_id_->setPlaceholderText("device_id to manage");
-        revoke_device_ = new QPushButton("Revoke", root);
-        trust_device_ = new QPushButton("Trust", root);
-        untrust_device_ = new QPushButton("Untrust", root);
-        set_device_action_enabled(false);
-        device_action_row->addWidget(new QLabel("Manage Device", root));
-        device_action_row->addWidget(device_action_id_, 1);
-        device_action_row->addWidget(revoke_device_);
-        device_action_row->addWidget(trust_device_);
-        device_action_row->addWidget(untrust_device_);
-        root_layout->addLayout(device_action_row);
+        settings_nav_ = new QListWidget();
+        settings_nav_->setObjectName("settingsNav");
+        settings_nav_->setMinimumWidth(150);
+        settings_nav_->setMaximumWidth(170);
+        settings_nav_->setFrameShape(QFrame::NoFrame);
+        settings_nav_->setSpacing(2);
+        for (const char* label : {"Profile", "Account", "Connection",
+                                  "Devices", "Contacts", "Find Users",
+                                  "Groups", "Attachments"}) {
+            settings_nav_->addItem(label);
+        }
+        body_layout->addWidget(settings_nav_);
 
-        auto* contacts_row = new QHBoxLayout();
-        refresh_contacts_ = new QPushButton("Refresh Contacts", root);
-        refresh_contacts_->setEnabled(false);
-        contact_user_id_ = new QLineEdit(root);
-        contact_user_id_->setPlaceholderText("user_id");
-        add_contact_ = new QPushButton("Add Contact", root);
-        remove_contact_ = new QPushButton("Remove Contact", root);
-        contacts_ = new QPlainTextEdit(root);
-        contacts_->setReadOnly(true);
-        contacts_->setMaximumHeight(100);
-        contacts_->setPlaceholderText("Contacts appear here.");
-        set_contact_action_enabled(false);
-        contacts_row->addWidget(refresh_contacts_);
-        contacts_row->addWidget(contact_user_id_, 1);
-        contacts_row->addWidget(add_contact_);
-        contacts_row->addWidget(remove_contact_);
-        root_layout->addLayout(contacts_row);
-        root_layout->addWidget(contacts_);
+        settings_pages_ = new QStackedWidget();
+        settings_pages_->setObjectName("settingsPages");
 
-        auto* user_search_row = new QHBoxLayout();
-        user_search_query_ = new QLineEdit(root);
-        user_search_query_->setPlaceholderText("search username/display/user_id");
-        search_users_ = new QPushButton("Search Users", root);
-        user_search_results_ = new QPlainTextEdit(root);
-        user_search_results_->setReadOnly(true);
-        user_search_results_->setMaximumHeight(100);
-        user_search_results_->setPlaceholderText("User search results appear here.");
-        set_user_search_enabled(false);
-        user_search_row->addWidget(new QLabel("Find User", root));
-        user_search_row->addWidget(user_search_query_, 1);
-        user_search_row->addWidget(search_users_);
-        root_layout->addLayout(user_search_row);
-        root_layout->addWidget(user_search_results_);
+        auto make_page = [](const char* title, const char* subtitle, QLayout* body) -> QWidget* {
+            auto* page = new QWidget();
+            auto* layout = new QVBoxLayout(page);
+            layout->setContentsMargins(20, 18, 20, 18);
+            layout->setSpacing(12);
+            auto* heading = new QLabel(title);
+            heading->setObjectName("pageHeading");
+            layout->addWidget(heading);
+            if (subtitle && *subtitle) {
+                auto* sub = new QLabel(subtitle);
+                sub->setObjectName("pageSubtitle");
+                sub->setWordWrap(true);
+                layout->addWidget(sub);
+            }
+            auto* container = new QWidget();
+            container->setLayout(body);
+            layout->addWidget(container);
+            layout->addStretch(1);
+            return page;
+        };
 
-        auto* group_row = new QHBoxLayout();
-        group_title_ = new QLineEdit(root);
-        group_title_->setPlaceholderText("new group title");
-        group_participants_ = new QLineEdit(root);
-        group_participants_->setPlaceholderText("participant user_ids comma-separated");
-        create_group_ = new QPushButton("Create Group", root);
-        create_group_->setEnabled(false);
-        group_row->addWidget(new QLabel("Group", root));
-        group_row->addWidget(group_title_, 1);
-        group_row->addWidget(group_participants_, 1);
-        group_row->addWidget(create_group_);
-        root_layout->addLayout(group_row);
+        // === Profile page (with avatar) ===
+        avatar_label_ = new QLabel();
+        avatar_label_->setObjectName("profileAvatar");
+        avatar_label_->setFixedSize(96, 96);
+        avatar_label_->setAlignment(Qt::AlignCenter);
+        update_avatar_pixmap(args.user, args.display_name.empty() ? args.user : args.display_name);
 
-        auto* member_row = new QHBoxLayout();
-        member_user_id_ = new QLineEdit(root);
-        member_user_id_->setPlaceholderText("member user_id");
-        add_member_ = new QPushButton("Add Member", root);
-        remove_member_ = new QPushButton("Remove Member", root);
-        set_group_action_enabled(false);
-        member_row->addWidget(new QLabel("Selected Conversation Member", root));
-        member_row->addWidget(member_user_id_, 1);
-        member_row->addWidget(add_member_);
-        member_row->addWidget(remove_member_);
-        root_layout->addLayout(member_row);
+        profile_identity_label_ = new QLabel("Not connected");
+        profile_identity_label_->setObjectName("profileIdentity");
+        profile_identity_label_->setWordWrap(true);
 
-        setCentralWidget(root);
-        resize(980, 640);
+        auto* profile_body = new QVBoxLayout();
+        profile_body->setSpacing(10);
+        auto* profile_top = new QHBoxLayout();
+        profile_top->setSpacing(14);
+        profile_top->addWidget(avatar_label_);
+        auto* profile_top_text = new QVBoxLayout();
+        profile_top_text->addWidget(profile_identity_label_);
+        profile_top_text->addStretch(1);
+        profile_top->addLayout(profile_top_text, 1);
+        profile_body->addLayout(profile_top);
+        profile_body->addWidget(new QLabel("Display name"));
+        auto* prof_form = new QHBoxLayout();
+        prof_form->addWidget(profile_display_name_, 1);
+        prof_form->addWidget(refresh_profile_);
+        prof_form->addWidget(save_profile_);
+        profile_body->addLayout(prof_form);
+        profile_body->addWidget(new QLabel("Server profile snapshot"));
+        profile_body->addWidget(profile_);
+        settings_pages_->addWidget(
+            make_page("Profile", "Edit how others see you on this server.", profile_body));
+
+        // === Account page ===
+        auto* account_body = new QVBoxLayout();
+        account_body->setSpacing(10);
+        auto* acc_user_lab = new QLabel("Username");
+        acc_user_lab->setObjectName("fieldLabel");
+        account_body->addWidget(acc_user_lab);
+        account_body->addWidget(user_);
+        auto* acc_pwd_lab = new QLabel("Password");
+        acc_pwd_lab->setObjectName("fieldLabel");
+        account_body->addWidget(acc_pwd_lab);
+        account_body->addWidget(password_);
+        auto* acc_disp_lab = new QLabel("Display name (used at register)");
+        acc_disp_lab->setObjectName("fieldLabel");
+        account_body->addWidget(acc_disp_lab);
+        account_body->addWidget(display_name_);
+        auto* acc_dev_lab = new QLabel("Device id");
+        acc_dev_lab->setObjectName("fieldLabel");
+        account_body->addWidget(acc_dev_lab);
+        account_body->addWidget(device_);
+        auto* acc_btns = new QHBoxLayout();
+        acc_btns->addWidget(connect_);
+        acc_btns->addWidget(register_);
+        acc_btns->addStretch(1);
+        account_body->addLayout(acc_btns);
+        settings_pages_->addWidget(
+            make_page("Account", "Sign in or create a new account on this server.", account_body));
+
+        // === Connection page ===
+        auto* connection_body = new QVBoxLayout();
+        connection_body->setSpacing(10);
+        auto* conn_host_lab = new QLabel("Host");
+        conn_host_lab->setObjectName("fieldLabel");
+        connection_body->addWidget(conn_host_lab);
+        auto* conn_host_row = new QHBoxLayout();
+        conn_host_row->addWidget(host_, 1);
+        conn_host_row->addWidget(new QLabel("Port"));
+        conn_host_row->addWidget(port_);
+        connection_body->addLayout(conn_host_row);
+        auto* conn_tls_lab = new QLabel("Transport security");
+        conn_tls_lab->setObjectName("fieldLabel");
+        connection_body->addWidget(conn_tls_lab);
+        auto* conn_tls_row = new QHBoxLayout();
+        conn_tls_row->addWidget(tls_);
+        conn_tls_row->addWidget(tls_insecure_);
+        conn_tls_row->addStretch(1);
+        connection_body->addLayout(conn_tls_row);
+        auto* conn_conv_lab = new QLabel("Default conversation");
+        conn_conv_lab->setObjectName("fieldLabel");
+        connection_body->addWidget(conn_conv_lab);
+        connection_body->addWidget(conversation_);
+        settings_pages_->addWidget(
+            make_page("Connection", "Where to connect and how to secure the link.", connection_body));
+
+        // === Devices page ===
+        auto* devices_body = new QVBoxLayout();
+        devices_body->setSpacing(10);
+        auto* dev_top = new QHBoxLayout();
+        dev_top->addWidget(refresh_devices_);
+        dev_top->addStretch(1);
+        devices_body->addLayout(dev_top);
+        devices_body->addWidget(devices_);
+        auto* dev_action_lab = new QLabel("Manage device");
+        dev_action_lab->setObjectName("fieldLabel");
+        devices_body->addWidget(dev_action_lab);
+        devices_body->addWidget(device_action_id_);
+        auto* dev_btns = new QHBoxLayout();
+        dev_btns->addWidget(revoke_device_);
+        dev_btns->addWidget(trust_device_);
+        dev_btns->addWidget(untrust_device_);
+        dev_btns->addStretch(1);
+        devices_body->addLayout(dev_btns);
+        settings_pages_->addWidget(
+            make_page("Devices", "Sessions signed in to this account. Revoke or trust each device.", devices_body));
+
+        // === Contacts page ===
+        auto* contacts_body = new QVBoxLayout();
+        contacts_body->setSpacing(10);
+        auto* con_top = new QHBoxLayout();
+        con_top->addWidget(refresh_contacts_);
+        con_top->addStretch(1);
+        contacts_body->addLayout(con_top);
+        auto* con_id_lab = new QLabel("Contact user_id");
+        con_id_lab->setObjectName("fieldLabel");
+        contacts_body->addWidget(con_id_lab);
+        contacts_body->addWidget(contact_user_id_);
+        auto* con_btns = new QHBoxLayout();
+        con_btns->addWidget(add_contact_);
+        con_btns->addWidget(remove_contact_);
+        con_btns->addStretch(1);
+        contacts_body->addLayout(con_btns);
+        contacts_body->addWidget(contacts_);
+        settings_pages_->addWidget(
+            make_page("Contacts", "Your saved contacts and their online state.", contacts_body));
+
+        // === Find Users page ===
+        auto* find_body = new QVBoxLayout();
+        find_body->setSpacing(10);
+        auto* find_lab = new QLabel("Search query");
+        find_lab->setObjectName("fieldLabel");
+        find_body->addWidget(find_lab);
+        auto* find_row = new QHBoxLayout();
+        find_row->addWidget(user_search_query_, 1);
+        find_row->addWidget(search_users_);
+        find_body->addLayout(find_row);
+        find_body->addWidget(user_search_results_);
+        settings_pages_->addWidget(
+            make_page("Find Users", "Search by username, display name or user_id.", find_body));
+
+        // === Groups page ===
+        auto* groups_body = new QVBoxLayout();
+        groups_body->setSpacing(10);
+        auto* grp_title_lab = new QLabel("New group");
+        grp_title_lab->setObjectName("fieldLabel");
+        groups_body->addWidget(grp_title_lab);
+        groups_body->addWidget(group_title_);
+        auto* grp_part_lab = new QLabel("Initial participants (comma-separated user_ids)");
+        grp_part_lab->setObjectName("fieldLabel");
+        groups_body->addWidget(grp_part_lab);
+        groups_body->addWidget(group_participants_);
+        auto* grp_create_row = new QHBoxLayout();
+        grp_create_row->addWidget(create_group_);
+        grp_create_row->addStretch(1);
+        groups_body->addLayout(grp_create_row);
+        auto* grp_member_lab = new QLabel("Add or remove a member from the selected chat");
+        grp_member_lab->setObjectName("fieldLabel");
+        groups_body->addWidget(grp_member_lab);
+        groups_body->addWidget(member_user_id_);
+        auto* grp_member_btns = new QHBoxLayout();
+        grp_member_btns->addWidget(add_member_);
+        grp_member_btns->addWidget(remove_member_);
+        grp_member_btns->addStretch(1);
+        groups_body->addLayout(grp_member_btns);
+        settings_pages_->addWidget(
+            make_page("Groups", "Create new groups and manage selected chat membership.", groups_body));
+
+        // === Attachments page ===
+        auto* attach_body = new QVBoxLayout();
+        attach_body->setSpacing(10);
+        auto* att_lab = new QLabel("Attachment id");
+        att_lab->setObjectName("fieldLabel");
+        attach_body->addWidget(att_lab);
+        attach_body->addWidget(attachment_id_);
+        auto* att_btns = new QHBoxLayout();
+        att_btns->addWidget(save_attachment_);
+        att_btns->addStretch(1);
+        attach_body->addLayout(att_btns);
+        settings_pages_->addWidget(
+            make_page("Attachments", "Save received attachments by id to disk.", attach_body));
+
+        body_layout->addWidget(settings_pages_, 1);
+        details_root_layout->addWidget(body_wrap, 1);
+
+        QObject::connect(settings_nav_, &QListWidget::currentRowChanged,
+                         [this](int row) {
+                             if (row >= 0) settings_pages_->setCurrentIndex(row);
+                         });
+        QObject::connect(settings_close, &QToolButton::clicked,
+                         [this] { toggle_details_panel(); });
+        settings_nav_->setCurrentRow(0);
+
+        details_panel_->setWidget(details_inner);
+        details_panel_->setMinimumWidth(420);
+        details_panel_->setVisible(false);
+
+        // ---- compose splitter ----
+        auto* splitter = new QSplitter(Qt::Horizontal);
+        splitter->setObjectName("mainSplitter");
+        splitter->addWidget(sidebar);
+        splitter->addWidget(center);
+        splitter->addWidget(details_panel_);
+        splitter->setStretchFactor(0, 0);
+        splitter->setStretchFactor(1, 1);
+        splitter->setStretchFactor(2, 0);
+        splitter->setSizes({320, 700, 360});
+        splitter->setChildrenCollapsible(false);
+
+        setCentralWidget(splitter);
+        resize(1200, 760);
         setWindowTitle("Telegram-like Desktop");
+        setStyleSheet(telegram_stylesheet());
         statusBar()->showMessage("Disconnected");
         store_.set_selected_conversation(args.conversation);
         load_cache();
+        update_chat_header();
         render_store();
 
         QObject::connect(connect_, &QPushButton::clicked, [this] { connect_and_sync(); });
@@ -652,6 +964,8 @@ public:
         QObject::connect(react_, &QPushButton::clicked, [this] { react_to_message(); });
         QObject::connect(pin_, &QPushButton::clicked, [this] { pin_message(true); });
         QObject::connect(unpin_, &QPushButton::clicked, [this] { pin_message(false); });
+        QObject::connect(edit_, &QPushButton::clicked, [this] { edit_message_action(); });
+        QObject::connect(delete_, &QPushButton::clicked, [this] { delete_message_action(); });
         QObject::connect(use_match_, &QPushButton::clicked, [this] { use_focused_message_as_action_target(); });
         QObject::connect(use_latest_, &QPushButton::clicked, [this] { use_latest_message_as_action_target(); });
         QObject::connect(messages_, &QTextBrowser::anchorClicked, [this](const QUrl& url) {
@@ -696,9 +1010,11 @@ public:
             message_action_id_->setText(qstr(store_.last_message_id(conversation_id)));
             current_search_index_ = -1;
             refresh_message_search();
+            update_chat_header();
             save_cache();
             render_store();
         });
+        QObject::connect(toggle_details_, &QPushButton::clicked, [this] { toggle_details_panel(); });
     }
 
     ~DesktopWindow() override {
@@ -711,11 +1027,156 @@ private:
         messages_->append(line.toHtmlEscaped());
     }
 
+    static QString telegram_stylesheet() {
+        return QStringLiteral(
+            "QMainWindow, QWidget { background:#f4f5f7; color:#0f1419; font-family:'Segoe UI','Helvetica Neue',sans-serif; font-size:13px; }"
+            "QSplitter#mainSplitter::handle { background:#e1e4e8; width:1px; }"
+            "QWidget#sidebar { background:#ffffff; border-right:1px solid #e6e8eb; }"
+            "QWidget#sidebarSearch { background:#ffffff; border-bottom:1px solid #eef0f2; }"
+            "QWidget#sidebarFooter { background:#fafbfc; border-top:1px solid #eef0f2; }"
+            "QListWidget#chatList { background:#ffffff; border:none; padding:6px 4px; }"
+            "QListWidget#chatList::item { padding:10px 12px; border-radius:8px; margin:1px 4px; color:#0f1419; }"
+            "QListWidget#chatList::item:selected { background:#e7f0fb; color:#0f1419; }"
+            "QListWidget#chatList::item:hover { background:#f0f3f6; }"
+            "QWidget#centerPane { background:#e6ebee; }"
+            "QWidget#chatHeader { background:#ffffff; border-bottom:1px solid #e6e8eb; }"
+            "QLabel#chatHeaderTitle { font-weight:600; font-size:15px; color:#0f1419; }"
+            "QLabel#chatHeaderSubtitle { font-size:11px; color:#7c8a96; }"
+            "QWidget#inChatSearch { background:#f4f6f8; border-bottom:1px solid #e6e8eb; }"
+            "QLabel#searchStatus { color:#7c8a96; font-size:11px; padding-left:6px; }"
+            "QTextBrowser { background:#e6ebee; border:none; }"
+            "QWidget#composer { background:#ffffff; border-top:1px solid #e6e8eb; }"
+            "QWidget#messageActions { background:#f7f8fa; border-top:1px solid #eef0f2; }"
+            "QScrollArea#detailsPanel { background:#ffffff; border-left:1px solid #e6e8eb; }"
+            "QScrollArea#detailsPanel > QWidget > QWidget { background:#ffffff; }"
+            "QWidget#settingsHeader { background:#ffffff; border-bottom:1px solid #eef0f2; }"
+            "QLabel#settingsTitle { font-weight:700; font-size:15px; color:#0f1419; }"
+            "QToolButton#settingsClose { border:none; background:transparent; color:#7c8a96; font-size:14px; padding:4px 8px; border-radius:6px; }"
+            "QToolButton#settingsClose:hover { background:#f0f3f6; color:#0f1419; }"
+            "QListWidget#settingsNav { background:#fafbfc; border-right:1px solid #eef0f2; padding:8px 4px; }"
+            "QListWidget#settingsNav::item { padding:9px 12px; border-radius:8px; margin:1px 4px; color:#3a4853; }"
+            "QListWidget#settingsNav::item:selected { background:#e7f0fb; color:#0f1419; font-weight:600; }"
+            "QListWidget#settingsNav::item:hover { background:#f0f3f6; }"
+            "QStackedWidget#settingsPages { background:#ffffff; }"
+            "QLabel#pageHeading { font-size:18px; font-weight:600; color:#0f1419; }"
+            "QLabel#pageSubtitle { font-size:12px; color:#7c8a96; padding-bottom:4px; }"
+            "QLabel#fieldLabel { font-size:11px; font-weight:600; color:#7c8a96; text-transform:uppercase; letter-spacing:0.5px; }"
+            "QLabel#profileIdentity { font-size:13px; }"
+            "QGroupBox#detailsGroup { border:1px solid #e6e8eb; border-radius:10px; margin-top:8px; padding-top:8px; background:#ffffff; }"
+            "QGroupBox#detailsGroup::title { subcontrol-origin:margin; left:12px; padding:0 4px; color:#3390ec; font-weight:600; }"
+            "QLineEdit, QSpinBox, QPlainTextEdit { background:#ffffff; border:1px solid #d8dde2; border-radius:8px; padding:6px 9px; selection-background-color:#3390ec; }"
+            "QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus { border:1px solid #3390ec; }"
+            "QPushButton { background:#ffffff; border:1px solid #d8dde2; border-radius:8px; padding:6px 14px; color:#0f1419; }"
+            "QPushButton:hover { background:#f0f3f6; }"
+            "QPushButton:disabled { color:#9aa3ab; background:#f7f8fa; border:1px solid #e6e8eb; }"
+            "QPushButton#primary { background:#3390ec; color:#ffffff; border:1px solid #3390ec; font-weight:600; }"
+            "QPushButton#primary:hover { background:#2079d2; border:1px solid #2079d2; }"
+            "QPushButton#primary:disabled { background:#a8c8ec; color:#ffffff; border:1px solid #a8c8ec; }"
+            "QPushButton#ghost { background:transparent; border:none; color:#3390ec; padding:4px 8px; }"
+            "QPushButton#ghost:hover { background:#eaf3fc; }"
+            "QCheckBox { spacing:6px; }"
+            "QStatusBar { background:#ffffff; border-top:1px solid #e6e8eb; color:#7c8a96; }"
+            "QProgressBar { border:1px solid #d8dde2; border-radius:6px; background:#ffffff; height:14px; text-align:center; }"
+            "QProgressBar::chunk { background:#3390ec; border-radius:6px; }"
+        );
+    }
+
+    void update_chat_header() {
+        const auto* conversation = store_.selected_conversation();
+        if (conversation == nullptr) {
+            chat_header_title_->setText("No chat selected");
+            chat_header_subtitle_->setText("Pick a chat from the list");
+            return;
+        }
+        const QString title = conversation->title.empty()
+            ? qstr(conversation->conversation_id)
+            : qstr(conversation->title);
+        chat_header_title_->setText(title);
+        std::string subtitle = conversation->conversation_id;
+        if (!conversation->participant_user_ids.empty()) {
+            subtitle += "  ·  ";
+            for (std::size_t i = 0; i < conversation->participant_user_ids.size(); ++i) {
+                if (i > 0) subtitle += ", ";
+                subtitle += conversation->participant_user_ids[i];
+            }
+        }
+        chat_header_subtitle_->setText(qstr(subtitle));
+    }
+
+    void toggle_details_panel() {
+        const bool visible = details_panel_->isVisible();
+        details_panel_->setVisible(!visible);
+        toggle_details_->setText(visible ? "Settings ▸" : "Settings ▾");
+    }
+
+    static QColor avatar_color_for(const std::string& seed) {
+        // 8 Telegram-style accent colors, picked deterministically from seed.
+        static const QColor palette[] = {
+            QColor("#e17076"), QColor("#7bc862"), QColor("#65aadd"),
+            QColor("#a695e7"), QColor("#ee7aae"), QColor("#6ec9cb"),
+            QColor("#faa774"), QColor("#7d8ea0")
+        };
+        if (seed.empty()) return palette[0];
+        unsigned hash = 0;
+        for (char c : seed) hash = hash * 31u + static_cast<unsigned char>(c);
+        return palette[hash % (sizeof(palette) / sizeof(palette[0]))];
+    }
+
+    void update_avatar_pixmap(const std::string& user_id, const std::string& display_name) {
+        if (avatar_label_ == nullptr) return;
+        const std::string& source = display_name.empty() ? user_id : display_name;
+        QString initials;
+        if (!source.empty()) {
+            const auto qsource = qstr(source).trimmed();
+            if (!qsource.isEmpty()) {
+                initials += qsource.at(0).toUpper();
+                const int space = qsource.indexOf(' ');
+                if (space >= 0 && space + 1 < qsource.size()) {
+                    initials += qsource.at(space + 1).toUpper();
+                }
+            }
+        }
+        if (initials.isEmpty()) initials = "?";
+
+        const int side = 96;
+        QPixmap pixmap(side, side);
+        pixmap.fill(Qt::transparent);
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+        const QColor bg = avatar_color_for(source);
+        painter.setBrush(bg);
+        painter.setPen(Qt::NoPen);
+        painter.drawEllipse(0, 0, side, side);
+        QFont f = painter.font();
+        f.setBold(true);
+        f.setPointSize(28);
+        painter.setFont(f);
+        painter.setPen(Qt::white);
+        painter.drawText(QRect(0, 0, side, side), Qt::AlignCenter, initials);
+        avatar_label_->setPixmap(pixmap);
+    }
+
+    void update_profile_identity(const std::string& user_id, const std::string& display_name) {
+        if (profile_identity_label_ == nullptr) return;
+        if (user_id.empty()) {
+            profile_identity_label_->setText("Not connected");
+            return;
+        }
+        const auto display = display_name.empty() ? user_id : display_name;
+        const QString html = QStringLiteral(
+            "<div style='font-size:16px;font-weight:600;color:#0f1419;'>%1</div>"
+            "<div style='font-size:12px;color:#7c8a96;'>%2</div>")
+            .arg(qstr(display).toHtmlEscaped(),
+                 qstr(user_id).toHtmlEscaped());
+        profile_identity_label_->setText(html);
+    }
+
     void render_store() {
         const auto focused_id = focused_search_message_id();
         messages_->setHtml(qstr(store_.render_selected_timeline_html(str(message_search_->text().trimmed()), focused_id)));
         render_conversation_list();
         render_search_status();
+        update_chat_header();
         const auto summary = store_.render_conversation_summary();
         const auto selected = store_.selected_conversation_id();
         std::string status = "Connected";
@@ -908,6 +1369,9 @@ private:
 
         const auto host = str(host_->text());
         const auto port = static_cast<unsigned short>(port_->value());
+        const auto use_tls = tls_->isChecked();
+        const auto tls_insecure = tls_insecure_->isChecked();
+        const auto tls_server_name = args_.tls_server_name;
         const auto user = str(user_->text());
         const auto password = str(password_->text());
         const auto display_name = str(display_name_->text());
@@ -919,9 +1383,13 @@ private:
         render_store();
         const auto cursors = store_.sync_cursors();
 
-        std::thread([this, host, port, user, password, display_name, device, cursors, create_account] {
+        std::thread([this, host, port, use_tls, tls_insecure, tls_server_name,
+                     user, password, display_name, device, cursors, create_account] {
             auto next_client = std::make_shared<ControlPlaneClient>();
-            if (!next_client->connect(host, port)) {
+            const bool connected = use_tls
+                ? next_client->connect_tls(host, port, tls_insecure, tls_server_name)
+                : next_client->connect(host, port);
+            if (!connected) {
                 post_error("connect failed");
                 return;
             }
@@ -1118,6 +1586,65 @@ private:
                 save_cache();
                 render_store();
                 statusBar()->showMessage(result.pinned ? "Pinned" : "Unpinned");
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void edit_message_action() {
+        if (!client_ || message_action_id_->text().trimmed().isEmpty()) return;
+        const auto conversation = str(conversation_->text());
+        const auto message_id = str(message_action_id_->text().trimmed());
+        bool ok = false;
+        const QString new_text = QInputDialog::getText(
+            this, "Edit message",
+            "New text for " + qstr(message_id) + ":",
+            QLineEdit::Normal, QString(), &ok);
+        if (!ok || new_text.trimmed().isEmpty()) return;
+        const auto text = str(new_text);
+        set_message_action_enabled(false);
+        auto client = client_;
+        std::thread([this, client, conversation, message_id, text] {
+            const auto result = client->edit_message(conversation, message_id, text);
+            QMetaObject::invokeMethod(this, [this, conversation, message_id, text, result] {
+                if (shutting_down_) return;
+                set_message_action_enabled(true);
+                if (!result.ok) {
+                    append_line("[error] edit failed: " + qstr(result.error_code + " " + result.error_message));
+                    return;
+                }
+                // Server fans MESSAGE_EDITED to others; actor must apply locally.
+                store_.apply_message_edited(conversation, message_id, text);
+                save_cache();
+                render_store();
+                statusBar()->showMessage("Edited " + qstr(message_id));
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void delete_message_action() {
+        if (!client_ || message_action_id_->text().trimmed().isEmpty()) return;
+        const auto conversation = str(conversation_->text());
+        const auto message_id = str(message_action_id_->text().trimmed());
+        const auto answer = QMessageBox::question(
+            this, "Delete message",
+            "Delete " + qstr(message_id) + "? This cannot be undone.",
+            QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer != QMessageBox::Yes) return;
+        set_message_action_enabled(false);
+        auto client = client_;
+        std::thread([this, client, conversation, message_id] {
+            const auto result = client->delete_message(conversation, message_id);
+            QMetaObject::invokeMethod(this, [this, conversation, message_id, result] {
+                if (shutting_down_) return;
+                set_message_action_enabled(true);
+                if (!result.ok) {
+                    append_line("[error] delete failed: " + qstr(result.error_code + " " + result.error_message));
+                    return;
+                }
+                store_.apply_message_deleted(conversation, message_id);
+                save_cache();
+                render_store();
+                statusBar()->showMessage("Deleted " + qstr(message_id));
             }, Qt::QueuedConnection);
         }).detach();
     }
@@ -1465,6 +1992,8 @@ private:
             result.user_id + "  @" + result.username + "\n"
             + "display: " + result.display_name
         ));
+        update_avatar_pixmap(result.user_id, result.display_name);
+        update_profile_identity(result.user_id, result.display_name);
     }
 
     void render_contacts(const telegram_like::client::transport::ContactListResult& result) {
@@ -1522,6 +2051,8 @@ private:
         if (react_) react_->setEnabled(enabled);
         if (pin_) pin_->setEnabled(enabled);
         if (unpin_) unpin_->setEnabled(enabled);
+        if (edit_) edit_->setEnabled(enabled);
+        if (delete_) delete_->setEnabled(enabled);
         if (use_match_) use_match_->setEnabled(enabled);
         if (use_latest_) use_latest_->setEnabled(enabled);
     }
@@ -1577,6 +2108,8 @@ private:
     Args args_;
     QLineEdit* host_ {nullptr};
     QSpinBox* port_ {nullptr};
+    QCheckBox* tls_ {nullptr};
+    QCheckBox* tls_insecure_ {nullptr};
     QLineEdit* conversation_ {nullptr};
     QLineEdit* user_ {nullptr};
     QLineEdit* password_ {nullptr};
@@ -1607,6 +2140,8 @@ private:
     QPushButton* react_ {nullptr};
     QPushButton* pin_ {nullptr};
     QPushButton* unpin_ {nullptr};
+    QPushButton* edit_ {nullptr};
+    QPushButton* delete_ {nullptr};
     QPushButton* use_match_ {nullptr};
     QPushButton* use_latest_ {nullptr};
     QLineEdit* attachment_id_ {nullptr};
@@ -1634,6 +2169,14 @@ private:
     QLineEdit* member_user_id_ {nullptr};
     QPushButton* add_member_ {nullptr};
     QPushButton* remove_member_ {nullptr};
+    QLabel* chat_header_title_ {nullptr};
+    QLabel* chat_header_subtitle_ {nullptr};
+    QScrollArea* details_panel_ {nullptr};
+    QPushButton* toggle_details_ {nullptr};
+    QListWidget* settings_nav_ {nullptr};
+    QStackedWidget* settings_pages_ {nullptr};
+    QLabel* avatar_label_ {nullptr};
+    QLabel* profile_identity_label_ {nullptr};
     std::shared_ptr<ControlPlaneClient> client_;
     telegram_like::client::app_desktop::DesktopChatStore store_;
     int current_search_index_ {-1};

@@ -2,10 +2,6 @@ add_library(chat_client_core STATIC
     app/application.cpp
     app/app_shell.cpp
     app_desktop/desktop_chat_store.cpp
-    auth/auth_controller.cpp
-    chat/chat_controller.cpp
-    contacts/contact_controller.cpp
-    devices/device_controller.cpp
     remote_control/remote_session_controller.cpp
     net/socket_error.cpp
     net/socket_subsystem.cpp
@@ -68,6 +64,33 @@ if(Qt6_FOUND)
     else()
         target_compile_options(app_desktop PRIVATE -Wall -Wextra -Wpedantic)
     endif()
+
+    # Deploy Qt runtime DLLs + platform plugins next to app_desktop.exe so
+    # double-click launch works without Qt being on PATH. Disabled with
+    # -DTELEGRAM_LIKE_SKIP_WINDEPLOYQT=ON for environments that ship via
+    # scripts/package_windows_desktop.ps1 instead.
+    if(WIN32 AND NOT TELEGRAM_LIKE_SKIP_WINDEPLOYQT)
+        find_program(TELEGRAM_LIKE_WINDEPLOYQT windeployqt
+            HINTS "${Qt6_DIR}/../../../bin"
+                  "${Qt6_DIR}/../../bin"
+        )
+        if(TELEGRAM_LIKE_WINDEPLOYQT)
+            # windeployqt auto-detects debug vs release from the binary's CRT
+            # markers, so we don't pass --debug/--release here — passing the
+            # wrong flag set would copy mismatched Qt DLLs.
+            add_custom_command(TARGET app_desktop POST_BUILD
+                COMMAND "${TELEGRAM_LIKE_WINDEPLOYQT}"
+                        --no-translations
+                        --no-system-d3d-compiler
+                        --no-opengl-sw
+                        "$<TARGET_FILE:app_desktop>"
+                COMMENT "Deploying Qt runtime next to app_desktop.exe via windeployqt"
+                VERBATIM
+            )
+        else()
+            message(STATUS "windeployqt not found; double-click launch will require Qt bin on PATH")
+        endif()
+    endif()
 else()
     message(STATUS "Qt6 Widgets not found; app_desktop target disabled")
 endif()
@@ -81,9 +104,27 @@ target_link_libraries(app_desktop_store_test
         chat_client_core
 )
 
+add_executable(json_parser_test
+    transport/json_parser_test.cpp
+)
+
+target_link_libraries(json_parser_test
+    PRIVATE
+        chat_client_core
+)
+
+add_executable(remote_session_smoke
+    remote_control/remote_session_smoke.cpp
+)
+
+target_link_libraries(remote_session_smoke
+    PRIVATE
+        chat_client_core
+)
+
 find_package(Threads REQUIRED)
 target_link_libraries(chat_client_core PUBLIC Threads::Threads)
 
 if(WIN32)
-    target_link_libraries(chat_client_core PUBLIC ws2_32)
+    target_link_libraries(chat_client_core PUBLIC ws2_32 secur32)
 endif()

@@ -18,7 +18,12 @@ class _ControlPlaneHandler(socketserver.StreamRequestHandler):
 
         def writer(envelope: dict[str, Any]) -> None:
             with write_lock:
-                self.wfile.write((json.dumps(envelope) + "\n").encode("utf-8"))
+                # ensure_ascii=False keeps non-ASCII characters as UTF-8 on the wire
+                # instead of \uXXXX escapes — smaller frames and matches what every
+                # current client (incl. C++ json_value.cpp) decodes natively.
+                self.wfile.write(
+                    (json.dumps(envelope, ensure_ascii=False) + "\n").encode("utf-8")
+                )
                 self.wfile.flush()
 
         registered_session_id: str | None = None

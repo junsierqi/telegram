@@ -778,3 +778,156 @@ PASS. The TLS termination path is now locally runnable and verified with a real 
 ### Next-Phase Recommendation
 
 Implement C++ TLS client transport parity or add TLS proxy coverage for the PostgreSQL-backed server profile.
+
+## PostgreSQL TLS proxy coverage (M66)
+
+### Phase Goal
+
+Extend TLS termination coverage to the PostgreSQL-backed Docker server while preserving the rule that external side effects require confirmation.
+
+### Requirement Understanding
+
+The current deployment hardening path needs a durable Atlas task library, explicit pending actions, and PostgreSQL parity for the already verified SQLite TLS proxy.
+
+### Completed Tasks
+
+- Created `.idea-to-code/telegram-platform/08-atlas-task-library.md` with prioritized tasks and pending actions.
+- Added `telegram-tls-proxy-postgres` to `deploy/docker/docker-compose.yml` on host port 8444.
+- Added `deploy/tls/nginx-postgres.conf` targeting `telegram-server-postgres:8787`.
+- Extended `scripts/validate_tls_deployment_config.py` from 2 to 4 static scenarios.
+- Updated README, TLS deployment notes and current-state docs.
+
+### Implementation Summary
+
+The PostgreSQL proxy mirrors the existing nginx stream TLS termination shape but uses its own config file and compose service so SQLite and PostgreSQL TLS paths can be tested independently.
+
+### Test Flow
+
+- `python -m py_compile scripts\validate_tls_deployment_config.py scripts\validate_tls_proxy_smoke.py`
+- `python scripts\validate_tls_deployment_config.py`
+- `python C:\Users\junsierqi\.codex\skills\idea-to-code\scripts\manage_delivery_bundle.py verify --root . --slug telegram-platform`
+
+### Test Results
+
+- py_compile: PASS.
+- TLS deployment static validation: PASS, 4/4 scenarios.
+- Delivery bundle verify: PASS.
+
+### Acceptance Conclusion
+
+PASS for static/local coverage. Live Docker startup and PostgreSQL TLS smoke were not executed because they are external side effects.
+
+### Deferred Work And Risks
+
+- Pending action PA-001: start the PostgreSQL TLS proxy stack.
+- Pending action PA-002: run `validate_tls_proxy_smoke.py --port 8444`.
+- Direct C++ TLS client parity remains the next product gap.
+
+### Next-Phase Recommendation
+
+Implement C++ direct TLS client transport parity, or approve the pending PostgreSQL TLS live smoke before moving deeper into client TLS work.
+
+## C++ direct TLS client transport parity (M67)
+
+### Phase Goal
+
+Add a direct TLS client entrypoint behind the existing C++ control-plane boundary without changing the chat/server protocol.
+
+### Requirement Understanding
+
+The desktop and CLI clients need a path to connect directly to native TLS control-plane servers instead of relying only on external TLS proxy termination.
+
+### Completed Tasks
+
+- Added `TcpLineClient::connect_tls` with a Windows Schannel TLS transport path and optional dev insecure certificate validation mode.
+- Added `ControlPlaneClient::connect_tls` so higher-level RPC code remains unchanged.
+- Added `--tls`, `--tls-insecure` and `--tls-server-name` to `app_chat.exe`.
+- Added TLS controls and TLS-aware connect behavior to `app_desktop.exe`.
+- Added `scripts/validate_cpp_tls_client.py` to start a native TLS server and drive `app_chat.exe` through TLS login/sync.
+- Updated docs and README to show current C++ TLS status.
+
+### Test Flow
+
+- `python -m py_compile scripts\validate_cpp_tls_client.py`
+- `cmake -S . -B build-verify -DCMAKE_PREFIX_PATH=C:\Qt\6.11.0\msvc2022_64`
+- `cmake --build build-verify --config Debug`
+- `python scripts\validate_cpp_chat_e2e.py`
+- `build-verify\client\src\Debug\app_desktop_store_test.exe`
+- `python scripts\validate_cpp_tls_client.py`
+
+### Test Results
+
+- Python syntax check: PASS.
+- CMake configure/build in `build-verify`: PASS.
+- Existing C++ chat E2E: PASS, 3/3.
+- Desktop store test: PASS, 20/20.
+- C++ direct TLS smoke: FAIL/PARTIAL. `app_chat.exe --tls --tls-insecure` reached the Schannel path but `AcquireCredentialsHandle` returned `SEC_E_NO_CREDENTIALS (0x8009030e)`, so login/sync over direct TLS could not be verified in this environment.
+
+### Acceptance Conclusion
+
+PARTIAL. The C++ TLS boundary and CLI/UI controls are implemented and build cleanly, but runtime acceptance is blocked by the Windows TLS backend acquiring no Schannel credentials locally.
+
+### Deferred Work And Risks
+
+- Resolve Schannel credential acquisition on this machine or replace the backend with another local dependency such as OpenSSL/Qt Network.
+- Keep Docker TLS proxy smoke as the verified TLS client path until direct C++ TLS runtime passes.
+- `build-codex` has a stale cache/timestamp issue in this checkout; verification used `build-verify` instead.
+
+### Next-Phase Recommendation
+
+Fix the C++ TLS backend runtime blocker first, then rerun `validate_cpp_tls_client.py` and a broader TLS acceptance sweep.
+
+## C++ TLS Schannel credential fix (M68)
+
+### Phase Goal
+
+Elevate M67 from PARTIAL to PASS by resolving the Schannel `SEC_E_NO_CREDENTIALS` runtime blocker so the C++ direct-TLS path is acceptance-verified end-to-end on this Windows host.
+
+### Requirement Understanding
+
+The desktop and CLI clients need direct TLS to native control-plane servers (REQ-TLS-CPP-CLIENT). The previous build path compiled but couldn't acquire Schannel credentials at runtime, leaving the proxy-only TLS path as the only verified route.
+
+### Completed Tasks
+
+- Replaced the implicit-default `AcquireCredentialsHandleW(...,nullptr,nullptr,...)` call in `client/src/net/tcp_line_client.cpp::tls_handshake` with an explicit `SCHANNEL_CRED` populated with `SCH_CRED_NO_DEFAULT_CREDS | SCH_USE_STRONG_CRYPTO` and `SCH_CRED_MANUAL_CRED_VALIDATION` for the insecure verification mode.
+- Wiped the stale `build-verify/` cache (it referenced an old `D:/code/telegram` source tree) and reconfigured + built `app_chat`, `app_desktop`, `telegram_like_client`, `app_desktop_store_test` against `D:/office-ai/telegram`.
+- Installed the `cryptography` Python package locally so `scripts/generate_tls_dev_cert.py` could synthesize the dev cert used by the smoke.
+- Re-ran the C++ TLS smoke and the broader regression sweep.
+- Updated `08-atlas-task-library.md`: M67 → done, M68 → done, renumbered M69/M70 lanes (deployment sweep / package signing) and rewrote the notes section.
+
+### Implementation Summary
+
+The fix is local to `tcp_line_client.cpp`. The cred handle now never depends on machine-wide outbound default credentials; instead the client requests an anonymous outbound Schannel cred with strong-crypto enforcement and per-flag opt-in to manual cert validation when callers pass `--tls-insecure`. No header or call-site change was needed.
+
+### Test Flow
+
+- `cmake -S . -B build-verify -DCMAKE_PREFIX_PATH=C:\Qt\6.11.0\msvc2022_64`
+- `cmake --build build-verify --config Debug --target app_chat app_desktop telegram_like_client app_desktop_store_test`
+- `python scripts\validate_cpp_tls_client.py`
+- `python scripts\validate_cpp_chat_e2e.py`
+- `build-verify\client\src\Debug\app_desktop_store_test.exe`
+- `python scripts\validate_tls_deployment_config.py`
+- `python C:\Users\Administrator\.claude\skills\idea-to-code\scripts\manage_delivery_bundle.py verify --root . --slug telegram-platform`
+
+### Test Results
+
+- CMake configure + Debug build of TLS-relevant targets: PASS.
+- C++ direct TLS smoke: PASS, 2/2 (login + initial sync over native TLS).
+- C++ chat E2E: PASS, 3/3.
+- Desktop store test: PASS, 20/20.
+- TLS deployment static validation: PASS, 4/4 scenarios.
+- Delivery bundle verify: PASS, 72 requirements covered.
+
+### Acceptance Conclusion
+
+PASS. Direct C++ TLS now reaches the protocol layer locally, login succeeds against a Python-hosted native TLS server, and the surrounding regression suite stays green.
+
+### Deferred Work And Risks
+
+- PA-001/PA-002 remain pending: live PostgreSQL Docker TLS proxy stack and the 8444 smoke require user approval.
+- Windows package signing/installer (M70) is unchanged — still pending a signing certificate.
+- `build-codex` was not used for this verification; it carries an unrelated stale-cache issue and is not blocking.
+
+### Next-Phase Recommendation
+
+Run the deployment hardening acceptance sweep (M69) now that the TLS direct-client path is green, or pivot to Windows package signing (M70) if the user prefers consolidating shippable artifacts before any live Docker work.

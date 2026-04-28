@@ -94,6 +94,19 @@ services:
       - ../tls/nginx.conf:/etc/nginx/nginx.conf:ro
       - ../tls/certs:/etc/nginx/certs:ro
 
+  telegram-tls-proxy-postgres:
+    image: nginx:1.27-alpine
+    profiles:
+      - tls
+      - postgres
+    depends_on:
+      - telegram-server-postgres
+    ports:
+      - "8444:8443"
+    volumes:
+      - ../tls/nginx-postgres.conf:/etc/nginx/nginx.conf:ro
+      - ../tls/certs:/etc/nginx/certs:ro
+
 volumes:
   telegram_server_data:
   telegram_postgres_data:
