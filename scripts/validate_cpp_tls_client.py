@@ -48,6 +48,14 @@ def _wait_for_port(port: int, timeout: float = 5.0) -> bool:
 
 
 def main() -> int:
+    # C++ TLS is Schannel-only — gated on _WIN32 in tcp_line_client.cpp.
+    # On non-Windows hosts the connect_tls call returns false immediately,
+    # so the test would always fail. Skip cleanly with rc=0 so CI doesn't
+    # flag it; the sweep harness's NEEDS_PLATFORM gate also catches this,
+    # but having the validator self-check keeps direct invocation honest.
+    if sys.platform != "win32":
+        print(f"SKIP_PLATFORM ({sys.platform}) — C++ TLS is Schannel-only (Windows-only)")
+        return 0
     app_chat = next((p for p in APP_CHAT_CANDIDATES if p.exists()), None)
     if app_chat is None:
         searched = ", ".join(str(p) for p in APP_CHAT_CANDIDATES)

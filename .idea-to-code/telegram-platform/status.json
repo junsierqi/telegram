@@ -2,7 +2,7 @@
   "title": "Telegram-like chat and remote desktop platform",
   "slug": "telegram-platform",
   "created_at_utc": "2026-04-20T05:26:28.066566+00:00",
-  "updated_at_utc": "2026-04-29T05:14:46+00:00",
+  "updated_at_utc": "2026-04-29T05:40:38+00:00",
   "state": "in_progress",
   "current_focus": "release-readiness — CI hardening",
   "next_gate": "User direction",
@@ -1541,6 +1541,17 @@
       "delivered": "Three real bugs surfaced by GitHub Actions CI run: (1) M113 macdeployqt POST_BUILD passed -qmldir=\"...\" with literal embedded quotes, qmlimportscanner received a path wrapped in extra quotes and failed; (2) Homebrew Qt on the runner doesn't include QtPdf/QtSvg/QtVirtualKeyboard/libwebp/libsharpyuv/libbrotlicommon, macdeployqt couldn't resolve those rpaths and failed the entire build (the .app was actually produced fine, only embedding failed); (3) validate_cpp_chat_e2e.py, validate_cpp_remote_session.py, validate_cpp_tls_client.py only listed Windows-style binary paths (build-{verify,codex,}/client/src/Debug/<stem>.exe) — sweep harness's _has_built_binary glob saw the macOS/Linux binaries and ran the validators, which then printed [FAIL] not built. Fix: (1) use single-token \"-qmldir=PATH\" form with no embedded quotes, (2) wrap macdeployqt invocation in sh -c '... || echo WARN...' so missing optional deps emit a warning instead of failing the build, (3) add shared _binary_candidates(stem) helper to the 3 cpp validators that enumerates the same path tree the sweep harness searches (build-{verify,codex,,macos,linux,wsl,android}/client/src/{,Debug,Release}/<stem>{,.exe}).",
       "verified": "Windows: 3 fixed cpp validators 3/3 + 9/9 + 2/2; full sweep 68 passed | 0 failed | 4 SKIP_EXTERNAL. WSL Linux: same 3 cpp validators 3/3 + 9/9 + 2/2 (find binaries at build-wsl/client/src/<stem>). validate_macos_scaffold.py still 5/5 (the ${TELEGRAM_LIKE_MACDEPLOYQT} variable expansion that the static check looks for survives inside the new sh -c wrapper).",
       "next": "Optional: M119 update GitHub Actions workflow to make the macOS build pass DTELEGRAM_LIKE_SKIP_MACDEPLOYQT=ON for explicit Qt-on-PATH builds, or install QtPdf/QtSvg/etc. via Homebrew so macdeployqt can succeed end-to-end.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-VALIDATION"
+      ]
+    },
+    {
+      "name": "M119 - cpp_tls_client skip on non-Windows + sweep NEEDS_PLATFORM",
+      "timestamp_utc": "2026-04-29T05:40:38+00:00",
+      "delivered": "GitHub Actions linux-validators job still failed validate_cpp_tls_client.py after M118 because the test forces app_chat --tls --tls-insecure but C++ TLS support is gated on _WIN32 (Schannel-only); on Linux app_chat ignores the TLS path and just fails to connect. The local WSL run masked this because the validator's binary candidate list put Windows-built build-verify/.../app_chat.exe first and WSL ran the Windows binary via interop. Fix: (a) add NEEDS_PLATFORM dict to scripts/_sweep_validators.py keyed by validator filename and a set of allowed sys.platform values; the sweep harness emits SKIP_PLATFORM and counts the validator as skipped on disallowed platforms. (b) validate_cpp_tls_client.py self-checks sys.platform != 'win32' at the top of main() and exits 0 with a SKIP_PLATFORM marker so direct invocation on Linux/macOS doesn't print misleading [FAIL] either. Also added validate_windows_installer.py to NEEDS_PLATFORM=['win32'] for the same reason.",
+      "verified": "WSL Linux sweep: validate_cpp_tls_client.py + validate_windows_installer.py both emit SKIP_PLATFORM (linux not in ['win32']) and count toward 'skipped' rather than 'failed'. Windows sweep: 68 passed | 0 failed | 4 SKIP_EXTERNAL — unchanged (NEEDS_PLATFORM gate doesn't fire on win32 for win32-required validators). The unrelated WSL-only validate_desktop_smoke.py attachment-save failure was confirmed pre-existing and not in scope (GitHub linux-validators correctly SKIPs it via NEEDS_BINARY because Qt isn't installed there).",
+      "next": "Push the four release-readiness commits (M115-M117 + M118 + M119). Optional follow-up: investigate the WSL desktop_smoke attachment-save failure (Linux-specific path / permission); not on the CI critical path.",
       "gate_status": "pass",
       "covers": [
         "REQ-VALIDATION"

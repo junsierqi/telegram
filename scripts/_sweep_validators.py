@@ -35,6 +35,16 @@ NEEDS_BINARY = {
     "validate_windows_installer.py":    [],   # static; built artifact optional
 }
 
+# Validator -> sys.platform values it can actually run on. Anything outside
+# the listed platforms is skipped with SKIP_PLATFORM. C++ TLS uses Schannel,
+# which is Windows-only, so cpp_tls_client only meaningfully runs on win32
+# (or via WSL interop when a Windows .exe happens to be present, which the
+# harness still treats as Windows runtime).
+NEEDS_PLATFORM = {
+    "validate_cpp_tls_client.py": {"win32"},
+    "validate_windows_installer.py": {"win32"},
+}
+
 
 def _has_built_binary(stem: str) -> bool:
     """True if any build-* directory contains <stem>(.exe)? somewhere under
@@ -75,6 +85,11 @@ for path in scripts:
             print(f"[--] {name:46s} SKIP_NO_BINARY ({', '.join(needed)})")
             skipped += 1
             continue
+    needed_platform = NEEDS_PLATFORM.get(name)
+    if needed_platform and sys.platform not in needed_platform:
+        print(f"[--] {name:46s} SKIP_PLATFORM ({sys.platform} not in {sorted(needed_platform)})")
+        skipped += 1
+        continue
     try:
         r = subprocess.run(
             [sys.executable, path],

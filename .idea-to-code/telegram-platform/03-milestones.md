@@ -951,3 +951,11 @@
 - Next: Optional: M119 update GitHub Actions workflow to make the macOS build pass DTELEGRAM_LIKE_SKIP_MACDEPLOYQT=ON for explicit Qt-on-PATH builds, or install QtPdf/QtSvg/etc. via Homebrew so macdeployqt can succeed end-to-end.
 - Covers: REQ-VALIDATION
 
+## M119 - cpp_tls_client skip on non-Windows + sweep NEEDS_PLATFORM (gate: pass)
+
+- Timestamp: 2026-04-29T05:40:38+00:00
+- Delivered: GitHub Actions linux-validators job still failed validate_cpp_tls_client.py after M118 because the test forces app_chat --tls --tls-insecure but C++ TLS support is gated on _WIN32 (Schannel-only); on Linux app_chat ignores the TLS path and just fails to connect. The local WSL run masked this because the validator's binary candidate list put Windows-built build-verify/.../app_chat.exe first and WSL ran the Windows binary via interop. Fix: (a) add NEEDS_PLATFORM dict to scripts/_sweep_validators.py keyed by validator filename and a set of allowed sys.platform values; the sweep harness emits SKIP_PLATFORM and counts the validator as skipped on disallowed platforms. (b) validate_cpp_tls_client.py self-checks sys.platform != 'win32' at the top of main() and exits 0 with a SKIP_PLATFORM marker so direct invocation on Linux/macOS doesn't print misleading [FAIL] either. Also added validate_windows_installer.py to NEEDS_PLATFORM=['win32'] for the same reason.
+- Verified: WSL Linux sweep: validate_cpp_tls_client.py + validate_windows_installer.py both emit SKIP_PLATFORM (linux not in ['win32']) and count toward 'skipped' rather than 'failed'. Windows sweep: 68 passed | 0 failed | 4 SKIP_EXTERNAL — unchanged (NEEDS_PLATFORM gate doesn't fire on win32 for win32-required validators). The unrelated WSL-only validate_desktop_smoke.py attachment-save failure was confirmed pre-existing and not in scope (GitHub linux-validators correctly SKIPs it via NEEDS_BINARY because Qt isn't installed there).
+- Next: Push the four release-readiness commits (M115-M117 + M118 + M119). Optional follow-up: investigate the WSL desktop_smoke attachment-save failure (Linux-specific path / permission); not on the CI critical path.
+- Covers: REQ-VALIDATION
+

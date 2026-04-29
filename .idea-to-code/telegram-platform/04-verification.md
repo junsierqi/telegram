@@ -704,3 +704,9 @@
 - Verified: Windows: 3 fixed cpp validators 3/3 + 9/9 + 2/2; full sweep 68 passed | 0 failed | 4 SKIP_EXTERNAL. WSL Linux: same 3 cpp validators 3/3 + 9/9 + 2/2 (find binaries at build-wsl/client/src/<stem>). validate_macos_scaffold.py still 5/5 (the ${TELEGRAM_LIKE_MACDEPLOYQT} variable expansion that the static check looks for survives inside the new sh -c wrapper).
 - Covers: REQ-VALIDATION
 
+## M119 - cpp_tls_client skip on non-Windows + sweep NEEDS_PLATFORM (gate: pass)
+
+- Timestamp: 2026-04-29T05:40:38+00:00
+- Verified: WSL Linux sweep: validate_cpp_tls_client.py + validate_windows_installer.py both emit SKIP_PLATFORM (linux not in ['win32']) and count toward 'skipped' rather than 'failed'. Windows sweep: 68 passed | 0 failed | 4 SKIP_EXTERNAL — unchanged (NEEDS_PLATFORM gate doesn't fire on win32 for win32-required validators). The unrelated WSL-only validate_desktop_smoke.py attachment-save failure was confirmed pre-existing and not in scope (GitHub linux-validators correctly SKIPs it via NEEDS_BINARY because Qt isn't installed there).
+- Covers: REQ-VALIDATION
+
