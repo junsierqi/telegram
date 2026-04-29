@@ -573,6 +573,23 @@ public:
         remove_member_ = new QPushButton("Remove Member");
         set_group_action_enabled(false);
 
+        // ---- M108: remote-control panel ----
+        remote_target_device_ = new QLineEdit();
+        remote_target_device_->setPlaceholderText("target device_id (e.g. dev_bob_win)");
+        remote_invite_ = new QPushButton("Invite");
+        remote_session_id_input_ = new QLineEdit();
+        remote_session_id_input_->setPlaceholderText("remote_session_id (from invite or push)");
+        remote_approve_ = new QPushButton("Approve");
+        remote_reject_ = new QPushButton("Reject");
+        remote_cancel_ = new QPushButton("Cancel");
+        remote_terminate_ = new QPushButton("Terminate");
+        remote_rendezvous_ = new QPushButton("Rendezvous");
+        remote_log_ = new QPlainTextEdit();
+        remote_log_->setReadOnly(true);
+        remote_log_->setMaximumHeight(140);
+        remote_log_->setPlaceholderText("Remote-control RPC results and rendezvous info appear here.");
+        set_remote_action_enabled(false);
+
         chat_header_title_ = new QLabel("No chat selected");
         chat_header_title_->setObjectName("chatHeaderTitle");
         chat_header_subtitle_ = new QLabel("");
@@ -708,7 +725,7 @@ public:
         settings_nav_->setSpacing(2);
         for (const char* label : {"Profile", "Account", "Connection",
                                   "Devices", "Contacts", "Find Users",
-                                  "Groups", "Attachments"}) {
+                                  "Groups", "Attachments", "Remote"}) {
             settings_nav_->addItem(label);
         }
         body_layout->addWidget(settings_nav_);
@@ -918,6 +935,40 @@ public:
         settings_pages_->addWidget(
             make_page("Attachments", "Save received attachments by id to disk.", attach_body));
 
+        // === Remote-control page (M108) ===
+        auto* remote_body = new QVBoxLayout();
+        remote_body->setSpacing(10);
+        auto* remote_invite_lab = new QLabel("Invite a target device into a remote session");
+        remote_invite_lab->setObjectName("fieldLabel");
+        remote_body->addWidget(remote_invite_lab);
+        remote_body->addWidget(remote_target_device_);
+        auto* remote_invite_row = new QHBoxLayout();
+        remote_invite_row->addWidget(remote_invite_);
+        remote_invite_row->addStretch(1);
+        remote_body->addLayout(remote_invite_row);
+        auto* remote_session_lab = new QLabel(
+            "Existing remote_session_id (received via push or copied from invite)");
+        remote_session_lab->setObjectName("fieldLabel");
+        remote_body->addWidget(remote_session_lab);
+        remote_body->addWidget(remote_session_id_input_);
+        auto* remote_btns = new QHBoxLayout();
+        remote_btns->addWidget(remote_approve_);
+        remote_btns->addWidget(remote_reject_);
+        remote_btns->addWidget(remote_cancel_);
+        remote_btns->addWidget(remote_terminate_);
+        remote_btns->addWidget(remote_rendezvous_);
+        remote_btns->addStretch(1);
+        remote_body->addLayout(remote_btns);
+        auto* remote_log_lab = new QLabel("RPC results");
+        remote_log_lab->setObjectName("fieldLabel");
+        remote_body->addWidget(remote_log_lab);
+        remote_body->addWidget(remote_log_);
+        settings_pages_->addWidget(
+            make_page(
+                "Remote",
+                "Invite, approve, terminate and discover relay info for remote-control sessions.",
+                remote_body));
+
         body_layout->addWidget(settings_pages_, 1);
         details_root_layout->addWidget(body_wrap, 1);
 
@@ -990,6 +1041,12 @@ public:
         QObject::connect(create_group_, &QPushButton::clicked, [this] { create_group(); });
         QObject::connect(add_member_, &QPushButton::clicked, [this] { manage_group_member(true); });
         QObject::connect(remove_member_, &QPushButton::clicked, [this] { manage_group_member(false); });
+        QObject::connect(remote_invite_, &QPushButton::clicked, [this] { remote_invite_action(); });
+        QObject::connect(remote_approve_, &QPushButton::clicked, [this] { remote_terminal_action(RemoteOp::Approve); });
+        QObject::connect(remote_reject_, &QPushButton::clicked, [this] { remote_terminal_action(RemoteOp::Reject); });
+        QObject::connect(remote_cancel_, &QPushButton::clicked, [this] { remote_terminal_action(RemoteOp::Cancel); });
+        QObject::connect(remote_terminate_, &QPushButton::clicked, [this] { remote_terminal_action(RemoteOp::Terminate); });
+        QObject::connect(remote_rendezvous_, &QPushButton::clicked, [this] { remote_rendezvous_action(); });
         QObject::connect(chat_filter_, &QLineEdit::textChanged, [this] { render_conversation_list(); });
         QObject::connect(message_search_, &QLineEdit::textChanged, [this] {
             current_search_index_ = -1;
@@ -1442,6 +1499,7 @@ private:
                 set_contact_action_enabled(true);
                 set_user_search_enabled(true);
                 set_group_action_enabled(true);
+                set_remote_action_enabled(true);
                 statusBar()->showMessage(qstr(std::string(create_account ? "Registered as " : "Connected as ") + auth.user_id));
                 refresh_profile();
                 refresh_devices();
@@ -1939,6 +1997,145 @@ private:
         }).detach();
     }
 
+    enum class RemoteOp { Approve, Reject, Cancel, Terminate };
+
+    void append_remote_log(const QString& line) {
+        if (!remote_log_) return;
+        remote_log_->appendPlainText(line);
+    }
+
+    void remote_invite_action() {
+        if (!client_) return;
+        const auto target_device = str(remote_target_device_->text().trimmed());
+        if (target_device.empty()) {
+            append_remote_log("[error] target device_id is required");
+            return;
+        }
+        const auto requester_device = str(device_->text().trimmed());
+        if (requester_device.empty()) {
+            append_remote_log("[error] requester device_id (Connection > Device) is required");
+            return;
+        }
+        set_remote_action_enabled(false);
+        auto client = client_;
+        std::thread([this, client, requester_device, target_device] {
+            const auto result = client->remote_invite(requester_device, target_device);
+            QMetaObject::invokeMethod(this, [this, result] {
+                if (shutting_down_) return;
+                set_remote_action_enabled(true);
+                if (!result.ok) {
+                    append_remote_log(qstr(
+                        "[invite error] " + result.error_code + " " + result.error_message));
+                    return;
+                }
+                if (remote_session_id_input_) {
+                    remote_session_id_input_->setText(qstr(result.remote_session_id));
+                }
+                append_remote_log(qstr(
+                    "[invite ok] remote_session_id=" + result.remote_session_id
+                    + " state=" + result.state));
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void remote_terminal_action(RemoteOp op) {
+        if (!client_) return;
+        const auto rs_id = str(remote_session_id_input_->text().trimmed());
+        if (rs_id.empty()) {
+            append_remote_log("[error] remote_session_id is required");
+            return;
+        }
+        set_remote_action_enabled(false);
+        auto client = client_;
+        std::thread([this, client, rs_id, op] {
+            std::string verb;
+            std::string state;
+            std::string detail;
+            std::string error_code;
+            std::string error_message;
+            bool ok = false;
+            switch (op) {
+                case RemoteOp::Approve: {
+                    verb = "approve";
+                    auto r = client->remote_approve(rs_id);
+                    ok = r.ok;
+                    state = r.state;
+                    error_code = r.error_code;
+                    error_message = r.error_message;
+                    if (ok) {
+                        detail = "relay=" + r.relay_endpoint + " region=" + r.relay_region;
+                    }
+                    break;
+                }
+                case RemoteOp::Reject: {
+                    verb = "reject";
+                    auto r = client->remote_reject(rs_id);
+                    ok = r.ok; state = r.state; detail = r.detail;
+                    error_code = r.error_code; error_message = r.error_message;
+                    break;
+                }
+                case RemoteOp::Cancel: {
+                    verb = "cancel";
+                    auto r = client->remote_cancel(rs_id);
+                    ok = r.ok; state = r.state; detail = r.detail;
+                    error_code = r.error_code; error_message = r.error_message;
+                    break;
+                }
+                case RemoteOp::Terminate: {
+                    verb = "terminate";
+                    auto r = client->remote_terminate(rs_id);
+                    ok = r.ok; state = r.state; detail = r.detail;
+                    error_code = r.error_code; error_message = r.error_message;
+                    break;
+                }
+            }
+            QMetaObject::invokeMethod(this, [this, verb, ok, state, detail, error_code, error_message] {
+                if (shutting_down_) return;
+                set_remote_action_enabled(true);
+                if (!ok) {
+                    append_remote_log(qstr("[" + verb + " error] " + error_code + " " + error_message));
+                    return;
+                }
+                append_remote_log(qstr("[" + verb + " ok] state=" + state
+                                       + (detail.empty() ? std::string() : " " + detail)));
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void remote_rendezvous_action() {
+        if (!client_) return;
+        const auto rs_id = str(remote_session_id_input_->text().trimmed());
+        if (rs_id.empty()) {
+            append_remote_log("[error] remote_session_id is required");
+            return;
+        }
+        set_remote_action_enabled(false);
+        auto client = client_;
+        std::thread([this, client, rs_id] {
+            const auto r = client->remote_rendezvous_request(rs_id);
+            QMetaObject::invokeMethod(this, [this, r] {
+                if (shutting_down_) return;
+                set_remote_action_enabled(true);
+                if (!r.ok) {
+                    append_remote_log(qstr(
+                        "[rendezvous error] " + r.error_code + " " + r.error_message));
+                    return;
+                }
+                std::string summary = "[rendezvous ok] state=" + r.state
+                    + " region=" + r.relay_region
+                    + " relay=" + r.relay_endpoint
+                    + " key=" + (r.relay_key_b64.empty() ? "(none)" : "(set)")
+                    + " candidates=" + std::to_string(r.candidates.size());
+                append_remote_log(qstr(summary));
+                for (const auto& c : r.candidates) {
+                    append_remote_log(qstr(
+                        "  " + c.kind + " " + c.address + ":" + std::to_string(c.port)
+                        + " prio=" + std::to_string(c.priority)));
+                }
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
     void manage_group_member(bool add) {
         if (!client_ || member_user_id_->text().trimmed().isEmpty()) return;
         const auto selected = str(conversation_->text().trimmed());
@@ -2043,6 +2240,15 @@ private:
         if (create_group_) create_group_->setEnabled(enabled);
         if (add_member_) add_member_->setEnabled(enabled);
         if (remove_member_) remove_member_->setEnabled(enabled);
+    }
+
+    void set_remote_action_enabled(bool enabled) {
+        if (remote_invite_) remote_invite_->setEnabled(enabled);
+        if (remote_approve_) remote_approve_->setEnabled(enabled);
+        if (remote_reject_) remote_reject_->setEnabled(enabled);
+        if (remote_cancel_) remote_cancel_->setEnabled(enabled);
+        if (remote_terminate_) remote_terminate_->setEnabled(enabled);
+        if (remote_rendezvous_) remote_rendezvous_->setEnabled(enabled);
     }
 
     void set_message_action_enabled(bool enabled) {
@@ -2177,6 +2383,16 @@ private:
     QStackedWidget* settings_pages_ {nullptr};
     QLabel* avatar_label_ {nullptr};
     QLabel* profile_identity_label_ {nullptr};
+    // M108: remote-control widgets
+    QLineEdit* remote_target_device_ {nullptr};
+    QPushButton* remote_invite_ {nullptr};
+    QLineEdit* remote_session_id_input_ {nullptr};
+    QPushButton* remote_approve_ {nullptr};
+    QPushButton* remote_reject_ {nullptr};
+    QPushButton* remote_cancel_ {nullptr};
+    QPushButton* remote_terminate_ {nullptr};
+    QPushButton* remote_rendezvous_ {nullptr};
+    QPlainTextEdit* remote_log_ {nullptr};
     std::shared_ptr<ControlPlaneClient> client_;
     telegram_like::client::app_desktop::DesktopChatStore store_;
     int current_search_index_ {-1};

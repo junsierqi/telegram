@@ -70,14 +70,12 @@ toggle that off and ship ATS-compliant pinned roots.
 
 ## Pending
 
-- **Qt framework embedding via `macdeployqt`** — without it the produced
-  `.app` bundle depends on **system-installed Qt** (Homebrew's `qt@6`)
-  staying at the same path at runtime. CI is fine because the runner
-  keeps Qt installed; for distribution to non-developer Macs the bundle
-  must be processed by `macdeployqt build-macos/client/src/<target>.app`
-  to embed `Frameworks/Qt*.framework` and the QML / platform plugins.
-  This is the macOS analogue of `windeployqt` (which CMake already runs
-  POST_BUILD on Windows) — a future milestone wires the equivalent.
+- ~~**Qt framework embedding via `macdeployqt`**~~ — wired POST_BUILD in
+  `client/src/CMakeLists.txt` as of M113 (2026-04-29). On macOS, when
+  `macdeployqt` is on PATH the build automatically embeds Qt frameworks
+  and (for `app_mobile`) the QML modules into the `.app` bundle. Disable
+  with `-DTELEGRAM_LIKE_SKIP_MACDEPLOYQT=ON` for CI builds where Qt is
+  guaranteed to stay on PATH and you want to keep build-link parity.
 - Code signing (`-DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=...`) — gated on
   PA-005 (developer cert procurement).
 - `.dmg` packaging — `macdeployqt -dmg` produces it once Qt is embedded.

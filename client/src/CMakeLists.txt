@@ -141,6 +141,28 @@ if(Qt6_FOUND)
         endif()
     endif()
 
+    # M113: macOS analogue of windeployqt — embed the Qt frameworks +
+    # platform plugins inside app_desktop.app so distribution to non-dev
+    # Macs doesn't require Homebrew Qt staying at the same path. Skip with
+    # -DTELEGRAM_LIKE_SKIP_MACDEPLOYQT=ON for CI runs that already have
+    # Qt installed and want to keep build-link parity.
+    if(APPLE AND NOT TELEGRAM_LIKE_TARGET_IS_IOS AND NOT TELEGRAM_LIKE_SKIP_MACDEPLOYQT)
+        find_program(TELEGRAM_LIKE_MACDEPLOYQT macdeployqt
+            HINTS "${Qt6_DIR}/../../../bin"
+                  "${Qt6_DIR}/../../bin"
+        )
+        if(TELEGRAM_LIKE_MACDEPLOYQT)
+            add_custom_command(TARGET app_desktop POST_BUILD
+                COMMAND "${TELEGRAM_LIKE_MACDEPLOYQT}"
+                        "$<TARGET_BUNDLE_DIR:app_desktop>"
+                COMMENT "Embedding Qt frameworks into app_desktop.app via macdeployqt"
+                VERBATIM
+            )
+        else()
+            message(STATUS "macdeployqt not found; app_desktop.app will require Qt on the runtime path")
+        endif()
+    endif()
+
     # ---- app_mobile (Qt Quick / QML, phone-shaped UI) ----
     if(TARGET Qt6::Quick AND TARGET Qt6::QuickControls2)
         qt_add_executable(app_mobile
@@ -231,6 +253,18 @@ if(Qt6_FOUND)
                         --qmldir "${CMAKE_CURRENT_SOURCE_DIR}/app_mobile/qml"
                         "$<TARGET_FILE:app_mobile>"
                 COMMENT "Deploying Qt Quick runtime next to app_mobile.exe"
+                VERBATIM
+            )
+        endif()
+
+        # M113: macOS bundle for app_mobile too — runs as a desktop preview.
+        if(APPLE AND NOT TELEGRAM_LIKE_TARGET_IS_IOS AND NOT TELEGRAM_LIKE_SKIP_MACDEPLOYQT
+                AND TELEGRAM_LIKE_MACDEPLOYQT)
+            add_custom_command(TARGET app_mobile POST_BUILD
+                COMMAND "${TELEGRAM_LIKE_MACDEPLOYQT}"
+                        "$<TARGET_BUNDLE_DIR:app_mobile>"
+                        -qmldir="${CMAKE_CURRENT_SOURCE_DIR}/app_mobile/qml"
+                COMMENT "Embedding Qt Quick runtime into app_mobile.app via macdeployqt"
                 VERBATIM
             )
         endif()

@@ -614,3 +614,69 @@
 - Verified: scripts/validate_group_roles.py 10/10; full sweep 58/58 (4 SKIP_EXTERNAL, no regression in incremental_sync)
 - Covers: REQ-D6
 
+## M104 - Release-readiness verification gate sweep (gate: pass)
+
+- Timestamp: 2026-04-29T01:00:44+00:00
+- Verified: scripts/_sweep_validators.py: 58 passed | 0 failed | 4 SKIP_EXTERNAL (docker_deploy, postgres_repository, postgres_backup_restore, tls_proxy_smoke — those four were last green at PA-001/002/003 live run on 2026-04-28). manage_delivery_bundle.py verify: ok=true, 77 REQs, 0 problems, 0 blockers.
+- Covers: REQ-VALIDATION
+
+## M105 - ReliableChannel wired into UDP relay (ATLAS-M71 part 1) (gate: pass)
+
+- Timestamp: 2026-04-29T01:06:34+00:00
+- Verified: scripts/validate_reliable_relay.py 5/5 (lossless 10+5, mid-seq drop NAK-recovered, reorder buffered+drained, tail-loss recovered via tick_retransmit, bidirectional 1-in-3 drop both directions delivered in order). Full sweep regression: 59 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Covers: REQ-UDP-RELIABILITY, REQ-UDP-RELAY
+
+## M106 - D9 media-plane AEAD (AES-256-GCM) (gate: pass)
+
+- Timestamp: 2026-04-29T01:14:49+00:00
+- Verified: scripts/validate_media_aead.py 5/5: shared-key round-trip + plaintext-leak guard (5 secret strings asserted absent from captured wire bytes), wrong-key silent drop with sender unacked stuck, keyed-vs-plain mutual drop, server-minted stable per-session key, legacy plaintext path. Full sweep regression: 60 passed | 0 failed | 4 SKIP_EXTERNAL — including validate_rendezvous.py 6/6 and validate_cpp_remote_session.py 8/8 (proves the additive payload field doesn't break existing parsers). cryptography 47.0.0 was already on PATH so no install step.
+- Covers: REQ-MEDIA-AUTH, REQ-MEDIA-RENDEZVOUS
+
+## M107 - Release-readiness phase summary (gate: pass)
+
+- Timestamp: 2026-04-29T01:16:00+00:00
+- Verified: Final bundle verify: ok=true, 79 REQs covered, 0 problems, 0 blockers. Final sweep regression: 60 passed | 0 failed | 4 SKIP_EXTERNAL. Phase summary visible in .idea-to-code/telegram-platform/07-execution-log.md.
+- Covers: REQ-VALIDATION
+
+## M108 - Qt remote-control UI (ATLAS-M71 part 2) (gate: pass)
+
+- Timestamp: 2026-04-29T01:33:19+00:00
+- Verified: Build clean (cmake --build build-verify --config Debug --target app_desktop and remote_session_smoke — no warnings). validate_cpp_remote_session.py 9/9 (positive flow asserts relay_key_b64 non-empty AND matches across both peers via two ControlPlaneClient instances). Full sweep regression: 60 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Covers: REQ-CPP-CONTROL-CLIENT, REQ-C1-DESKTOP-GUI, REQ-REMOTE-LIFECYCLE
+
+## M109 - Voice/video call signaling + AEAD media skeleton (gate: pass)
+
+- Timestamp: 2026-04-29T01:42:49+00:00
+- Verified: scripts/validate_call_session.py 6/6: full happy path with shared relay_key across both peers, decline by callee terminal, caller cancels while ringing, stranger denied across all 4 actions, invalid kind rejected, and AEAD-sealed PCM frames round-trip via M105/M106 RelayPeerSession over the relay using the per-call key. Full sweep regression: 61 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Covers: REQ-CHAT-CORE, REQ-MEDIA-AUTH
+
+## M110 - Web client bridge (HTTP + WebSocket) (gate: pass)
+
+- Timestamp: 2026-04-29T01:48:04+00:00
+- Verified: scripts/validate_web_bridge.py 5/5: GET / + /app.js serve correct content with right Content-Type; /nope returns 404; WS handshake honors RFC-6455 Sec-WebSocket-Accept; login over WS returns u_alice session; message_send -> conversation_sync round-trip lands; malformed JSON returns invalid_envelope error and the connection survives. Full sweep regression: 62 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Covers: REQ-CHAT-CORE, REQ-NET-ABSTRACTION
+
+## M111 - Redis hot-state cache bridge (FakeRedis default + HTTP stub) (gate: pass)
+
+- Timestamp: 2026-04-29T01:52:00+00:00
+- Verified: scripts/validate_redis_cache.py 6/6: presence/session round-trip + TTL expiry + invalidate, corrupted JSON defensive, dry_run logs+records, missing-creds raises PermissionError mentioning PA-010, concurrent writes don't corrupt. Full sweep regression: 63 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Covers: REQ-PERSISTENCE, REQ-CHAT-CORE
+
+## M112 - iOS UI scaffold validator (gate: pass)
+
+- Timestamp: 2026-04-29T01:54:18+00:00
+- Verified: scripts/validate_ios_scaffold.py 5/5; full sweep regression about to follow with M113. No code is compiled here — that will happen when a real macOS host picks up the scaffold (CI macos-build job exists but iOS isn't enabled yet).
+- Covers: REQ-VALIDATION
+
+## M113 - macOS UI scaffold + macdeployqt POST_BUILD (gate: pass)
+
+- Timestamp: 2026-04-29T01:58:53+00:00
+- Verified: scripts/validate_macos_scaffold.py 5/5. Windows build still clean (cmake --build build-verify --config Debug --target app_desktop -> no warnings/errors after the macOS-only additions, since they're inside if(APPLE AND NOT TELEGRAM_LIKE_TARGET_IS_IOS) blocks). Full sweep: 65 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Covers: REQ-VALIDATION
+
+## M114 - Release-readiness phase 2 summary (gate: pass)
+
+- Timestamp: 2026-04-29T02:00:21+00:00
+- Verified: Final bundle verify: ok=true, 77 REQs covered, 0 problems, 0 blockers. Final sweep: 65 passed | 0 failed | 4 SKIP_EXTERNAL. Phase summary visible in .idea-to-code/telegram-platform/07-execution-log.md.
+- Covers: REQ-VALIDATION
+

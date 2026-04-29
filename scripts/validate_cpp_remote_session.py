@@ -65,34 +65,43 @@ def main() -> int:
             print("[FAIL] server did not open TCP port")
             return 1
 
-        # Pre-register alice via an existing client so the smoke can log in.
-        # The smoke uses a fixed --device id so we register that account here.
-        # The server creates user + device + session in one register_request.
+        # Pre-register both alice and bob so the smoke can do a positive
+        # invite -> approve -> rendezvous flow that asserts relay_key_b64
+        # round-trips through the C++ JSON parser (M108).
         import json
-        with socket.create_connection(("127.0.0.1", port)) as s:
-            req = json.dumps({
-                "type": "register_request",
-                "correlation_id": "reg_1",
-                "session_id": "",
-                "actor_user_id": "",
-                "payload": {
-                    "username": "alice",
-                    "password": "alice_pw",
-                    "display_name": "Alice",
-                    "device_id": "dev_remote_smoke",
-                },
-            }) + "\n"
-            s.sendall(req.encode("utf-8"))
-            s.settimeout(2.0)
-            data = b""
-            while not data.endswith(b"\n"):
-                chunk = s.recv(4096)
-                if not chunk: break
-                data += chunk
-            resp = json.loads(data.decode("utf-8").strip())
-            if resp.get("type") not in ("register_response", "error"):
-                print(f"[FAIL] register prep returned {resp}")
-                return 1
+
+        def _register(username: str, password: str, display: str, device: str) -> bool:
+            with socket.create_connection(("127.0.0.1", port)) as s:
+                req = json.dumps({
+                    "type": "register_request",
+                    "correlation_id": f"reg_{username}",
+                    "session_id": "",
+                    "actor_user_id": "",
+                    "payload": {
+                        "username": username,
+                        "password": password,
+                        "display_name": display,
+                        "device_id": device,
+                    },
+                }) + "\n"
+                s.sendall(req.encode("utf-8"))
+                s.settimeout(2.0)
+                data = b""
+                while not data.endswith(b"\n"):
+                    chunk = s.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                resp = json.loads(data.decode("utf-8").strip())
+                if resp.get("type") not in ("register_response", "error"):
+                    print(f"[FAIL] register prep for {username} returned {resp}")
+                    return False
+                return True
+
+        if not _register("alice", "alice_pw", "Alice", "dev_remote_smoke"):
+            return 1
+        if not _register("bob", "bob_pw", "Bob", "dev_remote_smoke_peer"):
+            return 1
 
         result = subprocess.run(
             [str(smoke),
@@ -100,7 +109,10 @@ def main() -> int:
              "--password", "alice_pw",
              "--device", "dev_remote_smoke",
              "--host", "127.0.0.1",
-             "--port", str(port)],
+             "--port", str(port),
+             "--peer-user", "bob",
+             "--peer-password", "bob_pw",
+             "--peer-device", "dev_remote_smoke_peer"],
             cwd=str(REPO),
             text=True,
             stdout=subprocess.PIPE,

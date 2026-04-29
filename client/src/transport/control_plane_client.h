@@ -298,6 +298,9 @@ struct RemoteRendezvousResult {
     std::vector<RemoteRendezvousCandidate> candidates;
     std::string relay_region;
     std::string relay_endpoint;
+    // M106 / D9: per-session AES-256-GCM key (base64). Empty when the server
+    // is on a pre-M106 build or the session was created without a key.
+    std::string relay_key_b64;
     std::string error_code;
     std::string error_message;
 };

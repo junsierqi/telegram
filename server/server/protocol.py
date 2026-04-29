@@ -87,6 +87,13 @@ class ErrorCode(StrEnum):
     CONVERSATION_PERMISSION_DENIED = "conversation_permission_denied"
     CONVERSATION_OWNER_ROLE_IMMUTABLE = "conversation_owner_role_immutable"
     CONVERSATION_INVALID_ROLE = "conversation_invalid_role"
+    # M109 voice / video calls
+    UNKNOWN_CALL = "unknown_call"
+    CALL_PARTICIPANT_DENIED = "call_participant_denied"
+    CALL_NOT_RINGING = "call_not_ringing"
+    CALL_ALREADY_TERMINAL = "call_already_terminal"
+    CALL_NOT_ACTIVE = "call_not_active"
+    CALL_INVALID_KIND = "call_invalid_kind"
 
 
 _ERROR_MESSAGES: dict[ErrorCode, str] = {
@@ -164,6 +171,12 @@ _ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.CONVERSATION_PERMISSION_DENIED: "Your role in this conversation does not allow that action.",
     ErrorCode.CONVERSATION_OWNER_ROLE_IMMUTABLE: "The conversation owner's role cannot be changed.",
     ErrorCode.CONVERSATION_INVALID_ROLE: "Role must be one of: owner, admin, member.",
+    ErrorCode.UNKNOWN_CALL: "No call matches that call_id.",
+    ErrorCode.CALL_PARTICIPANT_DENIED: "Only the caller or callee may act on this call.",
+    ErrorCode.CALL_NOT_RINGING: "This call is not in a ringing state.",
+    ErrorCode.CALL_ALREADY_TERMINAL: "This call is already in a terminal state.",
+    ErrorCode.CALL_NOT_ACTIVE: "This call is not in an active (accepted) state.",
+    ErrorCode.CALL_INVALID_KIND: "Call kind must be 'audio' or 'video'.",
 }
 
 
@@ -303,6 +316,14 @@ class MessageType(StrEnum):
     POLL_UPDATED = "poll_updated"
     # M103 group permissions + admin roles
     CONVERSATION_ROLE_UPDATE_REQUEST = "conversation_role_update_request"
+    # M109 voice / video calls
+    CALL_INVITE_REQUEST = "call_invite_request"
+    CALL_ACCEPT_REQUEST = "call_accept_request"
+    CALL_DECLINE_REQUEST = "call_decline_request"
+    CALL_END_REQUEST = "call_end_request"
+    CALL_RENDEZVOUS_REQUEST = "call_rendezvous_request"
+    CALL_STATE = "call_state"
+    CALL_RENDEZVOUS_INFO = "call_rendezvous_info"
     ERROR = "error"
 
 
@@ -454,6 +475,41 @@ class RemoteSessionActionRequestPayload:
 class RemoteDisconnectRequestPayload:
     remote_session_id: str
     reason: str = "peer_disconnected"
+
+
+# ---- M109 voice / video calls ----
+@dataclass(slots=True)
+class CallInviteRequestPayload:
+    callee_user_id: str
+    callee_device_id: str
+    kind: str  # "audio" | "video"
+
+
+@dataclass(slots=True)
+class CallActionRequestPayload:
+    """Accept / decline / end / rendezvous all carry just a call_id."""
+    call_id: str
+
+
+@dataclass(slots=True)
+class CallStatePayload:
+    call_id: str
+    caller_user_id: str
+    caller_device_id: str
+    callee_user_id: str
+    callee_device_id: str
+    kind: str  # "audio" | "video"
+    state: str  # "ringing" | "accepted" | "declined" | "ended" | "canceled"
+    detail: str = ""
+
+
+@dataclass(slots=True)
+class CallRendezvousInfoPayload:
+    call_id: str
+    state: str
+    relay_region: str
+    relay_endpoint: str
+    relay_key_b64: str  # AES-256-GCM session key, same wire format as M106
 
 
 @dataclass(slots=True)
@@ -801,6 +857,11 @@ class RemoteRendezvousInfoPayload:
     candidates: list[RemoteRendezvousCandidate]
     relay_region: str
     relay_endpoint: str
+    # M106 / D9: AES-256-GCM key shared by both peers for media-plane AEAD,
+    # base64-encoded. Empty string means the session is unencrypted (legacy).
+    # The control plane is treated as already-trusted here; future work
+    # negotiates the key without putting it on the wire.
+    relay_key_b64: str = ""
 
 
 # Input events are small and vary by kind, so carry a generic payload dict
@@ -1426,6 +1487,19 @@ def parse_request_payload(message_type: MessageType, payload: dict[str, Any]) ->
             remote_session_id=payload["remote_session_id"],
             reason=payload.get("reason", "peer_disconnected"),
         )
+    if message_type == MessageType.CALL_INVITE_REQUEST:
+        return CallInviteRequestPayload(
+            callee_user_id=payload["callee_user_id"],
+            callee_device_id=payload["callee_device_id"],
+            kind=payload.get("kind", "audio"),
+        )
+    if message_type in (
+        MessageType.CALL_ACCEPT_REQUEST,
+        MessageType.CALL_DECLINE_REQUEST,
+        MessageType.CALL_END_REQUEST,
+        MessageType.CALL_RENDEZVOUS_REQUEST,
+    ):
+        return CallActionRequestPayload(call_id=payload["call_id"])
     if message_type == MessageType.REMOTE_INPUT_EVENT:
         return RemoteInputEventRequestPayload(
             remote_session_id=payload["remote_session_id"],

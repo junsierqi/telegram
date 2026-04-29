@@ -27,6 +27,12 @@ struct Args {
     std::string device = "dev_remote_smoke";
     std::string host = "127.0.0.1";
     unsigned short port = 8787;
+    // M108 positive flow: optional second user; when both peer_user and
+    // peer_device are provided the smoke also exercises invite/approve/
+    // rendezvous and asserts the AEAD relay_key_b64 field round-trips.
+    std::string peer_user;
+    std::string peer_password;
+    std::string peer_device;
 };
 
 bool parse_args(int argc, char** argv, Args& out) {
@@ -44,6 +50,9 @@ bool parse_args(int argc, char** argv, Args& out) {
         else if (a == "--device") { auto v = next("--device"); if (!v) return false; out.device = v; }
         else if (a == "--host") { auto v = next("--host"); if (!v) return false; out.host = v; }
         else if (a == "--port") { auto v = next("--port"); if (!v) return false; out.port = static_cast<unsigned short>(std::atoi(v)); }
+        else if (a == "--peer-user") { auto v = next("--peer-user"); if (!v) return false; out.peer_user = v; }
+        else if (a == "--peer-password") { auto v = next("--peer-password"); if (!v) return false; out.peer_password = v; }
+        else if (a == "--peer-device") { auto v = next("--peer-device"); if (!v) return false; out.peer_device = v; }
         else { std::cerr << "unknown arg: " << a << "\n"; return false; }
     }
     return true;
@@ -132,6 +141,48 @@ int main(int argc, char** argv) {
             return fail("remote_input_event_negative", "expected error");
         }
         std::cout << "[ok ] remote_input_event negative path: " << r.error_code << "\n";
+        ++passed;
+    }
+
+    // 9. M108 positive flow: invite -> approve -> rendezvous; assert relay_key_b64
+    //    is non-empty (proves the new AEAD field round-trips through the
+    //    C++ ControlPlaneClient JSON parser end-to-end).
+    if (!args.peer_user.empty() && !args.peer_device.empty()) {
+        ++total;
+        ControlPlaneClient peer;
+        if (!peer.connect(args.host, args.port)) {
+            return fail("peer_connect", "could not open second TCP connection");
+        }
+        const auto peer_login = peer.login(args.peer_user, args.peer_password, args.peer_device);
+        if (!peer_login.ok) {
+            return fail("peer_login", peer_login.error_code + " " + peer_login.error_message);
+        }
+        const auto invite = client.remote_invite(args.device, args.peer_device);
+        if (!invite.ok) {
+            return fail("positive_invite", invite.error_code + " " + invite.error_message);
+        }
+        const auto approve = peer.remote_approve(invite.remote_session_id);
+        if (!approve.ok) {
+            return fail("positive_approve", approve.error_code + " " + approve.error_message);
+        }
+        const auto rv = client.remote_rendezvous_request(invite.remote_session_id);
+        if (!rv.ok) {
+            return fail("positive_rendezvous", rv.error_code + " " + rv.error_message);
+        }
+        if (rv.relay_key_b64.empty()) {
+            return fail("positive_rendezvous_key", "expected non-empty relay_key_b64");
+        }
+        // Both peers must observe the same key (server caches it on the record).
+        const auto rv_peer = peer.remote_rendezvous_request(invite.remote_session_id);
+        if (!rv_peer.ok) {
+            return fail("positive_rendezvous_peer", rv_peer.error_code + " " + rv_peer.error_message);
+        }
+        if (rv_peer.relay_key_b64 != rv.relay_key_b64) {
+            return fail("positive_rendezvous_key_match",
+                        "key mismatch: client=" + rv.relay_key_b64
+                        + " peer=" + rv_peer.relay_key_b64);
+        }
+        std::cout << "[ok ] positive flow: invite/approve/rendezvous, relay_key_b64 set + matches\n";
         ++passed;
     }
 

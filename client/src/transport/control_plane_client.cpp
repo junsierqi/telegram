@@ -1332,6 +1332,7 @@ RemoteRendezvousResult ControlPlaneClient::remote_rendezvous_request(
     result.state = extract_string(*payload_obj, "state");
     result.relay_region = extract_string(*payload_obj, "relay_region");
     result.relay_endpoint = extract_string(*payload_obj, "relay_endpoint");
+    result.relay_key_b64 = extract_string(*payload_obj, "relay_key_b64");
     const auto* candidates = find_member(*payload_obj, "candidates");
     if (candidates && candidates->is_array()) {
         for (const auto& cand_val : *candidates->as_array()) {

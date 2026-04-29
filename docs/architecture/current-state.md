@@ -347,8 +347,7 @@ Run `python "$HOME/.claude/skills/idea-to-code/scripts/manage_delivery_bundle.py
 
 | Area | Why it's not here yet |
 |---|---|
-| D9: AEAD on media plane | User deferred until after E-series. Crypto library still to pick (cryptography / pynacl). |
-| ReliableChannel wired into UDP transport | Pure algorithm exists + validated; integration deferred. |
+| ReliableChannel and AEAD wired through media-plane control flow into a Qt remote-control UI | The transport path is in: `server/server/relay_peer.py` composes ReliableChannel with the RELAY: envelope and `server/server/media_crypto.py` AES-256-GCM seals every reliable packet end-to-end (per-session key minted by `request_rendezvous`, ridden in `RemoteRendezvousInfoPayload.relay_key_b64`). Validators `validate_reliable_relay.py` and `validate_media_aead.py` cover lossy-path retransmit, reorder buffering, tail-loss recovery via tick, wire-bytes never contain plaintext, wrong-key drop, and stable per-session key. What remains: an in-product Qt UI for invite/approve/host/view (currently only protocol RPCs and `app_shell` script demo). |
 | POSIX compile path | Code structurally correct; no Linux/macOS CI; first real 2nd platform port will validate. |
 | C++ client parity with E-series | `app_chat` covers send / read / edit / delete / contacts / presence. `app_desktop` now covers registration, profile update, user discovery, contacts, basic group creation/member management and attachments. Remaining parity gaps are mostly polish and deeper UX rather than missing core RPC surface. |
 | Real database / Redis / object store | SQLite `--db-file` now provides a durable local database backend, but this is still single-process/dev-grade. PostgreSQL migrations, transactional repository boundaries and Redis-backed hot presence/session state remain future C4 work. |

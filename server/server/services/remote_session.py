@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from ..media_crypto import generate_key_b64
 from ..protocol import (
     ErrorCode,
     RemoteRelayAssignmentPayload,
@@ -158,6 +159,12 @@ class RemoteSessionService:
         if record.state == "approved":
             record.state = "negotiating"
             self._state.save_runtime_state()
+        # M106 / D9: lazily mint a per-session AES-256-GCM key the first time
+        # either peer asks for rendezvous info; persist so both sides observe
+        # the same key on subsequent calls.
+        if not record.relay_key_b64:
+            record.relay_key_b64 = generate_key_b64()
+            self._state.save_runtime_state()
 
         candidates = [
             RemoteRendezvousCandidate(
@@ -191,6 +198,7 @@ class RemoteSessionService:
             candidates=candidates,
             relay_region=record.relay_region,
             relay_endpoint=record.relay_endpoint,
+            relay_key_b64=record.relay_key_b64,
         )
 
     def disconnect(

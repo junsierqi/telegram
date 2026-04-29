@@ -5,6 +5,8 @@ from typing import Any, Callable
 
 from .protocol import (
     AttachmentFetchRequestPayload,
+    CallActionRequestPayload,
+    CallInviteRequestPayload,
     ContactListResponsePayload,
     ContactTargetRequestPayload,
     ConversationCreateRequestPayload,
@@ -120,6 +122,7 @@ from .services.two_fa import TwoFAService
 from .services.presence import DEFAULT_TTL_SECONDS, PresenceService
 from .services.push_dispatch import PushDispatchWorker
 from .services.push_tokens import PushTokenService
+from .services.call_session import CallSessionService
 from .services.remote_session import RemoteSessionService
 from .state import InMemoryState
 
@@ -150,6 +153,7 @@ class ServerApplication:
         )
         self.presence_service.set_transition_handler(self._fanout_presence_transition)
         self.remote_session_service = RemoteSessionService(self.state)
+        self.call_session_service = CallSessionService(self.state)
         self.input_service = InputService(self.state)
         self.contacts_service = ContactsService(self.state, self.presence_service)
         self.push_token_service = PushTokenService(self.state, clock=self.clock)
@@ -1433,6 +1437,86 @@ class ServerApplication:
                         sequence=ack["sequence"],
                         kind=ack["kind"],
                     ),
+                ).to_dict()
+            except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.CALL_INVITE_REQUEST:
+            try:
+                assert isinstance(payload, CallInviteRequestPayload)
+                state_payload = self.call_session_service.create_invite(
+                    caller_user_id=session.user_id,
+                    caller_device_id=session.device_id,
+                    callee_user_id=payload.callee_user_id,
+                    callee_device_id=payload.callee_device_id,
+                    kind=payload.kind,
+                )
+                return make_response(
+                    MessageType.CALL_STATE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=state_payload,
+                ).to_dict()
+            except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type in (
+            MessageType.CALL_ACCEPT_REQUEST,
+            MessageType.CALL_DECLINE_REQUEST,
+            MessageType.CALL_END_REQUEST,
+        ):
+            try:
+                assert isinstance(payload, CallActionRequestPayload)
+                if message_type == MessageType.CALL_ACCEPT_REQUEST:
+                    state_payload = self.call_session_service.accept(
+                        payload.call_id, session.user_id
+                    )
+                elif message_type == MessageType.CALL_DECLINE_REQUEST:
+                    state_payload = self.call_session_service.decline(
+                        payload.call_id, session.user_id
+                    )
+                else:
+                    state_payload = self.call_session_service.end(
+                        payload.call_id, session.user_id
+                    )
+                return make_response(
+                    MessageType.CALL_STATE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=state_payload,
+                ).to_dict()
+            except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.CALL_RENDEZVOUS_REQUEST:
+            try:
+                assert isinstance(payload, CallActionRequestPayload)
+                rv_payload = self.call_session_service.rendezvous(
+                    payload.call_id, session.user_id
+                )
+                return make_response(
+                    MessageType.CALL_RENDEZVOUS_INFO,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=rv_payload,
                 ).to_dict()
             except ValueError as exc:
                 return self._error_response(

@@ -86,6 +86,30 @@ class RemoteSessionRecord:
     state: str
     relay_endpoint: str = ""
     relay_region: str = ""
+    # M106 / D9: AES-256-GCM key shared by both peers for media-plane AEAD,
+    # base64-encoded. Empty string == legacy plaintext relay (peers without
+    # a key skip encryption). Generated on first request_rendezvous.
+    relay_key_b64: str = ""
+
+
+@dataclass(slots=True)
+class CallRecord:
+    """M109 voice/video call session.
+
+    Lives only in memory for now — runtime restart drops in-flight calls,
+    which is acceptable for a real-time channel. The same per-session
+    AES-256-GCM relay key (M106) seals the call's media-plane traffic.
+    """
+    call_id: str
+    caller_user_id: str
+    caller_device_id: str
+    callee_user_id: str
+    callee_device_id: str
+    kind: str  # "audio" | "video"
+    state: str  # "ringing" | "accepted" | "declined" | "ended" | "canceled"
+    relay_endpoint: str = ""
+    relay_region: str = ""
+    relay_key_b64: str = ""
 
 
 @dataclass(slots=True)
@@ -199,6 +223,9 @@ class InMemoryState:
             )
         }
         self.remote_sessions: dict[str, RemoteSessionRecord] = {}
+        # M109 voice/video calls — in-memory only; runtime restart drops
+        # in-flight calls (acceptable for a real-time channel).
+        self.calls: dict[str, CallRecord] = {}
         self.contacts: dict[str, list[str]] = {}
         self.attachments: dict[str, AttachmentRecord] = {}
         # Push tokens are kept in a flat list because (user_id, device_id) can
@@ -330,6 +357,7 @@ class InMemoryState:
                     state=entry["state"],
                     relay_endpoint=entry.get("relay_endpoint", ""),
                     relay_region=entry.get("relay_region", ""),
+                    relay_key_b64=entry.get("relay_key_b64", ""),
                 )
                 for entry in remote_sessions
             }
@@ -422,7 +450,8 @@ class InMemoryState:
               target_device_id TEXT NOT NULL,
               state TEXT NOT NULL,
               relay_endpoint TEXT NOT NULL,
-              relay_region TEXT NOT NULL
+              relay_region TEXT NOT NULL,
+              relay_key_b64 TEXT NOT NULL DEFAULT ''
             );
             CREATE TABLE IF NOT EXISTS contacts (
               owner_user_id TEXT NOT NULL,
@@ -449,6 +478,12 @@ class InMemoryState:
             conn.execute("ALTER TABLE conversations ADD COLUMN change_seq INTEGER NOT NULL DEFAULT 0")
         if "changes_json" not in columns:
             conn.execute("ALTER TABLE conversations ADD COLUMN changes_json TEXT NOT NULL DEFAULT '[]'")
+        rs_columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(remote_sessions)").fetchall()
+        }
+        if "relay_key_b64" not in rs_columns:
+            conn.execute("ALTER TABLE remote_sessions ADD COLUMN relay_key_b64 TEXT NOT NULL DEFAULT ''")
 
     def _save_sqlite_state(self) -> None:
         with self._connect_sqlite() as conn:
@@ -516,8 +551,8 @@ class InMemoryState:
                 """
                 INSERT INTO remote_sessions
                 (remote_session_id, requester_user_id, requester_device_id, target_user_id,
-                 target_device_id, state, relay_endpoint, relay_region)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 target_device_id, state, relay_endpoint, relay_region, relay_key_b64)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 [
                     (
@@ -529,6 +564,7 @@ class InMemoryState:
                         r.state,
                         r.relay_endpoint,
                         r.relay_region,
+                        r.relay_key_b64,
                     )
                     for r in self.remote_sessions.values()
                 ],
@@ -634,11 +670,13 @@ class InMemoryState:
                         "state": row[5],
                         "relay_endpoint": row[6],
                         "relay_region": row[7],
+                        "relay_key_b64": row[8],
                     }
                     for row in conn.execute(
                         """
                         SELECT remote_session_id, requester_user_id, requester_device_id,
-                               target_user_id, target_device_id, state, relay_endpoint, relay_region
+                               target_user_id, target_device_id, state, relay_endpoint,
+                               relay_region, relay_key_b64
                         FROM remote_sessions
                         """
                     ).fetchall()

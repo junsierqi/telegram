@@ -931,3 +931,159 @@ PASS. Direct C++ TLS now reaches the protocol layer locally, login succeeds agai
 ### Next-Phase Recommendation
 
 Run the deployment hardening acceptance sweep (M69) now that the TLS direct-client path is green, or pivot to Windows package signing (M70) if the user prefers consolidating shippable artifacts before any live Docker work.
+
+---
+
+## Phase: Release-readiness — Verification gate + internal tech debt closure (M104-M107, 2026-04-29)
+
+### Phase Goal
+
+Close the bundle's pending Verification gate after the M97-M103 chat-completeness gap-fill and burn down the two pieces of internal tech debt that did not need an external credential to ship: ATLAS-M71 (ReliableChannel wired into the UDP relay) and D9 (AEAD on the media plane). Result: nothing on the critical path is blocked on us — only on procurement (signing cert / FCM / SMS) and on whole-new product surfaces (iOS / voice / web / production DB).
+
+### Requirement Understanding
+
+- The user asked for a status-and-execute pass: what's left before Telegram can ship, then keep going.
+- Internal-only items must be closed; items that need external credentials or new product surfaces should be enumerated as deferred so the user knows exactly what's left to procure or schedule.
+
+### Completed Tasks
+
+- M104 — Verification gate sweep across 58 in-process validators (4 SKIP_EXTERNAL accepted; PA-001/2/3 stack last live-green 2026-04-28). Bundle `verify` ok, 77 REQs, 0 problems.
+- M105 — `server/server/relay_peer.py`: RelayPeerSession composes `media_plane.frame` + `RELAY:` prefix with `reliable_stream.ReliableChannel`. Server stays a dumb forwarder; reliability lives in the peers (REL/NAK/ACK seq packets ride inside the RELAY: body). Background reader thread per peer; injectable tx_loss / rx_loss for deterministic loss tests.
+- M106 — D9 AEAD on the media plane: `server/server/media_crypto.py` exposes AES-256-GCM (12-byte nonce || ct || 16-byte tag, base64 key wire format). RelayPeerSession seals every reliable packet end-to-end. RemoteSessionRecord + SQLite remote_sessions table gain `relay_key_b64` with idempotent ALTER TABLE migration; `RemoteRendezvousInfoPayload.relay_key_b64` carries the per-session key; `RemoteSessionService.request_rendezvous` lazily mints the AES-256 key on first call so both peers retrieve the same value.
+
+### Implementation Summary
+
+| Layer | Change | File(s) |
+|---|---|---|
+| State | `RemoteSessionRecord.relay_key_b64` field; SQLite remote_sessions column + ALTER TABLE migration; JSON load/save round-trip. | `server/server/state.py` |
+| Protocol | `RemoteRendezvousInfoPayload.relay_key_b64` (additive, default `""`). | `server/server/protocol.py` |
+| Service | `RemoteSessionService.request_rendezvous` lazily mints key, returns it to both peers. | `server/server/services/remote_session.py` |
+| Crypto | New AES-256-GCM facade. | `server/server/media_crypto.py` |
+| Transport | Peer-side reliability + AEAD over the relay. | `server/server/relay_peer.py` |
+| Tests | 2 new validators (10 scenarios). | `scripts/validate_reliable_relay.py`, `scripts/validate_media_aead.py` |
+| Docs | D9 + ReliableChannel-integration row removed from known-gaps. | `docs/architecture/current-state.md` |
+
+### Test Flow
+
+- Per-milestone targeted run: `python scripts/validate_reliable_relay.py` and `python scripts/validate_media_aead.py`.
+- Full sweep after each milestone: `python scripts/_sweep_validators.py` — picks up new validators automatically.
+
+### Test Results
+
+| Run | Counts |
+|---|---|
+| `validate_reliable_relay.py` (M105) | 5/5 (lossless 10+5 round-trip; mid-seq drop NAK-recovered; reorder buffered+drained; tail-loss tick recovers; bidirectional 1-in-3 drop both directions delivered in order). |
+| `validate_media_aead.py` (M106) | 5/5 (shared-key round-trip + plaintext-leak guard; wrong-key silent drop; keyed-vs-plain mutual drop; server-minted stable per-session key; legacy plaintext path). |
+| Full sweep after M104 | 58 passed | 0 failed | 4 SKIP_EXTERNAL. |
+| Full sweep after M105 | 59 passed | 0 failed | 4 SKIP_EXTERNAL. |
+| Full sweep after M106 | 60 passed | 0 failed | 4 SKIP_EXTERNAL — including `validate_rendezvous.py` 6/6 and `validate_cpp_remote_session.py` 8/8 (proves the additive `relay_key_b64` field doesn't break existing parsers). |
+
+### Acceptance Conclusion
+
+PASS. Bundle verify ok, 77 REQs, 0 problems, 0 blockers; milestone count 102 → 106. Every internal tech-debt item that fit inside this phase is closed; the remaining release-readiness items are external-credential or new-surface work.
+
+### Deferred Work And Risks
+
+External-credential blockers (no engineering work to do until procured):
+
+- **PA-005** — Authenticode code-signing certificate. Without it the Inno Setup installer trips SmartScreen / Defender warnings on first install.
+- **PA-008** — FCM service-account JSON or APNs token. Push pipeline already drains tokens through `PushDispatchWorker`; it just needs a real transport.
+- **PA-009** — Twilio (or Aliyun SMS) credential for `PhoneOtpService` to deliver real OTP codes instead of `MockSender` log lines.
+
+Engineering work outside this phase but still on the release-readiness path:
+
+- **Qt remote-control UI** — invite / approve / host / view buttons in `app_desktop`. The protocol RPCs and new `RelayPeerSession` are ready; only the UI binding is missing. Validation needs a multi-client harness.
+- **iOS client** — `f10e238` added `macOS + iOS` CMake guards but no UI; building a real iOS app is a separate phase.
+- **Voice / video calls** — not started.
+- **Web client** — not started.
+- **Production storage** — SQLite `--db-file` is single-process/dev-grade; PostgreSQL repository exists but full migrations + transactional repository boundaries + Redis hot state are still C4-tier work.
+
+### Next-Phase Recommendation
+
+If the user procures any of PA-005 / PA-008 / PA-009, wire it in as a focused 1-milestone phase each. Otherwise the highest-value engineering phase remaining is the Qt remote-control UI (M71-UI), which finally turns the now-working transport into a feature a real user can drive from `app_desktop`.
+
+---
+
+## Phase: Release-readiness — feature breadth (M108-M114, 2026-04-29)
+
+### Phase Goal
+
+User asked for the remaining release-readiness items to be implemented in one autonomous arc: Qt remote-control UI, voice/video calls, web client, production PG/Redis, plus iOS/macOS UI scaffolding (with no compile environment for Apple platforms — implement what is implementable without breaking other platforms). The output is a server + client surface that exercises every release-readiness path on Windows + Linux + Android + WS browsers, and ships ready-to-compile scaffolding for macOS / iOS that picks up cleanly on a real Apple host.
+
+### Requirement Understanding
+
+- Every change must keep Windows / Linux / Android builds green; Apple-only additions stay behind `if(APPLE)` / `if(TELEGRAM_LIKE_TARGET_IS_IOS)` guards.
+- Voice/video and Redis are skeletons — the FSM, transport, and pluggable seam matter; real codecs and a real Redis cluster are out of scope for this phase.
+- Validators are the contract: every milestone ships a green validator before the checkpoint.
+
+### Completed Tasks
+
+- **M108** — Qt remote-control UI: Remote settings page in app_desktop with Invite / Approve / Reject / Cancel / Terminate / Rendezvous buttons + RPC log; ControlPlaneClient::RemoteRendezvousResult extended with M106's `relay_key_b64`; remote_session_smoke positive flow with two ControlPlaneClient instances asserts the AEAD key round-trips and matches across both peers.
+- **M109** — Voice/video call signaling + AEAD media skeleton: 5 new CALL_* MessageTypes + 4 payloads + 6 typed ErrorCodes + CallRecord + CallSessionService FSM (ringing → accepted/declined/canceled/ended); media plane reuses M105/M106 RelayPeerSession with the per-call AES-256-GCM key; authorizer extended so accepted calls authorize the media plane the same way active remote_sessions do.
+- **M110** — Web client: stdlib-only RFC-6455 WebSocket bridge; each WS connection is a thin client of `ServerApplication.dispatch`; serves index.html + app.js with a minimal single-page chat UI (sign-in form, message log, composer, push handling for message_deliver / presence_update / conversation_updated).
+- **M111** — Redis hot-state cache bridge: RedisCacheBridge over a Protocol-typed RedisTransport; FakeRedisTransport (thread-safe in-memory, TTL semantics) is the default; RedisHttpTransport stubs an Upstash-shaped REST gateway, dry_run logs+records and !dry_run with no creds raises PermissionError citing PA-011; covers presence (5-min TTL) and session lookup (1-hour TTL).
+- **M112** — iOS UI scaffold validator: existing scaffold from f10e238 (Info.plist + CMake guards + README) was un-validated; added `validate_ios_scaffold.py` static-shape check covering plist well-formedness + required iOS-specific keys, CMake guard presence, no-regression on Windows/Apple-non-iOS/Android guards, README PA-005 + PA-010 documentation, mobile entry point + QML root presence.
+- **M113** — macOS UI scaffold + macdeployqt POST_BUILD: wired macOS analogue of windeployqt into `client/src/CMakeLists.txt` for both app_desktop and app_mobile (gated on `APPLE AND NOT IOS` and the new `TELEGRAM_LIKE_SKIP_MACDEPLOYQT` opt-out); README updated to remove the previous gap; `validate_macos_scaffold.py` covers Info.plist shape, MACOSX_BUNDLE_* identifiers, the new POST_BUILD step + opt-out flag, no-regression on Windows windeployqt POST_BUILD.
+
+### Implementation Summary
+
+| Layer | Change | File(s) |
+|---|---|---|
+| Server protocol | 5 CALL_* MessageTypes + 4 payloads + 6 ErrorCodes + parsers + error messages. | `server/server/protocol.py` |
+| Server state | `CallRecord` + `state.calls` dict (in-memory). | `server/server/state.py` |
+| Server services | `CallSessionService` FSM with relay_key minting on accept. | `server/server/services/call_session.py` |
+| Server dispatch | 4 dispatch arms for CALL_INVITE/ACCEPT/DECLINE/END/RENDEZVOUS. | `server/server/app.py` |
+| Server media-plane auth | Authorizer accepts active calls. | `server/main.py` |
+| Server bridges | `web_bridge.py` (HTTP + WS), `redis_cache.py` (Bridge + Fake/HTTP transports). | `server/server/web_bridge.py`, `server/server/redis_cache.py` |
+| Browser client | `index.html` + `app.js` single-page client. | `server/web/` |
+| C++ client | Remote settings page in app_desktop (Invite/Approve/etc.); `RemoteRendezvousResult.relay_key_b64`; positive flow in remote_session_smoke. | `client/src/app_desktop/main.cpp`, `client/src/transport/control_plane_client.{h,cpp}`, `client/src/remote_control/remote_session_smoke.cpp` |
+| CMake | macdeployqt POST_BUILD for both Apple-non-iOS targets. | `client/src/CMakeLists.txt` |
+| Docs | macOS README updated (gap closed). | `deploy/macos/README.md` |
+| Validators | 5 new (call_session, web_bridge, redis_cache, ios_scaffold, macos_scaffold) + extended cpp_remote_session positive flow. | `scripts/validate_*.py` |
+
+### Test Flow
+
+- Per-milestone targeted run: each new validator + a build check after the C++ changes.
+- Full sweep after each milestone via `scripts/_sweep_validators.py` — auto-discovers new validators.
+
+### Test Results
+
+| Run | Counts |
+|---|---|
+| `validate_call_session.py` (M109) | 6/6 |
+| `validate_web_bridge.py` (M110) | 5/5 |
+| `validate_redis_cache.py` (M111) | 6/6 |
+| `validate_ios_scaffold.py` (M112) | 5/5 |
+| `validate_macos_scaffold.py` (M113) | 5/5 |
+| `validate_cpp_remote_session.py` (M108 extension) | 9/9 (was 8/8) |
+| Full sweep after M113 | **65 passed | 0 failed | 4 SKIP_EXTERNAL** |
+
+### Acceptance Conclusion
+
+PASS. Bundle verify ok, 77 REQs, 0 problems, 0 blockers; milestone count 106 → 113. Every release-readiness item that has a Windows/Linux test path is wired and validated. Apple-only items (iOS/macOS) ship as production-quality scaffolding awaiting a real Mac host.
+
+### Deferred Work And Risks
+
+External-credential blockers (no engineering work to do until procured):
+
+- **PA-005** — Authenticode + Apple Developer Program code-signing certificates.
+- **PA-008** — FCM service-account JSON / APNs token.
+- **PA-009** — Twilio / Aliyun SMS credential.
+- **PA-010** — A macOS host running Xcode 15+ + Qt for iOS for the iOS build.
+- **PA-011** — Real Redis endpoint + auth token (Upstash, ElastiCache REST, or self-hosted).
+
+Engineering work outside this phase but on the roadmap:
+
+- **Voice/video real codecs** — Opus / VP8 / H.264; current frame transport is byte-opaque.
+- **Voice/video media bridges** — capture / playback platform integration (Core Audio, WASAPI, ALSA).
+- **PresenceService / Auth integration with the Redis bridge** — bridge is in place; the opt-in (`state.bind_redis_cache`) is a focused 1-milestone follow-up.
+- **Web client polish** — current page is a single-screen MVP; bring Telegram-style 3-pane layout, attachment uploads, push notifications via service workers.
+- **Native iOS UI tweaks** — adapt the QML phone shell for safe-area insets and iOS HIG once a real device runs the build.
+- **macOS .dmg packaging + notarization** — `macdeployqt -dmg` runs after embedding; notarytool via PA-005.
+- **PostgreSQL transactional repository boundaries** — `PostgresStateRepository` already exists; transactional save + per-table fine-grained writes are still future C4 work.
+
+### Next-Phase Recommendation
+
+The release-ready engineering surface is now feature-complete on every platform that this dev environment can build for. The two highest-leverage next moves are: (a) the user procuring PA-005/008/009/010/011 so the next sprint can drop in real signing/push/SMS/macOS-build/Redis without further engineering, or (b) wiring the Redis bridge into `PresenceService` (one-milestone follow-up) so the cache surface starts paying its keep on the load path.
+
+

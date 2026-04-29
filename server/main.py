@@ -12,13 +12,17 @@ from .server.state import InMemoryState
 
 
 _ACTIVE_REMOTE_STATES = {"approved", "negotiating", "connecting", "streaming", "controlling"}
+# M109: voice/video calls in 'accepted' state authorize their participants
+# on the media plane the same way remote-control sessions do.
+_ACTIVE_CALL_STATES = {"accepted"}
 
 
 def _build_session_authorizer(state: InMemoryState):
     """session_id is authorized when it points at a logged-in user who
     is currently a participant in at least one active (post-approval,
-    pre-terminal) remote session. Being only logged-in is not enough —
-    the media plane only carries traffic tied to an approved remote session.
+    pre-terminal) remote session OR an accepted voice/video call.
+    Being only logged-in is not enough — the media plane only carries
+    traffic tied to an approved remote session or an accepted call.
     """
 
     def authorize(session_id: str) -> bool:
@@ -29,6 +33,11 @@ def _build_session_authorizer(state: InMemoryState):
             if remote.state not in _ACTIVE_REMOTE_STATES:
                 continue
             if record.user_id in (remote.requester_user_id, remote.target_user_id):
+                return True
+        for call in state.calls.values():
+            if call.state not in _ACTIVE_CALL_STATES:
+                continue
+            if record.user_id in (call.caller_user_id, call.callee_user_id):
                 return True
         return False
 
