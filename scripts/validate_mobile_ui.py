@@ -109,6 +109,74 @@ def _t6():
     assert size < 200_000_000, f"mobile APK suspiciously large: {size} bytes"
 
 
+@scenario("m120_m122_qml_pages_present_and_wired")
+def _t7():
+    new_pages = [
+        "SettingsPage.qml", "ProfilePage.qml", "ContactsPage.qml",
+        "DevicesPage.qml", "RemoteControlPage.qml", "SearchPage.qml",
+        "AttachmentsPage.qml", "CallPage.qml",
+    ]
+    for p in new_pages:
+        path = QML_DIR / p
+        assert path.exists(), f"missing M120-M122 page: {p}"
+    main = (QML_DIR / "Main.qml").read_text(encoding="utf-8")
+    for c in ("settingsComponent", "profileComponent", "contactsComponent",
+              "devicesComponent", "searchComponent", "attachmentsComponent",
+              "remoteComponent", "callComponent"):
+        assert c in main, f"Main.qml missing component {c}"
+    chat_list = (QML_DIR / "ChatListPage.qml").read_text(encoding="utf-8")
+    assert "settingsRequested" in chat_list, "ChatListPage must expose settings entry"
+
+
+@scenario("m120_m122_bridge_invokables_and_signals")
+def _t8():
+    text = BRIDGE_H.read_text(encoding="utf-8")
+    for needle in (
+        # M120
+        "Q_INVOKABLE void refreshProfile(",
+        "Q_INVOKABLE void saveProfile(",
+        "Q_INVOKABLE void refreshContacts(",
+        "Q_INVOKABLE void addContact(",
+        "Q_INVOKABLE void removeContact(",
+        "Q_INVOKABLE void searchUsers(",
+        "Q_INVOKABLE void refreshDevices(",
+        "Q_INVOKABLE void revokeDevice(",
+        "Q_INVOKABLE void updateDeviceTrust(",
+        # M121
+        "Q_INVOKABLE void searchMessages(",
+        "Q_INVOKABLE void remoteInvite(",
+        "Q_INVOKABLE void remoteApprove(",
+        "Q_INVOKABLE void remoteTerminate(",
+        "Q_INVOKABLE void remoteRendezvous(",
+        "Q_INVOKABLE QVariantList selectedAttachments()",
+        "Q_INVOKABLE void fetchAttachment(",
+        # M122
+        "Q_INVOKABLE void callInvite(",
+        "Q_INVOKABLE void callAccept(",
+        "Q_INVOKABLE void callDecline(",
+        "Q_INVOKABLE void callEnd(",
+        # signals
+        "void profileReady(",
+        "void contactsReady(",
+        "void searchUsersReady(",
+        "void devicesReady(",
+        "void searchMessagesReady(",
+        "void remoteResult(",
+        "void attachmentReady(",
+        "void callStateChanged(",
+    ):
+        assert needle in text, f"bridge header missing: {needle}"
+
+
+@scenario("m120_m122_cmake_registers_new_qml_files")
+def _t9():
+    text = CMAKE.read_text(encoding="utf-8")
+    for f in ("SettingsPage.qml", "ProfilePage.qml", "ContactsPage.qml",
+              "DevicesPage.qml", "RemoteControlPage.qml", "SearchPage.qml",
+              "AttachmentsPage.qml", "CallPage.qml"):
+        assert f"app_mobile/qml/{f}" in text, f"CMake QML_FILES missing: {f}"
+
+
 def main() -> int:
     failed = 0
     for name, fn in SCENARIOS:

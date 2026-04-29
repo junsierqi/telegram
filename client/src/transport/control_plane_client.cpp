@@ -2,6 +2,7 @@
 
 #include "transport/json_value.h"
 
+#include <algorithm>
 #include <chrono>
 #include <sstream>
 
@@ -669,6 +670,92 @@ MessageResult ControlPlaneClient::send_attachment(const std::string& conversatio
     if (starts_with(result.mime_type, "text/")) {
         result.preview_text = text_preview(content);
     }
+    return result;
+}
+
+MessageResult ControlPlaneClient::send_attachment_chunked(
+    const std::string& conversation_id,
+    const std::string& caption,
+    const std::string& filename,
+    const std::string& mime_type,
+    const std::string& content,
+    ChunkedUploadProgressCallback progress,
+    std::size_t chunk_size) {
+    MessageResult result;
+
+    // ---- 1. init ----
+    const std::string init_payload =
+        "{\"conversation_id\":" + quote(conversation_id)
+      + ",\"filename\":" + quote(filename)
+      + ",\"mime_type\":" + quote(mime_type.empty() ? "application/octet-stream" : mime_type)
+      + ",\"total_size_bytes\":" + std::to_string(content.size()) + "}";
+    auto init_resp = send_and_wait("attachment_upload_init_request", init_payload);
+    if (!init_resp) { result.error_code = "transport_error"; return result; }
+    auto init_obj = parse_payload(*init_resp);
+    if (!init_obj || extract_type(*init_resp) != "attachment_upload_init_response") {
+        if (init_obj) {
+            result.error_code = extract_string(*init_obj, "code");
+            result.error_message = extract_string(*init_obj, "message");
+        } else {
+            result.error_code = "bad_response";
+        }
+        return result;
+    }
+    const std::string upload_id = extract_string(*init_obj, "upload_id");
+    if (upload_id.empty()) { result.error_code = "bad_response"; return result; }
+    // Server may suggest a chunk_size; honour it when smaller than ours.
+    const auto server_chunk = static_cast<std::size_t>(extract_number(*init_obj, "chunk_size"));
+    if (server_chunk > 0 && server_chunk < chunk_size) chunk_size = server_chunk;
+    if (chunk_size == 0) chunk_size = 256 * 1024;
+
+    // ---- 2. chunks ----
+    const std::size_t total = content.size();
+    if (progress) progress(0, total);
+    std::size_t offset = 0;
+    int sequence = 0;
+    while (offset < total) {
+        // Parenthesise std::min so MSVC's <windows.h> `min` macro doesn't
+        // intercept the call — Schannel headers in our TLS path pull it in.
+        const std::size_t this_chunk = (std::min)(chunk_size, total - offset);
+        const std::string body = content.substr(offset, this_chunk);
+        const std::string chunk_payload =
+            "{\"upload_id\":" + quote(upload_id)
+          + ",\"sequence\":" + std::to_string(sequence)
+          + ",\"content_b64\":" + quote(base64_encode(body)) + "}";
+        auto chunk_resp = send_and_wait("attachment_upload_chunk_request", chunk_payload);
+        if (!chunk_resp) { result.error_code = "transport_error"; return result; }
+        auto chunk_obj = parse_payload(*chunk_resp);
+        if (!chunk_obj || extract_type(*chunk_resp) != "attachment_upload_chunk_ack") {
+            if (chunk_obj) {
+                result.error_code = extract_string(*chunk_obj, "code");
+                result.error_message = extract_string(*chunk_obj, "message");
+            } else {
+                result.error_code = "bad_response";
+            }
+            return result;
+        }
+        offset += this_chunk;
+        if (progress) progress(offset, total);
+        ++sequence;
+    }
+
+    // ---- 3. complete ----
+    const std::string complete_payload =
+        "{\"upload_id\":" + quote(upload_id)
+      + ",\"caption\":" + quote(caption) + "}";
+    auto complete_resp = send_and_wait("attachment_upload_complete_request", complete_payload);
+    if (!complete_resp) { result.error_code = "transport_error"; return result; }
+    auto complete_obj = parse_payload(*complete_resp);
+    if (!complete_obj || extract_type(*complete_resp) != "message_deliver") {
+        if (complete_obj) {
+            result.error_code = extract_string(*complete_obj, "code");
+            result.error_message = extract_string(*complete_obj, "message");
+        } else {
+            result.error_code = "bad_response";
+        }
+        return result;
+    }
+    fill_message_result(result, *complete_obj);
     return result;
 }
 
@@ -1347,6 +1434,58 @@ RemoteRendezvousResult ControlPlaneClient::remote_rendezvous_request(
         }
     }
     return result;
+}
+
+namespace {
+CallStateResult parse_call_state(const std::string& response) {
+    CallStateResult result;
+    auto payload_obj = parse_payload(response);
+    const std::string type = extract_type(response);
+    if (type != "call_state" || !payload_obj) {
+        capture_error(result, payload_obj ? &*payload_obj : nullptr, "bad_response");
+        return result;
+    }
+    result.ok = true;
+    result.call_id = extract_string(*payload_obj, "call_id");
+    result.state = extract_string(*payload_obj, "state");
+    result.kind = extract_string(*payload_obj, "kind");
+    result.detail = extract_string(*payload_obj, "detail");
+    return result;
+}
+}  // namespace
+
+CallStateResult ControlPlaneClient::call_invite(
+    const std::string& callee_user_id,
+    const std::string& callee_device_id,
+    const std::string& kind) {
+    const std::string payload =
+        "{\"callee_user_id\":" + quote(callee_user_id)
+        + ",\"callee_device_id\":" + quote(callee_device_id)
+        + ",\"kind\":" + quote(kind) + "}";
+    auto response = send_and_wait("call_invite_request", payload);
+    if (!response) { CallStateResult r; r.error_code = "transport_error"; return r; }
+    return parse_call_state(*response);
+}
+
+CallStateResult ControlPlaneClient::call_accept(const std::string& call_id) {
+    const std::string payload = "{\"call_id\":" + quote(call_id) + "}";
+    auto response = send_and_wait("call_accept_request", payload);
+    if (!response) { CallStateResult r; r.error_code = "transport_error"; return r; }
+    return parse_call_state(*response);
+}
+
+CallStateResult ControlPlaneClient::call_decline(const std::string& call_id) {
+    const std::string payload = "{\"call_id\":" + quote(call_id) + "}";
+    auto response = send_and_wait("call_decline_request", payload);
+    if (!response) { CallStateResult r; r.error_code = "transport_error"; return r; }
+    return parse_call_state(*response);
+}
+
+CallStateResult ControlPlaneClient::call_end(const std::string& call_id) {
+    const std::string payload = "{\"call_id\":" + quote(call_id) + "}";
+    auto response = send_and_wait("call_end_request", payload);
+    if (!response) { CallStateResult r; r.error_code = "transport_error"; return r; }
+    return parse_call_state(*response);
 }
 
 RemoteInputAckResult ControlPlaneClient::remote_input_event(

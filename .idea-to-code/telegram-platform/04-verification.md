@@ -710,3 +710,15 @@
 - Verified: WSL Linux sweep: validate_cpp_tls_client.py + validate_windows_installer.py both emit SKIP_PLATFORM (linux not in ['win32']) and count toward 'skipped' rather than 'failed'. Windows sweep: 68 passed | 0 failed | 4 SKIP_EXTERNAL — unchanged (NEEDS_PLATFORM gate doesn't fire on win32 for win32-required validators). The unrelated WSL-only validate_desktop_smoke.py attachment-save failure was confirmed pre-existing and not in scope (GitHub linux-validators correctly SKIPs it via NEEDS_BINARY because Qt isn't installed there).
 - Covers: REQ-VALIDATION
 
+## M120-M131 - Mobile QML / Web / Desktop polish / Voice-video / PG transactional / CI Windows+Android (gate: pass)
+
+- Timestamp: 2026-04-29T06:59:08+00:00
+- Verified: Windows app_desktop + app_mobile build clean (cmake --build build-verify --config Debug), 0 errors/warnings. Full sweep: 70 passed | 0 failed | 4 SKIP_EXTERNAL. New validators: validate_media_codec.py 6/6 (E2E synthetic source -> AEAD relay -> sink + plaintext-leak guard), validate_pg_transactional.py 4/4. Extended validators: validate_mobile_ui.py 9/9 (covers all M120-M122 pages + bridge methods + CMake QML registration), validate_web_bridge.py 6/6 (M123/M124 markup + PWA assets), validate_ci_workflow.py 7/7 (windows-build + android-build jobs in expected list).
+- Covers: REQ-CHAT-CORE, REQ-C1-DESKTOP-GUI, REQ-CPP-CONTROL-CLIENT, REQ-PERSISTENCE, REQ-VALIDATION
+
+## M132 - Audit fixes + comprehensive README + current-state refresh (gate: pass)
+
+- Timestamp: 2026-04-29T07:15:25+00:00
+- Verified: Full sweep regression: 70 passed | 0 failed | 4 SKIP_EXTERNAL — including validate_web_bridge.py 6/6 (manifest still parses + sw.js still has the push handler the validator asserts).
+- Covers: REQ-VALIDATION, REQ-CHAT-CORE
+

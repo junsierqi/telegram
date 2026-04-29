@@ -2,9 +2,9 @@
   "title": "Telegram-like chat and remote desktop platform",
   "slug": "telegram-platform",
   "created_at_utc": "2026-04-20T05:26:28.066566+00:00",
-  "updated_at_utc": "2026-04-29T05:40:38+00:00",
+  "updated_at_utc": "2026-04-29T07:15:25+00:00",
   "state": "in_progress",
-  "current_focus": "release-readiness — CI hardening",
+  "current_focus": "release-readiness — audit + docs",
   "next_gate": "User direction",
   "finalized_at_utc": null,
   "milestones": [
@@ -1555,6 +1555,33 @@
       "gate_status": "pass",
       "covers": [
         "REQ-VALIDATION"
+      ]
+    },
+    {
+      "name": "M120-M131 - Mobile QML / Web / Desktop polish / Voice-video / PG transactional / CI Windows+Android",
+      "timestamp_utc": "2026-04-29T06:59:08+00:00",
+      "delivered": "Mobile (M120-M122): MobileChatBridge gains 17 Q_INVOKABLE methods + 8 result signals (profile, contacts, devices, user/message search, attachments, remote-control, voice/video calls). 8 new QML pages (Settings/Profile/Contacts/Devices/RemoteControl/Search/Attachments/Call) wired into Main.qml StackView via ChatListPage settings ⚙ button. C++ ControlPlaneClient gains call_invite/accept/decline/end + CallStateResult struct. Web (M123-M124): single-page client refactored to 3-pane (sidebar with chat list, center pane with selected chat, composer with attachment upload). Service worker /sw.js + /manifest.webmanifest registered for PWA push. Call dialog with invite/accept/decline/end. Desktop polish (M125-M126): design_tokens.h centralizes palette + spacing constants, telegram_stylesheet() consumes them. Real image preview dialog after attachment save (QPixmap.loadFromData). New ControlPlaneClient::send_attachment_chunked() drives ATTACHMENT_UPLOAD_INIT/CHUNK/COMPLETE in sequence with bytes_uploaded/bytes_total progress callback; desktop send path auto-uses chunked for files >1 MB so the progress bar shows real byte progress. Voice/video (M127-M128): server/server/media_codec.py (PassThroughCodec default + OpusCodec stub gated on PA-012; build/parse_audio_payload header), server/server/media_io.py (AudioSource/Sink Protocol + SyntheticAudioSource sine-wave + MemoryAudioSink). Desktop adds Call settings page (Invite/Accept/Decline/End + log). PG transactional (M129): PostgresStateRepository gains upsert_user / upsert_session / delete_session / upsert_remote_session per-entity transactional methods using ON CONFLICT DO UPDATE; remote_sessions table schema + idempotent ALTER TABLE migration for relay_key_b64 (PG parity with M106 SQLite). CI (M130): .github/workflows/ci.yml gains windows-build (windows-latest + Qt6 via aqtinstall + cmake + tests + sweep) and android-build (ubuntu + Qt for Android via aqtinstall + APK upload artifact).",
+      "verified": "Windows app_desktop + app_mobile build clean (cmake --build build-verify --config Debug), 0 errors/warnings. Full sweep: 70 passed | 0 failed | 4 SKIP_EXTERNAL. New validators: validate_media_codec.py 6/6 (E2E synthetic source -> AEAD relay -> sink + plaintext-leak guard), validate_pg_transactional.py 4/4. Extended validators: validate_mobile_ui.py 9/9 (covers all M120-M122 pages + bridge methods + CMake QML registration), validate_web_bridge.py 6/6 (M123/M124 markup + PWA assets), validate_ci_workflow.py 7/7 (windows-build + android-build jobs in expected list).",
+      "next": "M132 — push GitHub: M120-M131 squashed commit so the new windows-build + android-build CI jobs run. Optional follow-ups: PA-012 procurement (libopus / opuslib) to flip OpusCodec real path; QML smoke runner once a multi-client harness exists; finalize the bundle if user accepts current scope.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-CHAT-CORE",
+        "REQ-C1-DESKTOP-GUI",
+        "REQ-CPP-CONTROL-CLIENT",
+        "REQ-PERSISTENCE",
+        "REQ-VALIDATION"
+      ]
+    },
+    {
+      "name": "M132 - Audit fixes + comprehensive README + current-state refresh",
+      "timestamp_utc": "2026-04-29T07:15:25+00:00",
+      "delivered": "Post-M131 audit caught four real omissions: (1) server/web/app.js read p.content but the server payload field is content_b64, so browser attachment download silently decoded nothing; (2) server/web/sw.js + manifest.webmanifest referenced /icons/icon-*.png + /icons/badge.png that don't exist + aren't routed by web_bridge.py — install / push notification would 404; (3) README.md still claimed ~45 validators / 4 CI jobs / ReliableChannel deferred / D9 deferred / mobile UI minimal / no voice-video / no web client / no Redis cache; (4) docs/architecture/current-state.md known-gaps section listed several gaps that have since closed (D9, ReliableChannel, mobile UI breadth, web client). Fixes: (1) app.js now reads p.content_b64. (2) sw.js + manifest drop the icon refs (browsers fall back to default app icon — note added saying designer asset bundle is the next deliverable). (3) Comprehensive README rewrite covering M97-M131: every shipped capability, the 7 CI jobs, 70 validators with three skip categories (EXTERNAL / NO_BINARY / PLATFORM), 6 PA placeholders (PA-005/008/009/010/011/012), production deploy stack, and the explicit deferred-engineering list. (4) current-state.md known-gaps now reflects shipped state and lists only the genuine remaining items (codec real impl, AuthService/ChatService callsite refactor for M129 upserts, designer PWA icons, desktop polish remainders).",
+      "verified": "Full sweep regression: 70 passed | 0 failed | 4 SKIP_EXTERNAL — including validate_web_bridge.py 6/6 (manifest still parses + sw.js still has the push handler the validator asserts).",
+      "next": "Push these changes when ready — they are non-functional fixes (one real bug fix in app.js + docs). No new validators needed; existing ones cover the surface.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-VALIDATION",
+        "REQ-CHAT-CORE"
       ]
     }
   ],

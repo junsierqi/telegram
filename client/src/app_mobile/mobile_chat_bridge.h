@@ -49,12 +49,53 @@ public:
     Q_INVOKABLE QVariantList conversationList() const;
     Q_INVOKABLE QVariantList selectedMessages() const;
 
+    // M120: profile + contacts + devices RPCs (Q_INVOKABLE; results arrive
+    // via the corresponding *Ready signals so QML can rebind ListView models).
+    Q_INVOKABLE void refreshProfile();
+    Q_INVOKABLE void saveProfile(const QString& displayName);
+    Q_INVOKABLE void refreshContacts();
+    Q_INVOKABLE void addContact(const QString& userId);
+    Q_INVOKABLE void removeContact(const QString& userId);
+    Q_INVOKABLE void searchUsers(const QString& query);
+    Q_INVOKABLE void refreshDevices();
+    Q_INVOKABLE void revokeDevice(const QString& deviceId);
+    Q_INVOKABLE void updateDeviceTrust(const QString& deviceId, bool trusted);
+
+    // M121: server message search + remote-control + attachments
+    Q_INVOKABLE void searchMessages(const QString& query);
+    Q_INVOKABLE void remoteInvite(const QString& targetDevice);
+    Q_INVOKABLE void remoteApprove(const QString& remoteSessionId);
+    Q_INVOKABLE void remoteTerminate(const QString& remoteSessionId);
+    Q_INVOKABLE void remoteRendezvous(const QString& remoteSessionId);
+    Q_INVOKABLE QVariantList selectedAttachments() const;
+    Q_INVOKABLE void fetchAttachment(const QString& attachmentId);
+
+    // M122: voice/video calls
+    Q_INVOKABLE void callInvite(const QString& calleeUserId,
+                                const QString& calleeDeviceId,
+                                const QString& kind);
+    Q_INVOKABLE void callAccept(const QString& callId);
+    Q_INVOKABLE void callDecline(const QString& callId);
+    Q_INVOKABLE void callEnd(const QString& callId);
+
 signals:
     void connectedChanged();
     void identityChanged();
     void storeChanged();
     void statusChanged();
     void errorReported(const QString& detail);
+    // M120 result signals.
+    void profileReady(const QVariantMap& profile);
+    void contactsReady(const QVariantList& contacts);
+    void searchUsersReady(const QVariantList& users);
+    void devicesReady(const QVariantList& devices);
+    // M121
+    void searchMessagesReady(const QVariantList& matches);
+    void remoteResult(const QString& kind, bool ok, const QVariantMap& payload);
+    void attachmentReady(const QString& attachmentId, const QString& filename,
+                         const QString& mimeType, qlonglong sizeBytes);
+    // M122
+    void callStateChanged(const QVariantMap& callState);
 
 private:
     void setStatus(const QString& s);
@@ -64,5 +105,6 @@ private:
     telegram_like::client::app_desktop::DesktopChatStore store_;
     QString status_;
     QString display_name_;
+    QString device_id_;
     std::atomic<bool> shutting_down_ {false};
 };

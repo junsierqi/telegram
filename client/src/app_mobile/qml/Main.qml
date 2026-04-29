@@ -43,6 +43,7 @@ ApplicationWindow {
                 ChatBridge.selectChat(conversationId)
                 nav.push(chatPageComponent)
             }
+            onSettingsRequested: nav.push(settingsComponent)
         }
     }
 
@@ -52,6 +53,28 @@ ApplicationWindow {
             onBackRequested: nav.pop()
         }
     }
+
+    // M120-M122: settings hub + 7 sub-pages.
+    Component {
+        id: settingsComponent
+        SettingsPage {
+            onBackRequested: nav.pop()
+            onOpenProfile:     nav.push(profileComponent)
+            onOpenContacts:    nav.push(contactsComponent)
+            onOpenDevices:     nav.push(devicesComponent)
+            onOpenSearch:      nav.push(searchComponent)
+            onOpenAttachments: nav.push(attachmentsComponent)
+            onOpenRemote:      nav.push(remoteComponent)
+            onOpenCall:        nav.push(callComponent)
+        }
+    }
+    Component { id: profileComponent;     ProfilePage     { onBackRequested: nav.pop() } }
+    Component { id: contactsComponent;    ContactsPage    { onBackRequested: nav.pop() } }
+    Component { id: devicesComponent;     DevicesPage     { onBackRequested: nav.pop() } }
+    Component { id: searchComponent;      SearchPage      { onBackRequested: nav.pop() } }
+    Component { id: attachmentsComponent; AttachmentsPage { onBackRequested: nav.pop() } }
+    Component { id: remoteComponent;      RemoteControlPage { onBackRequested: nav.pop() } }
+    Component { id: callComponent;        CallPage        { onBackRequested: nav.pop() } }
 
     Connections {
         target: ChatBridge

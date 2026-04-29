@@ -194,6 +194,15 @@ if(Qt6_FOUND)
                 app_mobile/qml/LoginPage.qml
                 app_mobile/qml/ChatListPage.qml
                 app_mobile/qml/ChatPage.qml
+                # M120-M122: settings hub + 7 sub-pages
+                app_mobile/qml/SettingsPage.qml
+                app_mobile/qml/ProfilePage.qml
+                app_mobile/qml/ContactsPage.qml
+                app_mobile/qml/DevicesPage.qml
+                app_mobile/qml/RemoteControlPage.qml
+                app_mobile/qml/SearchPage.qml
+                app_mobile/qml/AttachmentsPage.qml
+                app_mobile/qml/CallPage.qml
         )
         target_link_libraries(app_mobile
             PRIVATE

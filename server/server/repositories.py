@@ -152,8 +152,17 @@ class PostgresStateRepository:
                       target_device_id TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
                       state TEXT NOT NULL,
                       relay_endpoint TEXT NOT NULL,
-                      relay_region TEXT NOT NULL
+                      relay_region TEXT NOT NULL,
+                      relay_key_b64 TEXT NOT NULL DEFAULT ''
                     )
+                    """
+                )
+                # M106 migration parity with SQLite: older PG schemas lack
+                # relay_key_b64; add it idempotently.
+                cur.execute(
+                    """
+                    ALTER TABLE remote_sessions
+                    ADD COLUMN IF NOT EXISTS relay_key_b64 TEXT NOT NULL DEFAULT ''
                     """
                 )
                 cur.execute(
@@ -183,6 +192,77 @@ class PostgresStateRepository:
                 cur.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
                 row = cur.fetchone()
                 return int(row[0] if row else 0)
+
+    # ---- M129: per-entity transactional methods ----
+    #
+    # The legacy `save()` below is a DELETE-then-INSERT snapshot of every
+    # table: simple but it makes any single-row update an O(N) write. The
+    # `upsert_*` / `delete_*` methods here let callers (AuthService,
+    # ChatService, RemoteSessionService) write one row in its own
+    # transaction so unrelated state is undisturbed and locks are short.
+    # ChatService still uses save() for the bulk path until the per-write
+    # callsite refactor lands; both paths coexist safely.
+
+    def upsert_user(self, record: dict[str, Any]) -> None:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users (user_id, username, password_hash, display_name)
+                    VALUES (%(user_id)s, %(username)s, %(password_hash)s, %(display_name)s)
+                    ON CONFLICT (user_id) DO UPDATE SET
+                        username = EXCLUDED.username,
+                        password_hash = EXCLUDED.password_hash,
+                        display_name = EXCLUDED.display_name
+                    """,
+                    record,
+                )
+
+    def upsert_session(self, record: dict[str, Any]) -> None:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO sessions (session_id, user_id, device_id, last_seen_at)
+                    VALUES (%(session_id)s, %(user_id)s, %(device_id)s, %(last_seen_at)s)
+                    ON CONFLICT (session_id) DO UPDATE SET
+                        last_seen_at = EXCLUDED.last_seen_at
+                    """,
+                    record,
+                )
+
+    def delete_session(self, session_id: str) -> None:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM sessions WHERE session_id = %s", (session_id,))
+
+    def upsert_remote_session(self, record: dict[str, Any]) -> None:
+        self.ensure_schema()
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO remote_sessions (
+                        remote_session_id, requester_user_id, requester_device_id,
+                        target_user_id, target_device_id, state,
+                        relay_endpoint, relay_region, relay_key_b64
+                    ) VALUES (
+                        %(remote_session_id)s, %(requester_user_id)s,
+                        %(requester_device_id)s, %(target_user_id)s,
+                        %(target_device_id)s, %(state)s,
+                        %(relay_endpoint)s, %(relay_region)s, %(relay_key_b64)s
+                    )
+                    ON CONFLICT (remote_session_id) DO UPDATE SET
+                        state = EXCLUDED.state,
+                        relay_endpoint = EXCLUDED.relay_endpoint,
+                        relay_region = EXCLUDED.relay_region,
+                        relay_key_b64 = EXCLUDED.relay_key_b64
+                    """,
+                    record,
+                )
 
     def save(self, payload: dict[str, Any]) -> None:
         self.ensure_schema()

@@ -291,6 +291,18 @@ struct RemoteRendezvousCandidate {
     int priority {0};
 };
 
+// M122: voice/video call state result returned from CALL_INVITE/ACCEPT/
+// DECLINE/END dispatch arms (server replies with CALL_STATE either way).
+struct CallStateResult {
+    bool ok {false};
+    std::string call_id;
+    std::string state;        // ringing | accepted | declined | ended | canceled
+    std::string kind;         // audio | video (only set on the invite reply)
+    std::string detail;
+    std::string error_code;
+    std::string error_message;
+};
+
 struct RemoteRendezvousResult {
     bool ok {false};
     std::string remote_session_id;
@@ -379,6 +391,22 @@ public:
                                                 const std::string& filename,
                                                 const std::string& mime_type,
                                                 const std::string& content);
+
+    // M126: chunked upload for files larger than ~1 MB. Calls
+    // ATTACHMENT_UPLOAD_INIT/CHUNK/COMPLETE in sequence; the optional
+    // `progress` callback is invoked after each successful chunk ack with
+    // (bytes_uploaded, bytes_total) so the desktop UI can drive a real
+    // byte-level progress bar instead of stage labels.
+    using ChunkedUploadProgressCallback =
+        std::function<void(std::size_t bytes_uploaded, std::size_t bytes_total)>;
+    [[nodiscard]] MessageResult send_attachment_chunked(
+        const std::string& conversation_id,
+        const std::string& caption,
+        const std::string& filename,
+        const std::string& mime_type,
+        const std::string& content,
+        ChunkedUploadProgressCallback progress = {},
+        std::size_t chunk_size = 256 * 1024);
     [[nodiscard]] AttachmentFetchResult fetch_attachment(const std::string& attachment_id);
     [[nodiscard]] AckResult mark_read(const std::string& conversation_id,
                                       const std::string& message_id);
@@ -423,6 +451,14 @@ public:
         const std::string& reason = "peer_disconnected");
     [[nodiscard]] RemoteRendezvousResult remote_rendezvous_request(
         const std::string& remote_session_id);
+
+    // M122: voice/video calls
+    [[nodiscard]] CallStateResult call_invite(const std::string& callee_user_id,
+                                              const std::string& callee_device_id,
+                                              const std::string& kind);
+    [[nodiscard]] CallStateResult call_accept(const std::string& call_id);
+    [[nodiscard]] CallStateResult call_decline(const std::string& call_id);
+    [[nodiscard]] CallStateResult call_end(const std::string& call_id);
     // data_json must be a JSON object literal like '{"key":"a"}'
     [[nodiscard]] RemoteInputAckResult remote_input_event(
         const std::string& remote_session_id,

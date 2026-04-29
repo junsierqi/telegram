@@ -7,18 +7,30 @@ Page {
     background: Rectangle { color: "#ffffff" }
 
     signal conversationSelected(string conversationId)
+    signal settingsRequested()
 
     header: Rectangle {
         height: 56
         color: "#3390ec"
-        Label {
-            anchors.centerIn: parent
-            text: ChatBridge.connected
-                  ? qsTr("Chats — %1").arg(ChatBridge.currentDisplayName || ChatBridge.currentUserId)
-                  : qsTr("Chats")
-            color: "white"
-            font.bold: true
-            font.pointSize: 14
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 16
+            anchors.rightMargin: 8
+            Label {
+                Layout.fillWidth: true
+                text: ChatBridge.connected
+                      ? qsTr("Chats — %1").arg(ChatBridge.currentDisplayName || ChatBridge.currentUserId)
+                      : qsTr("Chats")
+                color: "white"
+                font.bold: true
+                font.pointSize: 14
+            }
+            Button {
+                background: Rectangle { color: "transparent" }
+                contentItem: Label { text: "⚙"; color: "white"; font.pointSize: 18 }
+                onClicked: page.settingsRequested()
+                Layout.preferredWidth: 36
+            }
         }
     }
 

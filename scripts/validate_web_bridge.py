@@ -182,10 +182,37 @@ def run_static_files() -> None:
         assert code == 200, code
         assert headers.get("content-type", "").startswith("text/html")
         assert b"Telegram-like" in body and b"<script" in body, body[:200]
+        # M123: 3-pane layout shipped — sidebar + chat list + composer.
+        for needle in (b"id=\"sidebar\"", b"id=\"chatList\"", b"id=\"composer\"",
+                       b"id=\"fileInput\"", b"id=\"callDialog\""):
+            assert needle in body, f"M123/M124 markup missing: {needle!r}"
+        # M124: PWA manifest link in <head>.
+        assert b"manifest.webmanifest" in body
         code, headers, body = _http_get("127.0.0.1", port, "/app.js")
         assert code == 200, code
         assert headers.get("content-type", "").startswith("application/javascript")
         assert b"login_request" in body and b"WebSocket" in body, body[:200]
+        # M123: chat-list rendering + attachment upload helpers.
+        assert b"renderChatList" in body and b"uploadAttachment" in body
+        # M124: call dispatch.
+        assert b"call_invite_request" in body and b"call_accept_request" in body
+    finally:
+        _stop_bridge(thread, server)
+
+
+def run_pwa_assets() -> None:
+    scenario("GET /sw.js and /manifest.webmanifest serve M124 PWA assets")
+    _, port, thread, server = _start_bridge()
+    try:
+        code, headers, body = _http_get("127.0.0.1", port, "/sw.js")
+        assert code == 200, code
+        assert headers.get("content-type", "").startswith("application/javascript"), headers
+        assert b"addEventListener('push'" in body
+        assert b"showNotification" in body
+        code, headers, body = _http_get("127.0.0.1", port, "/manifest.webmanifest")
+        assert code == 200, code
+        assert headers.get("content-type", "").startswith("application/manifest+json"), headers
+        assert b'"name"' in body and b'"start_url"' in body
     finally:
         _stop_bridge(thread, server)
 
@@ -305,6 +332,7 @@ def run_bad_json_returns_error() -> None:
 def main() -> int:
     scenarios = [
         run_static_files,
+        run_pwa_assets,
         run_unknown_path_404,
         run_login_round_trip,
         run_send_round_trip,

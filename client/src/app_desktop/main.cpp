@@ -1,9 +1,12 @@
+#include "app_desktop/design_tokens.h"
 #include "app_desktop/desktop_chat_store.h"
 #include "transport/control_plane_client.h"
 
 #include <QApplication>
 #include <QCheckBox>
 #include <QFile>
+#include <QComboBox>
+#include <QDialog>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFont>
@@ -573,6 +576,26 @@ public:
         remove_member_ = new QPushButton("Remove Member");
         set_group_action_enabled(false);
 
+        // ---- M128: voice/video call panel ----
+        call_callee_user_ = new QLineEdit();
+        call_callee_user_->setPlaceholderText("callee user_id (e.g. u_bob)");
+        call_callee_device_ = new QLineEdit();
+        call_callee_device_->setPlaceholderText("callee device_id (e.g. dev_bob_win)");
+        call_kind_ = new QComboBox();
+        call_kind_->addItem("audio");
+        call_kind_->addItem("video");
+        call_id_input_ = new QLineEdit();
+        call_id_input_->setPlaceholderText("call_id (auto-filled after invite)");
+        call_invite_ = new QPushButton("Invite");
+        call_accept_ = new QPushButton("Accept");
+        call_decline_ = new QPushButton("Decline");
+        call_end_ = new QPushButton("End");
+        call_log_ = new QPlainTextEdit();
+        call_log_->setReadOnly(true);
+        call_log_->setMaximumHeight(140);
+        call_log_->setPlaceholderText("Call FSM transitions appear here.");
+        set_call_action_enabled(false);
+
         // ---- M108: remote-control panel ----
         remote_target_device_ = new QLineEdit();
         remote_target_device_->setPlaceholderText("target device_id (e.g. dev_bob_win)");
@@ -725,7 +748,7 @@ public:
         settings_nav_->setSpacing(2);
         for (const char* label : {"Profile", "Account", "Connection",
                                   "Devices", "Contacts", "Find Users",
-                                  "Groups", "Attachments", "Remote"}) {
+                                  "Groups", "Attachments", "Remote", "Call"}) {
             settings_nav_->addItem(label);
         }
         body_layout->addWidget(settings_nav_);
@@ -969,6 +992,39 @@ public:
                 "Invite, approve, terminate and discover relay info for remote-control sessions.",
                 remote_body));
 
+        // === Call page (M128) ===
+        auto* call_body = new QVBoxLayout();
+        call_body->setSpacing(10);
+        auto* call_callee_lab = new QLabel("Place a call");
+        call_callee_lab->setObjectName("fieldLabel");
+        call_body->addWidget(call_callee_lab);
+        call_body->addWidget(call_callee_user_);
+        call_body->addWidget(call_callee_device_);
+        auto* call_kind_row = new QHBoxLayout();
+        call_kind_row->addWidget(call_kind_);
+        call_kind_row->addWidget(call_invite_);
+        call_kind_row->addStretch(1);
+        call_body->addLayout(call_kind_row);
+        auto* call_id_lab = new QLabel("Active call_id");
+        call_id_lab->setObjectName("fieldLabel");
+        call_body->addWidget(call_id_lab);
+        call_body->addWidget(call_id_input_);
+        auto* call_btns = new QHBoxLayout();
+        call_btns->addWidget(call_accept_);
+        call_btns->addWidget(call_decline_);
+        call_btns->addWidget(call_end_);
+        call_btns->addStretch(1);
+        call_body->addLayout(call_btns);
+        auto* call_log_lab = new QLabel("FSM log");
+        call_log_lab->setObjectName("fieldLabel");
+        call_body->addWidget(call_log_lab);
+        call_body->addWidget(call_log_);
+        settings_pages_->addWidget(
+            make_page(
+                "Call",
+                "Voice/video call invite/accept/decline/end. Per-call AES-256-GCM key minted on accept.",
+                call_body));
+
         body_layout->addWidget(settings_pages_, 1);
         details_root_layout->addWidget(body_wrap, 1);
 
@@ -1047,6 +1103,10 @@ public:
         QObject::connect(remote_cancel_, &QPushButton::clicked, [this] { remote_terminal_action(RemoteOp::Cancel); });
         QObject::connect(remote_terminate_, &QPushButton::clicked, [this] { remote_terminal_action(RemoteOp::Terminate); });
         QObject::connect(remote_rendezvous_, &QPushButton::clicked, [this] { remote_rendezvous_action(); });
+        QObject::connect(call_invite_, &QPushButton::clicked, [this] { call_invite_action(); });
+        QObject::connect(call_accept_, &QPushButton::clicked, [this] { call_terminal_action(CallOp::Accept); });
+        QObject::connect(call_decline_, &QPushButton::clicked, [this] { call_terminal_action(CallOp::Decline); });
+        QObject::connect(call_end_, &QPushButton::clicked, [this] { call_terminal_action(CallOp::End); });
         QObject::connect(chat_filter_, &QLineEdit::textChanged, [this] { render_conversation_list(); });
         QObject::connect(message_search_, &QLineEdit::textChanged, [this] {
             current_search_index_ = -1;
@@ -1085,8 +1145,14 @@ private:
     }
 
     static QString telegram_stylesheet() {
-        return QStringLiteral(
-            "QMainWindow, QWidget { background:#f4f5f7; color:#0f1419; font-family:'Segoe UI','Helvetica Neue',sans-serif; font-size:13px; }"
+        // M125: tokens centralised in design_tokens.h; the QSS literal stays
+        // a single concatenated string so this stays cheap to parse, but
+        // the source-of-truth for any tweak is one constant in that header.
+        namespace dt = telegram_like::client::app_desktop::design;
+        return QString::fromUtf8(
+            "QMainWindow, QWidget { background:%1; color:%2; font-family:%3; font-size:%4px; }"
+        ).arg(dt::kAppBackground, dt::kTextPrimary, dt::kFontStack, QString::number(dt::kFontPxBase)) +
+        QStringLiteral(
             "QSplitter#mainSplitter::handle { background:#e1e4e8; width:1px; }"
             "QWidget#sidebar { background:#ffffff; border-right:1px solid #e6e8eb; }"
             "QWidget#sidebarSearch { background:#ffffff; border-bottom:1px solid #eef0f2; }"
@@ -1500,6 +1566,7 @@ private:
                 set_user_search_enabled(true);
                 set_group_action_enabled(true);
                 set_remote_action_enabled(true);
+                set_call_action_enabled(true);
                 statusBar()->showMessage(qstr(std::string(create_account ? "Registered as " : "Connected as ") + auth.user_id));
                 refresh_profile();
                 refresh_devices();
@@ -1745,14 +1812,32 @@ private:
         set_transfer_progress("Uploading " + filename, 35);
 
         auto client = client_;
-        std::thread([this, client, conversation, caption, filename, mime_type, content, local_message_id] {
-            const auto sent = client->send_attachment(
-                conversation,
-                caption,
-                filename,
-                mime_type,
-                content
-            );
+        // M126: prefer chunked upload for files > 1 MB so we get byte-level
+        // progress updates. Smaller files keep the single-shot path because
+        // the per-chunk RPC overhead dominates for tiny payloads.
+        constexpr std::size_t kChunkedThreshold = 1u * 1024 * 1024;
+        const bool use_chunked = content.size() > kChunkedThreshold;
+        std::thread([this, client, conversation, caption, filename, mime_type, content, local_message_id, use_chunked] {
+            telegram_like::client::transport::MessageResult sent;
+            if (use_chunked) {
+                auto progress = [this, total = content.size()](std::size_t bytes_uploaded, std::size_t bytes_total) {
+                    const int pct = bytes_total == 0 ? 0
+                        : static_cast<int>((bytes_uploaded * 100) / bytes_total);
+                    QMetaObject::invokeMethod(this, [this, bytes_uploaded, bytes_total, pct] {
+                        if (shutting_down_) return;
+                        set_transfer_progress(
+                            "Uploading "
+                            + std::to_string(bytes_uploaded) + " / " + std::to_string(bytes_total)
+                            + " B",
+                            pct);
+                    }, Qt::QueuedConnection);
+                };
+                sent = client->send_attachment_chunked(
+                    conversation, caption, filename, mime_type, content, progress);
+            } else {
+                sent = client->send_attachment(
+                    conversation, caption, filename, mime_type, content);
+            }
             QMetaObject::invokeMethod(this, [this, conversation, local_message_id, sent] {
                 if (shutting_down_) return;
                 send_->setEnabled(true);
@@ -1817,6 +1902,29 @@ private:
                 file.close();
                 set_transfer_progress("Saved " + fetched.filename, 100);
                 statusBar()->showMessage("Saved attachment " + qstr(fetched.attachment_id));
+                // M125: real thumbnail preview for image attachments. Decode
+                // the bytes into a QPixmap and pop a non-modal dialog so the
+                // user immediately sees the image they just downloaded.
+                if (fetched.mime_type.rfind("image/", 0) == 0) {
+                    QPixmap pixmap;
+                    const QByteArray image_bytes(fetched.content.data(), static_cast<int>(fetched.content.size()));
+                    if (pixmap.loadFromData(image_bytes)) {
+                        auto* preview = new QDialog(this);
+                        preview->setAttribute(Qt::WA_DeleteOnClose);
+                        preview->setWindowTitle(qstr("Preview — " + fetched.filename));
+                        auto* layout = new QVBoxLayout(preview);
+                        auto* label = new QLabel();
+                        label->setPixmap(pixmap.scaled(560, 560, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                        label->setAlignment(Qt::AlignCenter);
+                        layout->addWidget(label);
+                        auto* meta = new QLabel(qstr(fetched.filename + "  ·  "
+                            + std::to_string(fetched.size_bytes) + " B  ·  " + fetched.mime_type));
+                        meta->setObjectName("pageSubtitle");
+                        layout->addWidget(meta);
+                        preview->resize(600, 640);
+                        preview->show();
+                    }
+                }
             }, Qt::QueuedConnection);
         }).detach();
     }
@@ -1998,6 +2106,66 @@ private:
     }
 
     enum class RemoteOp { Approve, Reject, Cancel, Terminate };
+    enum class CallOp { Accept, Decline, End };
+
+    void append_call_log(const QString& line) {
+        if (!call_log_) return;
+        call_log_->appendPlainText(line);
+    }
+
+    void call_invite_action() {
+        if (!client_) return;
+        const auto callee_user = str(call_callee_user_->text().trimmed());
+        const auto callee_device = str(call_callee_device_->text().trimmed());
+        if (callee_user.empty() || callee_device.empty()) {
+            append_call_log("[error] callee user_id + device_id required");
+            return;
+        }
+        const auto kind = str(call_kind_->currentText());
+        set_call_action_enabled(false);
+        auto client = client_;
+        std::thread([this, client, callee_user, callee_device, kind] {
+            const auto r = client->call_invite(callee_user, callee_device, kind);
+            QMetaObject::invokeMethod(this, [this, r] {
+                if (shutting_down_) return;
+                set_call_action_enabled(true);
+                if (!r.ok) {
+                    append_call_log(qstr("[invite error] " + r.error_code + " " + r.error_message));
+                    return;
+                }
+                if (call_id_input_) call_id_input_->setText(qstr(r.call_id));
+                append_call_log(qstr("[invite ok] call_id=" + r.call_id + " state=" + r.state));
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void call_terminal_action(CallOp op) {
+        if (!client_) return;
+        const auto cid = str(call_id_input_->text().trimmed());
+        if (cid.empty()) { append_call_log("[error] call_id required"); return; }
+        set_call_action_enabled(false);
+        auto client = client_;
+        std::thread([this, client, cid, op] {
+            telegram_like::client::transport::CallStateResult r;
+            std::string verb;
+            switch (op) {
+                case CallOp::Accept:  verb = "accept";  r = client->call_accept(cid);  break;
+                case CallOp::Decline: verb = "decline"; r = client->call_decline(cid); break;
+                case CallOp::End:     verb = "end";     r = client->call_end(cid);     break;
+            }
+            QMetaObject::invokeMethod(this, [this, verb, r] {
+                if (shutting_down_) return;
+                set_call_action_enabled(true);
+                if (!r.ok) {
+                    append_call_log(qstr("[" + verb + " error] " + r.error_code + " " + r.error_message));
+                    return;
+                }
+                append_call_log(qstr("[" + verb + " ok] state=" + r.state
+                                     + (r.detail.empty() ? std::string() : " " + r.detail)));
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
 
     void append_remote_log(const QString& line) {
         if (!remote_log_) return;
@@ -2251,6 +2419,13 @@ private:
         if (remote_rendezvous_) remote_rendezvous_->setEnabled(enabled);
     }
 
+    void set_call_action_enabled(bool enabled) {
+        if (call_invite_) call_invite_->setEnabled(enabled);
+        if (call_accept_) call_accept_->setEnabled(enabled);
+        if (call_decline_) call_decline_->setEnabled(enabled);
+        if (call_end_) call_end_->setEnabled(enabled);
+    }
+
     void set_message_action_enabled(bool enabled) {
         if (reply_) reply_->setEnabled(enabled);
         if (forward_) forward_->setEnabled(enabled);
@@ -2393,6 +2568,16 @@ private:
     QPushButton* remote_terminate_ {nullptr};
     QPushButton* remote_rendezvous_ {nullptr};
     QPlainTextEdit* remote_log_ {nullptr};
+    // M128: voice/video call widgets
+    QLineEdit* call_callee_user_ {nullptr};
+    QLineEdit* call_callee_device_ {nullptr};
+    QComboBox* call_kind_ {nullptr};
+    QLineEdit* call_id_input_ {nullptr};
+    QPushButton* call_invite_ {nullptr};
+    QPushButton* call_accept_ {nullptr};
+    QPushButton* call_decline_ {nullptr};
+    QPushButton* call_end_ {nullptr};
+    QPlainTextEdit* call_log_ {nullptr};
     std::shared_ptr<ControlPlaneClient> client_;
     telegram_like::client::app_desktop::DesktopChatStore store_;
     int current_search_index_ {-1};

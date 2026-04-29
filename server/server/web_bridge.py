@@ -142,6 +142,13 @@ class _BridgeHandler(BaseHTTPRequestHandler):
         if self.path == "/app.js":
             self._serve_file("app.js", "application/javascript; charset=utf-8")
             return
+        # M124: PWA assets so the browser can install + show push.
+        if self.path == "/sw.js":
+            self._serve_file("sw.js", "application/javascript; charset=utf-8")
+            return
+        if self.path == "/manifest.webmanifest":
+            self._serve_file("manifest.webmanifest", "application/manifest+json; charset=utf-8")
+            return
         self.send_error(404, "not found")
 
     # ---- static files ----

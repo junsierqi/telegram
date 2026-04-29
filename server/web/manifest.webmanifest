@@ -1,0 +1,9 @@
+{
+  "name": "Telegram-like Web Client",
+  "short_name": "Telegram-like",
+  "description": "Browser client for the telegram-like server. Login, chat, attachments, calls.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a1a",
+  "theme_color": "#2a73d3"
+}
