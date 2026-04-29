@@ -1,0 +1,25 @@
+# M115 production Prometheus scrape config.
+# Mounted into the prometheus service at /etc/prometheus/prometheus.yml.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    deployment: telegram-prod
+
+scrape_configs:
+  - job_name: telegram-server
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - telegram-server-prod:9100
+        labels:
+          service: telegram-server
+          component: control-plane
+
+  - job_name: prometheus-self
+    static_configs:
+      - targets:
+          - localhost:9090
+        labels:
+          service: prometheus

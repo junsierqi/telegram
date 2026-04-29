@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import time
-from typing import Callable
+from typing import Callable, Optional, TYPE_CHECKING
 
 from ..protocol import DeviceDescriptor, PresenceUserStatus
 from ..protocol import ErrorCode, ServiceError
 from ..state import InMemoryState
+
+if TYPE_CHECKING:
+    from ..redis_cache import RedisCacheBridge
 
 
 DEFAULT_TTL_SECONDS = 30.0
@@ -19,6 +22,7 @@ class PresenceService:
         clock: Callable[[], float] | None = None,
         ttl_seconds: float = DEFAULT_TTL_SECONDS,
         transition_handler: Callable[[str, bool], None] | None = None,
+        redis_cache: "Optional[RedisCacheBridge]" = None,
     ) -> None:
         self._state = state
         self._clock = clock or time.time
@@ -26,9 +30,21 @@ class PresenceService:
         # Optional: app wires a callback that fans out PRESENCE_UPDATE.
         # Receives (user_id, online). Called only when state actually flips.
         self._transition_handler = transition_handler
+        # M116: optional hot-state cache. When set, is_user_online /
+        # last_seen_ms / query_users hit the cache before scanning state, and
+        # writes (touch / transitions / device revoke) refresh or invalidate
+        # the cached entry. Without it, behaviour is identical to pre-M116.
+        self._cache = redis_cache
+        # Cache TTL is bounded by the presence TTL — past that, the cached
+        # "online" answer would be wrong because the underlying session has
+        # already gone stale.
+        self._cache_ttl_seconds = max(1, int(self._ttl))
 
     def set_transition_handler(self, handler: Callable[[str, bool], None] | None) -> None:
         self._transition_handler = handler
+
+    def bind_redis_cache(self, cache: "Optional[RedisCacheBridge]") -> None:
+        self._cache = cache
 
     @property
     def ttl_seconds(self) -> float:
@@ -57,6 +73,9 @@ class PresenceService:
         was_online = self._is_user_online_excluding(session.user_id, session_id)
         session.last_seen_at = now
         self._state.save_runtime_state()
+        # M116: keep the cache in sync so the next query gets the fresh
+        # last_seen without a state scan.
+        self._write_cache(session.user_id, online=True, last_seen_at_ms=int(now * 1000))
         if not was_online and self._transition_handler is not None:
             # User had no other fresh session before this touch; they just
             # transitioned offline -> online.
@@ -80,7 +99,16 @@ class PresenceService:
         push if this is the user's first fresh session.
         """
         session = self._state.sessions.get(session_id)
-        if session is None or self._transition_handler is None:
+        if session is None:
+            return
+        # M116: refresh cache with the new session's last_seen so subsequent
+        # presence reads don't hit a stale "offline" entry.
+        self._write_cache(
+            session.user_id,
+            online=True,
+            last_seen_at_ms=int(session.last_seen_at * 1000),
+        )
+        if self._transition_handler is None:
             return
         if not self._is_user_online_excluding(session.user_id, session_id):
             self._transition_handler(session.user_id, True)
@@ -101,26 +129,68 @@ class PresenceService:
         return False
 
     def is_user_online(self, user_id: str) -> bool:
-        now = self._clock()
-        for session in self._state.sessions.values():
-            if session.user_id != user_id:
-                continue
-            if (now - session.last_seen_at) <= self._ttl:
-                return True
-        return False
+        return self._resolve_user_presence(user_id)[0]
 
     def last_seen_ms(self, user_id: str) -> int:
         """Highest last_seen_at across the user's sessions, in milliseconds.
 
         Returns 0 if the user has no sessions at all.
         """
+        return self._resolve_user_presence(user_id)[1]
+
+    def _resolve_user_presence(self, user_id: str) -> tuple[bool, int]:
+        """Single source of truth: returns (online, last_seen_at_ms).
+
+        Cache fast path (M116): try the bound RedisCacheBridge first; on miss
+        compute from state.sessions and write back. The cache TTL is bounded
+        by the presence TTL so the cached "online" answer can't outlive the
+        underlying session-staleness window.
+        """
+        if self._cache is not None:
+            try:
+                cached = self._cache.get_presence(user_id)
+            except Exception:
+                # Best-effort hot state. A transport failure must fall back
+                # to a state scan rather than break the dispatch path.
+                cached = None
+            if cached is not None:
+                return bool(cached.get("online", False)), int(cached.get("last_seen_at_ms", 0))
+        now = self._clock()
         latest = 0.0
+        online = False
         for session in self._state.sessions.values():
             if session.user_id != user_id:
                 continue
             if session.last_seen_at > latest:
                 latest = session.last_seen_at
-        return int(latest * 1000)
+            if (now - session.last_seen_at) <= self._ttl:
+                online = True
+        last_seen_at_ms = int(latest * 1000)
+        self._write_cache(user_id, online=online, last_seen_at_ms=last_seen_at_ms)
+        return online, last_seen_at_ms
+
+    def _write_cache(self, user_id: str, *, online: bool, last_seen_at_ms: int) -> None:
+        if self._cache is None:
+            return
+        try:
+            self._cache.set_presence(
+                user_id,
+                online=online,
+                last_seen_at_ms=last_seen_at_ms,
+                ttl_override=self._cache_ttl_seconds,
+            )
+        except Exception:
+            # The cache is best-effort hot state. A transport hiccup must not
+            # break the dispatch path that called us.
+            pass
+
+    def _invalidate_cache(self, user_id: str) -> None:
+        if self._cache is None:
+            return
+        try:
+            self._cache.invalidate_presence(user_id)
+        except Exception:
+            pass
 
     def list_devices(self, user_id: str) -> list[DeviceDescriptor]:
         devices: list[DeviceDescriptor] = []
@@ -153,6 +223,9 @@ class PresenceService:
         }
         device.active = False
         self._state.save_runtime_state()
+        # M116: drop the cached entry so the next read recomputes against the
+        # newly trimmed sessions table.
+        self._invalidate_cache(user_id)
         if was_online and not self.is_user_online(user_id) and self._transition_handler is not None:
             # Removing the device's sessions just dropped the user offline.
             self._transition_handler(user_id, False)

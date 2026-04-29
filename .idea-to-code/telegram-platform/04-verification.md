@@ -680,3 +680,21 @@
 - Verified: Final bundle verify: ok=true, 77 REQs covered, 0 problems, 0 blockers. Final sweep: 65 passed | 0 failed | 4 SKIP_EXTERNAL. Phase summary visible in .idea-to-code/telegram-platform/07-execution-log.md.
 - Covers: REQ-VALIDATION
 
+## M115 - Production deploy 档1 (Docker + nginx + Prometheus, no app rewrite) (gate: pass)
+
+- Timestamp: 2026-04-29T04:01:38+00:00
+- Verified: scripts/validate_production_compose.py 8/8 (compose parse, prod service command flags, healthcheck wiring, nginx mounts + ports, nginx WS upgrade headers + /healthz passthrough, prometheus scrape, env example coverage incl. PA-008/009/011, README runbook). docker compose --profile production --profile monitoring config (via WSL Docker) parses with 0 errors/warnings. --metrics-port smoke: curl http://127.0.0.1:9101/metrics + /healthz both 200, healthz returns ok=true with state_loaded + active_session_count. Existing dev profile untouched. Full sweep regression: 66 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Covers: REQ-VALIDATION, REQ-PERSISTENCE
+
+## M116 - Redis cache wired into PresenceService (gate: pass)
+
+- Timestamp: 2026-04-29T04:14:51+00:00
+- Verified: scripts/validate_presence_cache.py 8/8 — no-cache regression, miss-then-hit, touch refresh, notify_session_started write, revoke invalidate + recompute, TTL bounded by presence TTL with FakeRedis sharing the manual clock, transport-failure fallback, ServerApplication kwarg propagation. --redis-fake startup smoke (curl /healthz returns ok=true). Linux WSL re-run validate_presence_cache.py 8/8. Full sweep regression: 67 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Covers: REQ-CHAT-CORE, REQ-PERSISTENCE
+
+## M117 - Redis cache wired into AuthService session lookup (gate: pass)
+
+- Timestamp: 2026-04-29T04:26:22+00:00
+- Verified: scripts/validate_auth_cache.py 9/9 on Windows + WSL Linux: no-cache regression, login + register write-through, cache hit short-circuits state lookup (proven by clearing state.sessions and confirming resolve still returns the session), TTL expiry double-evicts, unknown session invalidates, transport-down fallback, cache TTL default 60s when session_ttl=0, ServerApplication kwarg propagation. Full sweep regression: 68 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Covers: REQ-CHAT-CORE, REQ-PERSISTENCE
+

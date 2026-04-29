@@ -41,14 +41,22 @@ services:
     image: postgres:16-alpine
     profiles:
       - postgres
+      - production
     environment:
       POSTGRES_DB: telegram
       POSTGRES_USER: telegram
-      POSTGRES_PASSWORD: telegram_dev_password
+      POSTGRES_PASSWORD: ${TELEGRAM_PG_PASSWORD:-telegram_dev_password}
     ports:
-      - "5432:5432"
+      - "${TELEGRAM_PG_PORT:-5432}:5432"
     volumes:
       - telegram_postgres_data:/var/lib/postgresql/data
+    restart: ${TELEGRAM_RESTART_POLICY:-no}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U telegram -d telegram"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
 
   telegram-server-postgres:
     build:
@@ -107,7 +115,111 @@ services:
       - ../tls/nginx-postgres.conf:/etc/nginx/nginx.conf:ro
       - ../tls/certs:/etc/nginx/certs:ro
 
+  # ---- M115 production stack (档1) ----
+  # PostgreSQL-backed server that listens on TCP control plane (8787),
+  # the M110 web bridge (8080) and the M92 observability sidecar (9100).
+  # restart=always + depends_on the healthchecked postgres so the stack
+  # comes up clean after host reboot.
+  telegram-server-prod:
+    profiles:
+      - production
+    build:
+      context: ../..
+      dockerfile: deploy/docker/server.Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-127.0.0.1,localhost}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command:
+      - python
+      - -m
+      - server.main
+      - --tcp-server
+      - --web-port
+      - "8080"
+      - --metrics-port
+      - "9100"
+      - --metrics-host
+      - 0.0.0.0
+    environment:
+      TELEGRAM_HOST: 0.0.0.0
+      TELEGRAM_PORT: 8787
+      TELEGRAM_DB_FILE: ""
+      TELEGRAM_PG_DSN: postgresql://telegram:${TELEGRAM_PG_PASSWORD:-telegram_dev_password}@postgres:5432/telegram
+      TELEGRAM_ATTACHMENT_DIR: /data/attachments
+      TELEGRAM_SESSION_TTL_SECONDS: ${TELEGRAM_SESSION_TTL_SECONDS:-86400}
+      # PA-008: drop a real FCM service-account JSON path here when procured.
+      TELEGRAM_FCM_CREDENTIALS: ${TELEGRAM_FCM_CREDENTIALS:-}
+      # PA-009: real SMS gateway credentials.
+      TELEGRAM_SMS_PROVIDER: ${TELEGRAM_SMS_PROVIDER:-mock}
+      TELEGRAM_SMS_AUTH_TOKEN: ${TELEGRAM_SMS_AUTH_TOKEN:-}
+      # PA-011: Redis hot-state cache endpoint.
+      TELEGRAM_REDIS_URL: ${TELEGRAM_REDIS_URL:-}
+      TELEGRAM_REDIS_TOKEN: ${TELEGRAM_REDIS_TOKEN:-}
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-127.0.0.1,localhost,postgres}
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      no_proxy: ${no_proxy:-127.0.0.1,localhost,postgres}
+    expose:
+      - "8787"
+      - "8080"
+      - "9100"
+    volumes:
+      - telegram_server_prod_data:/data
+    restart: always
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9100/healthz', timeout=2)"]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 10s
+
+  # HTTP/WS reverse proxy + TLS termination for the browser client.
+  # Listens on 80 (redirect) and 443 (TLS); proxies / + /app.js as static
+  # assets and /ws as a WebSocket upgrade to telegram-server-prod:8080.
+  nginx-web:
+    profiles:
+      - production
+    image: nginx:1.27-alpine
+    depends_on:
+      - telegram-server-prod
+    ports:
+      - "${TELEGRAM_HTTP_PORT:-80}:80"
+      - "${TELEGRAM_HTTPS_PORT:-443}:443"
+    volumes:
+      - ../tls/nginx-web.conf:/etc/nginx/nginx.conf:ro
+      - ../tls/certs:/etc/nginx/certs:ro
+    restart: always
+
+  # Optional Prometheus scraper for the observability sidecar. Enable
+  # alongside production with: --profile production --profile monitoring.
+  prometheus:
+    profiles:
+      - monitoring
+    image: prom/prometheus:v2.55.0
+    depends_on:
+      - telegram-server-prod
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "${TELEGRAM_PROM_PORT:-9090}:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - telegram_prometheus_data:/prometheus
+    restart: always
+
 volumes:
   telegram_server_data:
   telegram_postgres_data:
   telegram_server_pg_data:
+  telegram_server_prod_data:
+  telegram_prometheus_data:

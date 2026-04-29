@@ -139,6 +139,7 @@ class ServerApplication:
         presence_ttl_seconds: float = DEFAULT_TTL_SECONDS,
         session_ttl_seconds: float = 0.0,
         attachment_dir: str | None = None,
+        redis_cache=None,
     ) -> None:
         self.state = InMemoryState(state_file=state_file, db_file=db_file, pg_dsn=pg_dsn)
         self.clock = clock or time.time
@@ -146,10 +147,18 @@ class ServerApplication:
             self.state,
             clock=self.clock,
             session_ttl_seconds=session_ttl_seconds,
+            redis_cache=redis_cache,
         )
         self.chat_service = ChatService(self.state, attachment_store=AttachmentBlobStore(attachment_dir))
+        # M116: optional Redis hot-state cache. Default None preserves the
+        # pre-M116 direct-state read path; callers (server/main.py) bind a
+        # bridge when --redis-url / --redis-fake is passed.
+        self.redis_cache = redis_cache
         self.presence_service = PresenceService(
-            self.state, clock=self.clock, ttl_seconds=presence_ttl_seconds
+            self.state,
+            clock=self.clock,
+            ttl_seconds=presence_ttl_seconds,
+            redis_cache=redis_cache,
         )
         self.presence_service.set_transition_handler(self._fanout_presence_transition)
         self.remote_session_service = RemoteSessionService(self.state)
@@ -2293,6 +2302,7 @@ def create_app(
     pg_dsn: str | None = None,
     attachment_dir: str | None = None,
     session_ttl_seconds: float = 0.0,
+    redis_cache=None,
 ) -> ServerApplication:
     return ServerApplication(
         state_file=state_file,
@@ -2300,4 +2310,5 @@ def create_app(
         pg_dsn=pg_dsn,
         attachment_dir=attachment_dir,
         session_ttl_seconds=session_ttl_seconds,
+        redis_cache=redis_cache,
     )

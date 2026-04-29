@@ -150,13 +150,24 @@ class RedisCacheBridge:
 
     # ---- presence ----
 
-    def set_presence(self, user_id: str, *, online: bool, last_seen_at_ms: int) -> None:
+    def set_presence(
+        self,
+        user_id: str,
+        *,
+        online: bool,
+        last_seen_at_ms: int,
+        ttl_override: Optional[int] = None,
+    ) -> None:
+        """Cache a presence snapshot. `ttl_override` lets callers (e.g.
+        PresenceService) align the cache TTL with their own staleness window
+        instead of the bridge's broader default."""
         body = json.dumps({
             "user_id": user_id,
             "online": online,
             "last_seen_at_ms": last_seen_at_ms,
         }).encode("utf-8")
-        self._transport.setex(self._presence_key(user_id), self._presence_ttl, body)
+        ttl = ttl_override if ttl_override is not None else self._presence_ttl
+        self._transport.setex(self._presence_key(user_id), ttl, body)
 
     def get_presence(self, user_id: str) -> Optional[dict]:
         raw = self._transport.get(self._presence_key(user_id))

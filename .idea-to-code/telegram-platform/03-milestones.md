@@ -3,7 +3,7 @@
 ## Current Phase
 
 - Status: in_progress
-- Current focus: release-readiness — feature breadth (M108-M114)
+- Current focus: release-readiness — production deployment
 - Next gate: User direction
 
 ## Milestone History
@@ -918,4 +918,28 @@
 - Verified: Final bundle verify: ok=true, 77 REQs covered, 0 problems, 0 blockers. Final sweep: 65 passed | 0 failed | 4 SKIP_EXTERNAL. Phase summary visible in .idea-to-code/telegram-platform/07-execution-log.md.
 - Next: User direction: (a) procure PA-005/008/009/010/011, (b) wire Redis bridge into PresenceService (1-milestone follow-up), (c) voice/video real codecs (Opus/VP8/H.264), (d) finalize the bundle if user accepts current scope.
 - Covers: REQ-VALIDATION
+
+## M115 - Production deploy 档1 (Docker + nginx + Prometheus, no app rewrite) (gate: pass)
+
+- Timestamp: 2026-04-29T04:01:38+00:00
+- Delivered: Added a production deployment stack that does NOT touch the application code path. server/main.py grows --metrics-port + --metrics-host so the M92 observability sidecar can run as a real entry point. deploy/docker/docker-compose.yml adds a production profile: telegram-server-prod (TCP 8787 + web bridge 8080 + sidecar 9100, postgres-backed, restart=always, healthchecked against /healthz, depends_on healthchecked postgres) and nginx-web (TLS termination + WS upgrade reverse proxy on 80/443, mounts new deploy/tls/nginx-web.conf with map   + /ws location + /healthz passthrough). Optional monitoring profile adds prometheus scraping the sidecar via deploy/docker/prometheus.yml. deploy/docker/production.env.example documents every prod env knob + PA-008/009/011 procurement placeholders. deploy/docker/README.md gets a full production runbook (one-shot bring-up, PA injection table, TLS cert swap, day-2 ops, dev-still-works callout).
+- Verified: scripts/validate_production_compose.py 8/8 (compose parse, prod service command flags, healthcheck wiring, nginx mounts + ports, nginx WS upgrade headers + /healthz passthrough, prometheus scrape, env example coverage incl. PA-008/009/011, README runbook). docker compose --profile production --profile monitoring config (via WSL Docker) parses with 0 errors/warnings. --metrics-port smoke: curl http://127.0.0.1:9101/metrics + /healthz both 200, healthz returns ok=true with state_loaded + active_session_count. Existing dev profile untouched. Full sweep regression: 66 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Next: Optional follow-up: M116 wire Redis bridge into PresenceService (1-milestone, M111 bridge already in place); or档2 asyncio rewrite when concurrency really demands it.
+- Covers: REQ-VALIDATION, REQ-PERSISTENCE
+
+## M116 - Redis cache wired into PresenceService (gate: pass)
+
+- Timestamp: 2026-04-29T04:14:51+00:00
+- Delivered: PresenceService gains an optional redis_cache parameter. is_user_online / last_seen_ms / query_users now flow through a single _resolve_user_presence() that hits the cache first, falling back to a state.sessions scan + write-back on miss. Hot writes (touch, notify_session_started, revoke_device, transitions) refresh or invalidate the cached entry so the next read doesn't see a stale online/offline answer. Cache TTL is bounded by the presence TTL so the cached online answer can't outlive the underlying session-staleness window. Transport failures (get/set/delete throwing) fall back to the state scan and don't propagate. RedisCacheBridge.set_presence accepts a per-call ttl_override so PresenceService can pin the cache TTL to its own staleness window. ServerApplication + create_app gain a redis_cache kwarg. server/main.py adds --redis-url / --redis-token (RedisHttpTransport gated on PA-011) and --redis-fake (FakeRedisTransport in-memory, dev only).
+- Verified: scripts/validate_presence_cache.py 8/8 — no-cache regression, miss-then-hit, touch refresh, notify_session_started write, revoke invalidate + recompute, TTL bounded by presence TTL with FakeRedis sharing the manual clock, transport-failure fallback, ServerApplication kwarg propagation. --redis-fake startup smoke (curl /healthz returns ok=true). Linux WSL re-run validate_presence_cache.py 8/8. Full sweep regression: 67 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Next: Optional follow-up: M117 wire Redis cache into AuthService session lookup (same pattern); or档2 asyncio rewrite when concurrency demands it.
+- Covers: REQ-CHAT-CORE, REQ-PERSISTENCE
+
+## M117 - Redis cache wired into AuthService session lookup (gate: pass)
+
+- Timestamp: 2026-04-29T04:26:22+00:00
+- Delivered: AuthService gains an optional redis_cache kwarg + bind_redis_cache(). resolve_session checks the cache first, reconstructing the SessionRecord from cached fields and applying the TTL freshness check on the cached last_seen_at; on miss it falls through to state.sessions and writes the result back. login + register write-through to the cache after persisting state. The TTL eviction path evicts both the in-memory session and the cached entry. Unknown sessions invalidate any (possibly stale) cached entry. Transport failures (get/set/delete raising) fall back to the state path without propagating. Cache TTL = configured session_ttl_seconds, with a 60s default when session_ttl is 0 so a stale cached entry can't outlive a touch-driven refresh by more than the cap. ServerApplication threads redis_cache through to AuthService alongside the M116 PresenceService binding.
+- Verified: scripts/validate_auth_cache.py 9/9 on Windows + WSL Linux: no-cache regression, login + register write-through, cache hit short-circuits state lookup (proven by clearing state.sessions and confirming resolve still returns the session), TTL expiry double-evicts, unknown session invalidates, transport-down fallback, cache TTL default 60s when session_ttl=0, ServerApplication kwarg propagation. Full sweep regression: 68 passed | 0 failed | 4 SKIP_EXTERNAL.
+- Next: Optional: cross-service touch-fanout (PresenceService.touch refreshes auth cache too) for tighter horizontal-scale staleness. Or档2 asyncio rewrite when concurrency demands it.
+- Covers: REQ-CHAT-CORE, REQ-PERSISTENCE
 
