@@ -60,6 +60,12 @@ if(Qt6_FOUND)
             set(TELEGRAM_LIKE_TARGET_IS_IOS TRUE)
         endif()
     endif()
+    # M134: app_desktop is the Qt Widgets desktop app — meaningless on
+    # Android (the touch UI is app_mobile in Qt Quick). Skip it on Android
+    # cross-builds so qt_add_executable doesn't generate an APK target for
+    # it that would trigger gradle resource compilation alongside
+    # app_mobile and double the failure surface.
+    if(NOT ANDROID)
     # qt_add_executable is the modern Qt 6 API that knows how to package the
     # binary differently per platform (plain .exe on Windows, .so wrapped in
     # an APK on Android). Falls back to add_executable on older Qt builds.
@@ -166,6 +172,7 @@ if(Qt6_FOUND)
             message(STATUS "macdeployqt not found; app_desktop.app will require Qt on the runtime path")
         endif()
     endif()
+    endif()  # NOT ANDROID — close M134 desktop-skip-on-Android gate
 
     # ---- app_mobile (Qt Quick / QML, phone-shaped UI) ----
     if(TARGET Qt6::Quick AND TARGET Qt6::QuickControls2)

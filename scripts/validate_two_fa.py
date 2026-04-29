@@ -132,14 +132,27 @@ def scenario_verify_without_pending_rejected():
 
 
 def main() -> int:
+    import traceback
     scenarios = [
         scenario_full_lifecycle,
         scenario_double_enable_rejected,
         scenario_disable_without_2fa_rejected,
         scenario_verify_without_pending_rejected,
     ]
+    failed = 0
     for s in scenarios:
-        s()
+        try:
+            s()
+        except Exception as exc:
+            failed += 1
+            # Make the failure visible to the sweep harness which only shows
+            # the last 50 chars of stdout. Print scenario name + error first,
+            # then the traceback for postmortem.
+            print(f"[FAIL] {s.__name__}: {type(exc).__name__}: {exc}")
+            traceback.print_exc()
+    if failed:
+        print(f"\n{failed}/{len(scenarios)} scenarios FAILED")
+        return 1
     print(f"\nAll {len(scenarios)}/{len(scenarios)} scenarios passed.")
     return 0
 

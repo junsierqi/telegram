@@ -281,6 +281,27 @@ jobs:
         with:
           ndk-version: r26d
 
+      - name: Pin Android SDK platform to 34 (AGP 7.4.1 caps compileSdk at 34)
+        # Qt 6.7.3 ships with Android Gradle Plugin 7.4.1 which only supports
+        # compileSdk up to 34. The ubuntu-latest runner image ships with
+        # android-36-ext19 installed and androiddeployqt picks the highest
+        # platform — aapt2 then errors with "Failed to load resources table
+        # in APK ... android-36-ext19/android.jar". Strip everything ≥ 35
+        # so the highest remaining platform is android-34, then make sure
+        # 34 + build-tools-34.0.0 are actually present.
+        run: |
+          set -e
+          sudo rm -rf "$ANDROID_SDK_ROOT/platforms/android-3[5-9]"* || true
+          sudo rm -rf "$ANDROID_SDK_ROOT/platforms/android-4"* || true
+          sudo rm -rf "$ANDROID_SDK_ROOT/build-tools/3[5-9]"* || true
+          sudo rm -rf "$ANDROID_SDK_ROOT/build-tools/4"* || true
+          ls "$ANDROID_SDK_ROOT/platforms" || true
+
+      - name: Install Android platform 34 + build-tools 34.0.0
+        uses: android-actions/setup-android@v3
+        with:
+          packages: "platforms;android-34 build-tools;34.0.0 platform-tools"
+
       - name: Install Qt 6 desktop host (needed by Qt for Android cross-build)
         uses: jurplel/install-qt-action@v4
         with:
