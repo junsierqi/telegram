@@ -26,7 +26,17 @@ BRIDGE_H = MOBILE_DIR / "mobile_chat_bridge.h"
 BRIDGE_CPP = MOBILE_DIR / "mobile_chat_bridge.cpp"
 QML_DIR = MOBILE_DIR / "qml"
 CMAKE = REPO / "client" / "src" / "CMakeLists.txt"
-EXE = REPO / "build-verify" / "client" / "src" / "Debug" / "app_mobile.exe"
+def _exe_candidates(stem: str) -> list[Path]:
+    candidates: list[Path] = []
+    for build in ("build-verify", "build-codex", "build", "build-macos",
+                  "build-linux", "build-wsl"):
+        for cfg in ("", "Debug", "Release"):
+            for ext in ("", ".exe"):
+                candidates.append(REPO / build / "client" / "src" / cfg / f"{stem}{ext}")
+    return candidates
+
+
+EXE_CANDIDATES = _exe_candidates("app_mobile")
 APK = REPO / "build-android" / "client" / "src" / "android-build" / "build" / "outputs" / "apk" / "release" / "android-build-release-unsigned.apk"
 
 SCENARIOS: list[tuple[str, callable]] = []
@@ -94,10 +104,11 @@ def _t4():
 
 @scenario("if_built_then_app_mobile_exe_size_is_reasonable")
 def _t5():
-    if not EXE.exists():
+    exe = next((p for p in EXE_CANDIDATES if p.exists()), None)
+    if exe is None:
         return
-    size = EXE.stat().st_size
-    assert size > 100_000, f"app_mobile.exe too small: {size} bytes"
+    size = exe.stat().st_size
+    assert size > 100_000, f"app_mobile binary too small ({exe}): {size} bytes"
 
 
 @scenario("if_built_then_mobile_apk_size_is_reasonable")
