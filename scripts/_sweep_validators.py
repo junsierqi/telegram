@@ -64,6 +64,21 @@ def _has_built_binary(stem: str) -> bool:
 
 env = os.environ.copy()
 env["PATH"] = r"C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
+# Force UTF-8 in the spawned validators' stdio. Otherwise Windows defaults
+# to cp1252 (because subprocess.run(...) sets stdout to a pipe, and Python
+# falls back to locale.getpreferredencoding() when stdout is not a tty).
+# A single non-ASCII char in a print() then crashes the validator with
+# UnicodeEncodeError — exactly how validate_two_fa.py failed in CI.
+env["PYTHONIOENCODING"] = "utf-8"
+
+# Same problem on the parent side: when we re-print captured stdout below
+# (the on-failure dump), Python encodes via the harness's stdout codec.
+# On Windows CI that's cp1252 and any U+2192 etc. would crash THIS script.
+# Reconfigure to UTF-8 with errors="replace" so a stray byte never masks
+# the actual validator failure with a harness traceback.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 scripts = sorted(glob.glob(str(REPO / "scripts" / "validate_*.py")))
 passed = 0
@@ -95,6 +110,7 @@ for path in scripts:
             [sys.executable, path],
             cwd=str(REPO), env=env,
             capture_output=True, text=True, timeout=200,
+            encoding="utf-8", errors="replace",
         )
         out = r.stdout.strip().splitlines()
         last = out[-1] if out else ""

@@ -95,7 +95,7 @@ def scenario_full_lifecycle():
     assert disabled["payload"]["enabled"] is False
     plain = _login(app, "alice", "alice_pw", "dev_alice_3", 8)
     assert plain["type"] == "login_response", plain
-    print("[ok ] full enroll → login-required → disable lifecycle")
+    print("[ok ] full enroll -> login-required -> disable lifecycle")
 
 
 def scenario_double_enable_rejected():
