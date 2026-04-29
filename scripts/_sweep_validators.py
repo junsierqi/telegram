@@ -103,6 +103,18 @@ for path in scripts:
             passed += 1
         else:
             print(f"[!!] {name:46s} rc={r.returncode}  {last[:50]}")
+            # Surface the full stdout + stderr on failure so CI logs show
+            # the actual exception/traceback. The 50-char last-line summary
+            # above hides everything before it (e.g. validate_two_fa.py's
+            # per-scenario [FAIL] line + traceback).
+            if r.stdout:
+                print("    --- stdout ---")
+                for line in r.stdout.rstrip().splitlines():
+                    print(f"    {line}")
+            if r.stderr:
+                print("    --- stderr ---")
+                for line in r.stderr.rstrip().splitlines():
+                    print(f"    {line}")
             failed += 1
             fail_names.append(name)
     except Exception as e:

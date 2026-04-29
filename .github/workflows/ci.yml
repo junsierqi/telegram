@@ -289,13 +289,25 @@ jobs:
         # in APK ... android-36-ext19/android.jar". Strip everything ≥ 35
         # so the highest remaining platform is android-34, then make sure
         # 34 + build-tools-34.0.0 are actually present.
+        #
+        # Glob caveat: the bracket pattern MUST stay outside double quotes —
+        # bash treats `"…[5-9]"*` as a literal `[5-9]` followed by `*`, which
+        # never matches `android-36-ext19`. The `|| true` only papers over
+        # the no-match case; verify by listing platforms after.
         run: |
           set -e
-          sudo rm -rf "$ANDROID_SDK_ROOT/platforms/android-3[5-9]"* || true
-          sudo rm -rf "$ANDROID_SDK_ROOT/platforms/android-4"* || true
-          sudo rm -rf "$ANDROID_SDK_ROOT/build-tools/3[5-9]"* || true
-          sudo rm -rf "$ANDROID_SDK_ROOT/build-tools/4"* || true
+          sudo rm -rf "$ANDROID_SDK_ROOT"/platforms/android-3[5-9]* || true
+          sudo rm -rf "$ANDROID_SDK_ROOT"/platforms/android-[4-9][0-9]* || true
+          sudo rm -rf "$ANDROID_SDK_ROOT"/build-tools/3[5-9]* || true
+          sudo rm -rf "$ANDROID_SDK_ROOT"/build-tools/[4-9][0-9]* || true
+          echo "platforms remaining after strip:"
           ls "$ANDROID_SDK_ROOT/platforms" || true
+          # Hard-fail if any platform >= 35 survived; better to break the
+          # job here than let aapt2 explode 30 minutes into the build.
+          if ls "$ANDROID_SDK_ROOT/platforms" 2>/dev/null | grep -E '^android-(3[5-9]|[4-9][0-9])' ; then
+            echo "ERROR: platform >= 35 survived strip step"
+            exit 1
+          fi
 
       - name: Install Android platform 34 + build-tools 34.0.0
         uses: android-actions/setup-android@v3
