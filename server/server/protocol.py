@@ -74,6 +74,19 @@ class ErrorCode(StrEnum):
     INVALID_TWO_FA_CODE = "invalid_two_fa_code"
     TWO_FA_REQUIRED = "two_fa_required"
     ACCOUNT_DELETE_AUTH_FAILED = "account_delete_auth_failed"
+    BLOCKED_BY_RECIPIENT = "blocked_by_recipient"
+    ALREADY_BLOCKED = "already_blocked"
+    NOT_BLOCKED = "not_blocked"
+    # M102 polls
+    NOT_A_POLL = "not_a_poll"
+    POLL_CLOSED = "poll_closed"
+    POLL_INVALID_OPTION = "poll_invalid_option"
+    POLL_TOO_FEW_OPTIONS = "poll_too_few_options"
+    POLL_CLOSE_DENIED = "poll_close_denied"
+    # M103 group permissions + admin roles
+    CONVERSATION_PERMISSION_DENIED = "conversation_permission_denied"
+    CONVERSATION_OWNER_ROLE_IMMUTABLE = "conversation_owner_role_immutable"
+    CONVERSATION_INVALID_ROLE = "conversation_invalid_role"
 
 
 _ERROR_MESSAGES: dict[ErrorCode, str] = {
@@ -140,6 +153,17 @@ _ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.INVALID_TWO_FA_CODE: "TOTP code does not match; check the authenticator app and retry.",
     ErrorCode.TWO_FA_REQUIRED: "Two-factor authentication is required; include two_fa_code on login.",
     ErrorCode.ACCOUNT_DELETE_AUTH_FAILED: "Account delete must be confirmed with the current password (and TOTP if 2FA is enabled).",
+    ErrorCode.BLOCKED_BY_RECIPIENT: "The recipient has blocked you; the message was not delivered.",
+    ErrorCode.ALREADY_BLOCKED: "That user is already on your block list.",
+    ErrorCode.NOT_BLOCKED: "That user is not on your block list.",
+    ErrorCode.NOT_A_POLL: "That message is not a poll; vote/close are not applicable.",
+    ErrorCode.POLL_CLOSED: "Voting on this poll has been closed by the author.",
+    ErrorCode.POLL_INVALID_OPTION: "The selected option index is out of range for this poll.",
+    ErrorCode.POLL_TOO_FEW_OPTIONS: "A poll must have at least two options.",
+    ErrorCode.POLL_CLOSE_DENIED: "Only the poll author can close the poll.",
+    ErrorCode.CONVERSATION_PERMISSION_DENIED: "Your role in this conversation does not allow that action.",
+    ErrorCode.CONVERSATION_OWNER_ROLE_IMMUTABLE: "The conversation owner's role cannot be changed.",
+    ErrorCode.CONVERSATION_INVALID_ROLE: "Role must be one of: owner, admin, member.",
 }
 
 
@@ -247,6 +271,38 @@ class MessageType(StrEnum):
     ACCOUNT_EXPORT_RESPONSE = "account_export_response"
     ACCOUNT_DELETE_REQUEST = "account_delete_request"
     ACCOUNT_DELETE_RESPONSE = "account_delete_response"
+    # M98 block + mute
+    BLOCK_USER_REQUEST = "block_user_request"
+    UNBLOCK_USER_REQUEST = "unblock_user_request"
+    BLOCKED_USERS_LIST_REQUEST = "blocked_users_list_request"
+    BLOCKED_USERS_LIST_RESPONSE = "blocked_users_list_response"
+    BLOCK_USER_ACK = "block_user_ack"
+    CONVERSATION_MUTE_UPDATE_REQUEST = "conversation_mute_update_request"
+    CONVERSATION_MUTE_UPDATE_RESPONSE = "conversation_mute_update_response"
+    # M99 server-side drafts
+    DRAFT_SAVE_REQUEST = "draft_save_request"
+    DRAFT_SAVE_RESPONSE = "draft_save_response"
+    DRAFT_LIST_REQUEST = "draft_list_request"
+    DRAFT_LIST_RESPONSE = "draft_list_response"
+    DRAFT_CLEAR_REQUEST = "draft_clear_request"
+    DRAFT_CLEAR_RESPONSE = "draft_clear_response"
+    # M100 pinned + archived chats (per-user)
+    CONVERSATION_PIN_TOGGLE_REQUEST = "conversation_pin_toggle_request"
+    CONVERSATION_PIN_TOGGLE_RESPONSE = "conversation_pin_toggle_response"
+    CONVERSATION_ARCHIVE_TOGGLE_REQUEST = "conversation_archive_toggle_request"
+    CONVERSATION_ARCHIVE_TOGGLE_RESPONSE = "conversation_archive_toggle_response"
+    # M101 profile + group avatars
+    PROFILE_AVATAR_UPDATE_REQUEST = "profile_avatar_update_request"
+    PROFILE_AVATAR_UPDATE_RESPONSE = "profile_avatar_update_response"
+    CONVERSATION_AVATAR_UPDATE_REQUEST = "conversation_avatar_update_request"
+    CONVERSATION_AVATAR_UPDATE_RESPONSE = "conversation_avatar_update_response"
+    # M102 polls (live as a special message type in conversation history)
+    POLL_CREATE_REQUEST = "poll_create_request"
+    POLL_VOTE_REQUEST = "poll_vote_request"
+    POLL_CLOSE_REQUEST = "poll_close_request"
+    POLL_UPDATED = "poll_updated"
+    # M103 group permissions + admin roles
+    CONVERSATION_ROLE_UPDATE_REQUEST = "conversation_role_update_request"
     ERROR = "error"
 
 
@@ -348,6 +404,7 @@ class ProfileResponsePayload:
     user_id: str
     username: str
     display_name: str
+    avatar_attachment_id: str = ""  # M101
 
 
 @dataclass(slots=True)
@@ -442,6 +499,27 @@ class ContactListResponsePayload:
 
 
 @dataclass(slots=True)
+class PollOptionDescriptor:
+    """Vote option carried inside PollDescriptor.options. Tallies are
+    computed live on the server from the (poll → user_id → option_index)
+    map kept on the message dict, not stored separately."""
+    text: str
+    vote_count: int = 0
+
+
+@dataclass(slots=True)
+class PollDescriptor:
+    """M102 poll state. `multiple_choice` toggles whether one user can
+    select more than one option. `closed` freezes voting (only the
+    author may close). The `voters` list reports which option indices
+    the *requesting* user voted for — None for non-voters."""
+    options: list[PollOptionDescriptor] = field(default_factory=list)
+    multiple_choice: bool = False
+    closed: bool = False
+    total_voters: int = 0
+
+
+@dataclass(slots=True)
 class MessageDescriptor:
     message_id: str
     sender_user_id: str
@@ -459,6 +537,11 @@ class MessageDescriptor:
     forwarded_from_sender_user_id: str = ""
     reaction_summary: str = ""
     pinned: bool = False
+    # M102: poll state. `poll` is None for normal messages; for polls the
+    # poll question lives in `text` and `poll` carries the option list,
+    # current tallies, vote rule, and closed flag. Embedded directly so
+    # one round-trip surfaces both the chat history and the poll status.
+    poll: "PollDescriptor | None" = None
 
 
 @dataclass(slots=True)
@@ -489,6 +572,18 @@ class ConversationDescriptor:
     changes: list[ConversationChangeDescriptor] = field(default_factory=list)
     next_before_message_id: str = ""
     has_more: bool = False
+    # M100 per-user view flags. These reflect the actor's preferences only,
+    # not a global property of the conversation. Sync materializes them
+    # from the per-(user, conversation) maps in InMemoryState.
+    pinned: bool = False
+    archived: bool = False
+    # M101: group/conversation avatar pointer. Empty = default.
+    avatar_attachment_id: str = ""
+    # M103: per-(conversation, user) role map. Same canonical strings as
+    # the server side ("owner", "admin", "member"). Missing entries are
+    # implicit members; the client can still use this to render badges
+    # or gate UI affordances.
+    roles: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -930,6 +1025,211 @@ class AccountDeleteResponsePayload:
     contacts_removed: int
 
 
+# ---- M98 block + mute ----
+
+@dataclass(slots=True)
+class BlockUserRequestPayload:
+    """target_user_id is the user being added to / removed from the actor's
+    block list. Block is one-directional in our model: A blocking B prevents
+    B from sending DMs to A but doesn't affect groups they share."""
+    target_user_id: str
+
+
+@dataclass(slots=True)
+class BlockUserAckPayload:
+    target_user_id: str
+    blocked: bool  # true after BLOCK_USER, false after UNBLOCK_USER
+
+
+@dataclass(slots=True)
+class BlockedUserDescriptor:
+    user_id: str
+    blocked_at_ms: int
+
+
+@dataclass(slots=True)
+class BlockedUsersListResponsePayload:
+    blocked: list[BlockedUserDescriptor]
+
+
+@dataclass(slots=True)
+class ConversationMuteUpdateRequestPayload:
+    """muted_until_ms semantics:
+       0  -> not muted (un-mute)
+      -1  -> muted forever
+       N  -> muted until wall-clock ms epoch N
+    """
+    conversation_id: str
+    muted_until_ms: int
+
+
+@dataclass(slots=True)
+class ConversationMuteUpdateResponsePayload:
+    conversation_id: str
+    muted_until_ms: int
+
+
+# ---- M99 drafts ----
+
+@dataclass(slots=True)
+class DraftSaveRequestPayload:
+    """Save / overwrite the draft for (current user, conversation_id).
+    Empty text auto-clears the draft (same UX as Telegram). Optional
+    reply_to_message_id lets a half-typed reply follow the user across
+    devices."""
+    conversation_id: str
+    text: str
+    reply_to_message_id: str = ""
+
+
+@dataclass(slots=True)
+class DraftDescriptor:
+    conversation_id: str
+    text: str
+    reply_to_message_id: str
+    updated_at_ms: int
+
+
+@dataclass(slots=True)
+class DraftSaveResponsePayload:
+    draft: DraftDescriptor
+    cleared: bool   # true when an empty text auto-cleared the entry
+
+
+@dataclass(slots=True)
+class DraftListResponsePayload:
+    drafts: list[DraftDescriptor]
+
+
+@dataclass(slots=True)
+class DraftClearRequestPayload:
+    conversation_id: str
+
+
+@dataclass(slots=True)
+class DraftClearResponsePayload:
+    conversation_id: str
+    cleared: bool   # false if there was nothing to clear
+
+
+# ---- M100 pinned + archived chats (per-user) ----
+
+@dataclass(slots=True)
+class ConversationPinToggleRequestPayload:
+    """Toggle the per-user pinned flag for a conversation. `pinned=true`
+    pins, `pinned=false` unpins. Pinning is a per-user preference — bob
+    pinning conv_alice_bob does not affect alice's view."""
+    conversation_id: str
+    pinned: bool
+
+
+@dataclass(slots=True)
+class ConversationPinToggleResponsePayload:
+    conversation_id: str
+    pinned: bool
+
+
+@dataclass(slots=True)
+class ConversationArchiveToggleRequestPayload:
+    """Same shape as pin: per-user archive flag. Archived conversations
+    typically render in a separate list on the client; the server just
+    persists the flag and exposes it via conversation_sync."""
+    conversation_id: str
+    archived: bool
+
+
+@dataclass(slots=True)
+class ConversationArchiveToggleResponsePayload:
+    conversation_id: str
+    archived: bool
+
+
+# ---- M101 profile + group avatars ----
+
+@dataclass(slots=True)
+class ProfileAvatarUpdateRequestPayload:
+    """Set or clear the actor's profile avatar. Empty `attachment_id`
+    clears it (revert to default). The bytes themselves come from the
+    chunked upload pipeline — we only persist the pointer here."""
+    avatar_attachment_id: str
+
+
+@dataclass(slots=True)
+class ProfileAvatarUpdateResponsePayload:
+    user_id: str
+    avatar_attachment_id: str
+
+
+@dataclass(slots=True)
+class ConversationAvatarUpdateRequestPayload:
+    """Set or clear a group/conversation avatar. Only participants may
+    update; UNKNOWN_CONVERSATION + CONVERSATION_ACCESS_DENIED enforced."""
+    conversation_id: str
+    avatar_attachment_id: str
+
+
+@dataclass(slots=True)
+class ConversationAvatarUpdateResponsePayload:
+    conversation_id: str
+    avatar_attachment_id: str
+
+
+# ---- M102 polls ----
+
+@dataclass(slots=True)
+class PollCreateRequestPayload:
+    """Author posts a poll into a conversation. The question goes into
+    `text`; `options` is a list of option strings. `multiple_choice`
+    flips between Telegram's "single answer" and "multiple answers"
+    poll modes."""
+    conversation_id: str
+    question: str
+    options: list[str]
+    multiple_choice: bool = False
+
+
+@dataclass(slots=True)
+class PollVoteRequestPayload:
+    """User votes on (conversation_id, message_id). `option_indices` is
+    a list because multiple-choice polls accept >=1 indices in a single
+    request. For single-choice polls only the first index is honored;
+    sending more is rejected."""
+    conversation_id: str
+    message_id: str
+    option_indices: list[int]
+
+
+@dataclass(slots=True)
+class PollCloseRequestPayload:
+    """Close voting. Only the poll author may invoke; everyone else
+    receives POLL_CLOSE_DENIED."""
+    conversation_id: str
+    message_id: str
+
+
+@dataclass(slots=True)
+class PollUpdatedPayload:
+    """Server -> all participants whenever a poll's tallies or closed
+    state change. Carries the canonical post-state of the poll so the
+    client can re-render without recomputing."""
+    conversation_id: str
+    message_id: str
+    poll: PollDescriptor
+
+
+# ---- M103 group permissions + admin roles ----
+
+@dataclass(slots=True)
+class ConversationRoleUpdateRequestPayload:
+    """Set the target_user_id's role in a conversation. Only owners can
+    promote a member to admin or demote an admin to member. The owner
+    role itself is immutable — there is exactly one owner (the
+    creator), and they can't be demoted via this RPC."""
+    conversation_id: str
+    target_user_id: str
+    role: str  # "admin" | "member"
+
+
 @dataclass(slots=True)
 class PresenceUpdatePayload:
     """Pushed to peers (anyone sharing a conversation) when a user's online
@@ -1193,6 +1493,68 @@ def parse_request_payload(message_type: MessageType, payload: dict[str, Any]) ->
         return AccountDeleteRequestPayload(
             password=payload.get("password", ""),
             two_fa_code=payload.get("two_fa_code", ""),
+        )
+    if message_type in (MessageType.BLOCK_USER_REQUEST, MessageType.UNBLOCK_USER_REQUEST):
+        return BlockUserRequestPayload(target_user_id=payload.get("target_user_id", ""))
+    if message_type == MessageType.BLOCKED_USERS_LIST_REQUEST:
+        return {}
+    if message_type == MessageType.CONVERSATION_MUTE_UPDATE_REQUEST:
+        return ConversationMuteUpdateRequestPayload(
+            conversation_id=payload.get("conversation_id", ""),
+            muted_until_ms=int(payload.get("muted_until_ms", 0)),
+        )
+    if message_type == MessageType.DRAFT_SAVE_REQUEST:
+        return DraftSaveRequestPayload(
+            conversation_id=payload.get("conversation_id", ""),
+            text=payload.get("text", ""),
+            reply_to_message_id=payload.get("reply_to_message_id", ""),
+        )
+    if message_type == MessageType.DRAFT_LIST_REQUEST:
+        return {}
+    if message_type == MessageType.DRAFT_CLEAR_REQUEST:
+        return DraftClearRequestPayload(conversation_id=payload.get("conversation_id", ""))
+    if message_type == MessageType.CONVERSATION_PIN_TOGGLE_REQUEST:
+        return ConversationPinToggleRequestPayload(
+            conversation_id=payload.get("conversation_id", ""),
+            pinned=bool(payload.get("pinned", False)),
+        )
+    if message_type == MessageType.CONVERSATION_ARCHIVE_TOGGLE_REQUEST:
+        return ConversationArchiveToggleRequestPayload(
+            conversation_id=payload.get("conversation_id", ""),
+            archived=bool(payload.get("archived", False)),
+        )
+    if message_type == MessageType.PROFILE_AVATAR_UPDATE_REQUEST:
+        return ProfileAvatarUpdateRequestPayload(
+            avatar_attachment_id=payload.get("avatar_attachment_id", ""),
+        )
+    if message_type == MessageType.CONVERSATION_AVATAR_UPDATE_REQUEST:
+        return ConversationAvatarUpdateRequestPayload(
+            conversation_id=payload.get("conversation_id", ""),
+            avatar_attachment_id=payload.get("avatar_attachment_id", ""),
+        )
+    if message_type == MessageType.POLL_CREATE_REQUEST:
+        return PollCreateRequestPayload(
+            conversation_id=payload.get("conversation_id", ""),
+            question=payload.get("question", ""),
+            options=list(payload.get("options", [])),
+            multiple_choice=bool(payload.get("multiple_choice", False)),
+        )
+    if message_type == MessageType.POLL_VOTE_REQUEST:
+        return PollVoteRequestPayload(
+            conversation_id=payload.get("conversation_id", ""),
+            message_id=payload.get("message_id", ""),
+            option_indices=[int(i) for i in payload.get("option_indices", [])],
+        )
+    if message_type == MessageType.POLL_CLOSE_REQUEST:
+        return PollCloseRequestPayload(
+            conversation_id=payload.get("conversation_id", ""),
+            message_id=payload.get("message_id", ""),
+        )
+    if message_type == MessageType.CONVERSATION_ROLE_UPDATE_REQUEST:
+        return ConversationRoleUpdateRequestPayload(
+            conversation_id=payload.get("conversation_id", ""),
+            target_user_id=payload.get("target_user_id", ""),
+            role=payload.get("role", ""),
         )
     return payload
 

@@ -25,6 +25,7 @@ import os
 import re
 import secrets
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional, Protocol
@@ -107,6 +108,13 @@ class PhoneOtpService:
         self._clock = clock or time.time
         self._codes: dict[str, _OtpRecord] = {}
         self._user_counter = 0
+        # ThreadedTCPServer can run two dispatch calls in parallel. The
+        # request_code / verify_code paths both mutate _codes (and verify
+        # increments record.attempts non-atomically), so an unlocked path
+        # could under-count attempts and let an attacker exceed
+        # MAX_VERIFY_ATTEMPTS. One lock covers everything inside this
+        # service since contention is low (one OTP per phone per 30 s).
+        self._lock = threading.Lock()
 
     @property
     def sender(self) -> Sender:
@@ -118,16 +126,25 @@ class PhoneOtpService:
         if not phone_number or not _PHONE_E164.match(phone_number):
             raise ServiceError(ErrorCode.INVALID_PHONE_NUMBER)
         now = self._clock()
-        existing = self._codes.get(phone_number)
-        if existing is not None and (now - existing.issued_at) < RESEND_COOLDOWN_SECONDS:
-            raise ServiceError(ErrorCode.PHONE_OTP_RATE_LIMITED)
-        # secrets.choice gives uniform 0-9 digits without seeded RNG bias.
-        code = "".join(secrets.choice("0123456789") for _ in range(CODE_LENGTH))
-        self._codes[phone_number] = _OtpRecord(
-            code=code,
-            issued_at=now,
-            expires_at=now + CODE_TTL_SECONDS,
-        )
+        with self._lock:
+            # Opportunistic purge: every request_code drops every entry that
+            # has already expired. Bounds _codes growth at "active flows in
+            # the last 5 minutes" instead of letting it accumulate forever
+            # for phones that never verify.
+            self._codes = {
+                phone: rec for phone, rec in self._codes.items()
+                if rec.expires_at >= now
+            }
+            existing = self._codes.get(phone_number)
+            if existing is not None and (now - existing.issued_at) < RESEND_COOLDOWN_SECONDS:
+                raise ServiceError(ErrorCode.PHONE_OTP_RATE_LIMITED)
+            # secrets.choice gives uniform 0-9 digits without seeded RNG bias.
+            code = "".join(secrets.choice("0123456789") for _ in range(CODE_LENGTH))
+            self._codes[phone_number] = _OtpRecord(
+                code=code,
+                issued_at=now,
+                expires_at=now + CODE_TTL_SECONDS,
+            )
         self._sender.send(phone_number, code)
         return CODE_LENGTH, CODE_TTL_SECONDS
 
@@ -138,23 +155,25 @@ class PhoneOtpService:
     ) -> tuple[UserRecord, str, bool]:
         if not phone_number or not _PHONE_E164.match(phone_number):
             raise ServiceError(ErrorCode.INVALID_PHONE_NUMBER)
-        record = self._codes.get(phone_number)
-        if record is None:
-            raise ServiceError(ErrorCode.INVALID_OTP_CODE)
         now = self._clock()
-        if now > record.expires_at:
-            self._codes.pop(phone_number, None)
-            raise ServiceError(ErrorCode.OTP_EXPIRED)
-        if record.exhausted:
-            raise ServiceError(ErrorCode.OTP_ATTEMPTS_EXHAUSTED)
-        if not secrets.compare_digest(record.code, code or ""):
-            record.attempts += 1
-            if record.attempts >= MAX_VERIFY_ATTEMPTS:
-                record.exhausted = True
+        with self._lock:
+            record = self._codes.get(phone_number)
+            if record is None:
+                raise ServiceError(ErrorCode.INVALID_OTP_CODE)
+            if now > record.expires_at:
+                self._codes.pop(phone_number, None)
+                raise ServiceError(ErrorCode.OTP_EXPIRED)
+            if record.exhausted:
                 raise ServiceError(ErrorCode.OTP_ATTEMPTS_EXHAUSTED)
-            raise ServiceError(ErrorCode.INVALID_OTP_CODE)
-        # success — burn the code
-        self._codes.pop(phone_number, None)
+            if not secrets.compare_digest(record.code, code or ""):
+                record.attempts += 1
+                if record.attempts >= MAX_VERIFY_ATTEMPTS:
+                    record.exhausted = True
+                    raise ServiceError(ErrorCode.OTP_ATTEMPTS_EXHAUSTED)
+                raise ServiceError(ErrorCode.INVALID_OTP_CODE)
+            # success — burn the code under lock to prevent a parallel
+            # verify from reusing it.
+            self._codes.pop(phone_number, None)
 
         user, new_account = self._upsert_phone_user(phone_number, display_name)
         device = self._upsert_device(user.user_id, device_id)

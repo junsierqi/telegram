@@ -60,6 +60,33 @@ from .protocol import (
     AccountExportResponsePayload,
     AccountDeleteRequestPayload,
     AccountDeleteResponsePayload,
+    BlockUserRequestPayload,
+    BlockUserAckPayload,
+    BlockedUserDescriptor,
+    BlockedUsersListResponsePayload,
+    ConversationMuteUpdateRequestPayload,
+    ConversationMuteUpdateResponsePayload,
+    DraftSaveRequestPayload,
+    DraftSaveResponsePayload,
+    DraftDescriptor,
+    DraftListResponsePayload,
+    DraftClearRequestPayload,
+    DraftClearResponsePayload,
+    ConversationPinToggleRequestPayload,
+    ConversationPinToggleResponsePayload,
+    ConversationArchiveToggleRequestPayload,
+    ConversationArchiveToggleResponsePayload,
+    ProfileAvatarUpdateRequestPayload,
+    ProfileAvatarUpdateResponsePayload,
+    ConversationAvatarUpdateRequestPayload,
+    ConversationAvatarUpdateResponsePayload,
+    PollCreateRequestPayload,
+    PollVoteRequestPayload,
+    PollCloseRequestPayload,
+    PollUpdatedPayload,
+    PollDescriptor,
+    PollOptionDescriptor,
+    ConversationRoleUpdateRequestPayload,
     RemoteApproveRequestPayload,
     RemoteDisconnectRequestPayload,
     RemoteInputAckPayload,
@@ -85,6 +112,10 @@ from .services.observability import Observability
 from .services.phone_otp import PhoneOtpService
 from .services.rate_limiter import RateLimiter
 from .services.account_lifecycle import AccountLifecycleService
+from .services.block_mute import BlockMuteService
+from .services.drafts import DraftsService
+from .services.conversation_flags import ConversationFlagsService
+from .services.polls import PollsService
 from .services.two_fa import TwoFAService
 from .services.presence import DEFAULT_TTL_SECONDS, PresenceService
 from .services.push_dispatch import PushDispatchWorker
@@ -126,7 +157,13 @@ class ServerApplication:
         self.observability = Observability(clock=self.clock)
         self.rate_limiter = RateLimiter()
         self.two_fa_service = TwoFAService(self.state, clock=self.clock)
-        self.account_lifecycle_service = AccountLifecycleService(self.state, clock=self.clock)
+        self.account_lifecycle_service = AccountLifecycleService(
+            self.state, clock=self.clock, two_fa_service=self.two_fa_service,
+        )
+        self.block_mute_service = BlockMuteService(self.state, clock=self.clock)
+        self.drafts_service = DraftsService(self.state, clock=self.clock)
+        self.conversation_flags_service = ConversationFlagsService(self.state)
+        self.polls_service = PollsService(self.state, clock=self.clock)
         # Cheap default health check: state file load completed if we got here.
         self.observability.health.register("state_loaded", lambda: (True, "ok"))
         self.observability.health.register(
@@ -378,6 +415,7 @@ class ServerApplication:
                     user_id=user.user_id,
                     username=user.username,
                     display_name=user.display_name,
+                    avatar_attachment_id=user.avatar_attachment_id,
                 ),
             ).to_dict()
 
@@ -399,9 +437,131 @@ class ServerApplication:
                         user_id=user.user_id,
                         username=user.username,
                         display_name=user.display_name,
+                        avatar_attachment_id=user.avatar_attachment_id,
                     ),
                 ).to_dict()
             except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.PROFILE_AVATAR_UPDATE_REQUEST:
+            assert isinstance(payload, ProfileAvatarUpdateRequestPayload)
+            user = self.state.users[session.user_id]
+            user.avatar_attachment_id = payload.avatar_attachment_id
+            self.state.save_runtime_state()
+            return make_response(
+                MessageType.PROFILE_AVATAR_UPDATE_RESPONSE,
+                correlation_id=correlation_id,
+                session_id=session_id,
+                actor_user_id=session.user_id,
+                payload=ProfileAvatarUpdateResponsePayload(
+                    user_id=user.user_id,
+                    avatar_attachment_id=user.avatar_attachment_id,
+                ),
+            ).to_dict()
+
+        if message_type == MessageType.CONVERSATION_AVATAR_UPDATE_REQUEST:
+            try:
+                assert isinstance(payload, ConversationAvatarUpdateRequestPayload)
+                conv = self.state.conversations.get(payload.conversation_id)
+                if conv is None:
+                    raise ServiceError(ErrorCode.UNKNOWN_CONVERSATION)
+                if session.user_id not in conv.participant_user_ids:
+                    raise ServiceError(ErrorCode.CONVERSATION_ACCESS_DENIED)
+                conv.avatar_attachment_id = payload.avatar_attachment_id
+                self.state.save_runtime_state()
+                return make_response(
+                    MessageType.CONVERSATION_AVATAR_UPDATE_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=ConversationAvatarUpdateResponsePayload(
+                        conversation_id=conv.conversation_id,
+                        avatar_attachment_id=conv.avatar_attachment_id,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type in (
+            MessageType.POLL_CREATE_REQUEST,
+            MessageType.POLL_VOTE_REQUEST,
+            MessageType.POLL_CLOSE_REQUEST,
+        ):
+            try:
+                if message_type == MessageType.POLL_CREATE_REQUEST:
+                    assert isinstance(payload, PollCreateRequestPayload)
+                    msg = self.polls_service.create(
+                        conversation_id=payload.conversation_id,
+                        sender_user_id=session.user_id,
+                        question=payload.question,
+                        options=payload.options,
+                        multiple_choice=payload.multiple_choice,
+                    )
+                elif message_type == MessageType.POLL_VOTE_REQUEST:
+                    assert isinstance(payload, PollVoteRequestPayload)
+                    msg = self.polls_service.vote(
+                        conversation_id=payload.conversation_id,
+                        message_id=payload.message_id,
+                        voter_user_id=session.user_id,
+                        option_indices=payload.option_indices,
+                    )
+                else:
+                    assert isinstance(payload, PollCloseRequestPayload)
+                    msg = self.polls_service.close(
+                        conversation_id=payload.conversation_id,
+                        message_id=payload.message_id,
+                        actor_user_id=session.user_id,
+                    )
+                # Build the canonical post-state PollDescriptor.
+                raw = self.polls_service.descriptor_from_message(msg)
+                assert raw is not None
+                poll_desc = PollDescriptor(
+                    options=[
+                        PollOptionDescriptor(text=o["text"], vote_count=o["vote_count"])
+                        for o in raw["options"]
+                    ],
+                    multiple_choice=raw["multiple_choice"],
+                    closed=raw["closed"],
+                    total_voters=raw["total_voters"],
+                )
+                conv_id = (
+                    payload.conversation_id
+                    if hasattr(payload, "conversation_id")
+                    else ""
+                )
+                update = PollUpdatedPayload(
+                    conversation_id=conv_id,
+                    message_id=msg["message_id"],
+                    poll=poll_desc,
+                )
+                # Fanout to every participant — same channel chat
+                # messages travel on, so subscribers receive one push.
+                self._fanout_to_conversation(
+                    conversation_id=conv_id,
+                    origin_session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message_type=MessageType.POLL_UPDATED,
+                    payload=update,
+                    correlation_id=f"poll_{msg['message_id']}",
+                )
+                return make_response(
+                    MessageType.POLL_UPDATED,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=update,
+                ).to_dict()
+            except ServiceError as exc:
                 return self._error_response(
                     correlation_id=correlation_id,
                     session_id=session_id,
@@ -565,6 +725,14 @@ class ServerApplication:
                 payload.history_limits,
                 payload.before_message_ids,
             )
+            # M100: layer per-user pinned/archived flags onto the descriptors
+            # the chat service produced. Done here (not in chat.py) so the
+            # chat service stays unaware of per-user view preferences.
+            pinned_set = self.conversation_flags_service.list_pinned(session.user_id)
+            archived_set = self.conversation_flags_service.list_archived(session.user_id)
+            for conv in conversations:
+                conv.pinned = conv.conversation_id in pinned_set
+                conv.archived = conv.conversation_id in archived_set
             return make_response(
                 MessageType.CONVERSATION_SYNC,
                 correlation_id=correlation_id,
@@ -583,6 +751,24 @@ class ServerApplication:
                 return limited
             try:
                 assert isinstance(payload, MessageSendRequestPayload)
+                # M98: 1-on-1 send is rejected when the recipient has the
+                # sender on their block list. Group sends are unaffected:
+                # Telegram doesn't silently drop blocked users from groups.
+                conv = self.state.conversations.get(payload.conversation_id)
+                if conv is not None and len(conv.participant_user_ids) == 2:
+                    other_id = next(
+                        (uid for uid in conv.participant_user_ids
+                         if uid != session.user_id),
+                        None,
+                    )
+                    if other_id and self.block_mute_service.is_blocked_by(
+                            other_id, session.user_id):
+                        return self._error_response(
+                            correlation_id=correlation_id,
+                            session_id=session_id,
+                            actor_user_id=session.user_id,
+                            message=ServiceError(ErrorCode.BLOCKED_BY_RECIPIENT),
+                        )
                 message_result = self.chat_service.send_message(
                     conversation_id=payload.conversation_id,
                     sender_user_id=session.user_id,
@@ -602,6 +788,10 @@ class ServerApplication:
                     sender_user_id=session.user_id,
                     body_summary=message_result.text[:80],
                 )
+                # M99: a successful send clears any draft this user had for
+                # the conversation — Telegram parity. Silent no-op if no
+                # draft exists.
+                self.drafts_service.clear(session.user_id, payload.conversation_id)
                 return make_response(
                     MessageType.MESSAGE_DELIVER,
                     correlation_id=correlation_id,
@@ -991,6 +1181,38 @@ class ServerApplication:
                     payload=descriptor,
                 ).to_dict()
             except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.CONVERSATION_ROLE_UPDATE_REQUEST:
+            try:
+                assert isinstance(payload, ConversationRoleUpdateRequestPayload)
+                descriptor = self.chat_service.set_role(
+                    conversation_id=payload.conversation_id,
+                    actor_user_id=session.user_id,
+                    target_user_id=payload.target_user_id,
+                    role=payload.role,
+                )
+                self._fanout_to_conversation(
+                    conversation_id=descriptor.conversation_id,
+                    origin_session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message_type=MessageType.CONVERSATION_UPDATED,
+                    payload=descriptor,
+                    correlation_id=f"push_role_{descriptor.conversation_id}_{payload.target_user_id}",
+                )
+                return make_response(
+                    MessageType.CONVERSATION_UPDATED,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=descriptor,
+                ).to_dict()
+            except ServiceError as exc:
                 return self._error_response(
                     correlation_id=correlation_id,
                     session_id=session_id,
@@ -1389,6 +1611,205 @@ class ServerApplication:
                         push_tokens_removed=summary["push_tokens_removed"],
                         messages_tombstoned=summary["messages_tombstoned"],
                         contacts_removed=summary["contacts_removed"],
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        # ---- M98 block + mute ----
+        if message_type == MessageType.BLOCK_USER_REQUEST:
+            try:
+                assert isinstance(payload, BlockUserRequestPayload)
+                self.block_mute_service.block(session.user_id, payload.target_user_id)
+                return make_response(
+                    MessageType.BLOCK_USER_ACK,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=BlockUserAckPayload(
+                        target_user_id=payload.target_user_id,
+                        blocked=True,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.UNBLOCK_USER_REQUEST:
+            try:
+                assert isinstance(payload, BlockUserRequestPayload)
+                self.block_mute_service.unblock(session.user_id, payload.target_user_id)
+                return make_response(
+                    MessageType.BLOCK_USER_ACK,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=BlockUserAckPayload(
+                        target_user_id=payload.target_user_id,
+                        blocked=False,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.BLOCKED_USERS_LIST_REQUEST:
+            entries = self.block_mute_service.list_blocked(session.user_id)
+            return make_response(
+                MessageType.BLOCKED_USERS_LIST_RESPONSE,
+                correlation_id=correlation_id,
+                session_id=session_id,
+                actor_user_id=session.user_id,
+                payload=BlockedUsersListResponsePayload(
+                    blocked=[
+                        BlockedUserDescriptor(
+                            user_id=e.target_user_id,
+                            blocked_at_ms=e.blocked_at_ms,
+                        )
+                        for e in entries
+                    ],
+                ),
+            ).to_dict()
+
+        if message_type == MessageType.CONVERSATION_MUTE_UPDATE_REQUEST:
+            try:
+                assert isinstance(payload, ConversationMuteUpdateRequestPayload)
+                stored = self.block_mute_service.set_mute(
+                    session.user_id, payload.conversation_id, payload.muted_until_ms,
+                )
+                return make_response(
+                    MessageType.CONVERSATION_MUTE_UPDATE_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=ConversationMuteUpdateResponsePayload(
+                        conversation_id=payload.conversation_id,
+                        muted_until_ms=stored,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.DRAFT_SAVE_REQUEST:
+            try:
+                assert isinstance(payload, DraftSaveRequestPayload)
+                record, cleared = self.drafts_service.save(
+                    session.user_id,
+                    payload.conversation_id,
+                    payload.text,
+                    reply_to_message_id=payload.reply_to_message_id,
+                )
+                return make_response(
+                    MessageType.DRAFT_SAVE_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=DraftSaveResponsePayload(
+                        draft=DraftDescriptor(
+                            conversation_id=record.conversation_id,
+                            text=record.text,
+                            reply_to_message_id=record.reply_to_message_id,
+                            updated_at_ms=record.updated_at_ms,
+                        ),
+                        cleared=cleared,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.DRAFT_LIST_REQUEST:
+            drafts = self.drafts_service.list_for_user(session.user_id)
+            return make_response(
+                MessageType.DRAFT_LIST_RESPONSE,
+                correlation_id=correlation_id,
+                session_id=session_id,
+                actor_user_id=session.user_id,
+                payload=DraftListResponsePayload(
+                    drafts=[
+                        DraftDescriptor(
+                            conversation_id=d.conversation_id,
+                            text=d.text,
+                            reply_to_message_id=d.reply_to_message_id,
+                            updated_at_ms=d.updated_at_ms,
+                        )
+                        for d in drafts
+                    ],
+                ),
+            ).to_dict()
+
+        if message_type == MessageType.DRAFT_CLEAR_REQUEST:
+            assert isinstance(payload, DraftClearRequestPayload)
+            removed = self.drafts_service.clear(session.user_id, payload.conversation_id)
+            return make_response(
+                MessageType.DRAFT_CLEAR_RESPONSE,
+                correlation_id=correlation_id,
+                session_id=session_id,
+                actor_user_id=session.user_id,
+                payload=DraftClearResponsePayload(
+                    conversation_id=payload.conversation_id,
+                    cleared=removed,
+                ),
+            ).to_dict()
+
+        if message_type == MessageType.CONVERSATION_PIN_TOGGLE_REQUEST:
+            try:
+                assert isinstance(payload, ConversationPinToggleRequestPayload)
+                stored = self.conversation_flags_service.set_pinned(
+                    session.user_id, payload.conversation_id, payload.pinned,
+                )
+                return make_response(
+                    MessageType.CONVERSATION_PIN_TOGGLE_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=ConversationPinToggleResponsePayload(
+                        conversation_id=payload.conversation_id, pinned=stored,
+                    ),
+                ).to_dict()
+            except ServiceError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.CONVERSATION_ARCHIVE_TOGGLE_REQUEST:
+            try:
+                assert isinstance(payload, ConversationArchiveToggleRequestPayload)
+                stored = self.conversation_flags_service.set_archived(
+                    session.user_id, payload.conversation_id, payload.archived,
+                )
+                return make_response(
+                    MessageType.CONVERSATION_ARCHIVE_TOGGLE_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=ConversationArchiveToggleResponsePayload(
+                        conversation_id=payload.conversation_id, archived=stored,
                     ),
                 ).to_dict()
             except ServiceError as exc:

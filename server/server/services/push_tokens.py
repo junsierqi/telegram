@@ -18,6 +18,7 @@ delivery worker would drain.
 """
 from __future__ import annotations
 
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Iterable
@@ -49,6 +50,9 @@ class PushTokenService:
         # In-memory mock queue for offline deliveries. A future FCM/APNs
         # worker drains this list. Tests reach in via drain_pending().
         self.pending_deliveries: list[PendingDelivery] = []
+        # Two threads concurrently dispatching MESSAGE_SEND (one drained
+        # via worker, another fresh enqueue) would otherwise lose entries.
+        self._lock = threading.Lock()
 
     # ---- registration ----
 
@@ -102,25 +106,30 @@ class PushTokenService:
         """
         enqueued: list[PendingDelivery] = []
         now_ms = int(self._clock() * 1000)
-        for record in self.tokens_for_user(user_id):
-            entry = PendingDelivery(
-                user_id=record.user_id,
-                device_id=record.device_id,
-                platform=record.platform,
-                token=record.token,
-                kind=kind,
-                body_summary=body_summary,
-                enqueued_at_ms=now_ms,
-            )
-            self.pending_deliveries.append(entry)
-            enqueued.append(entry)
+        records = self.tokens_for_user(user_id)
+        with self._lock:
+            for record in records:
+                entry = PendingDelivery(
+                    user_id=record.user_id,
+                    device_id=record.device_id,
+                    platform=record.platform,
+                    token=record.token,
+                    kind=kind,
+                    body_summary=body_summary,
+                    enqueued_at_ms=now_ms,
+                )
+                self.pending_deliveries.append(entry)
+                enqueued.append(entry)
         return enqueued
 
     def drain_pending(self) -> list[PendingDelivery]:
         """Return + clear all pending entries. A real FCM/APNs worker would
-        call this on a tick and then POST to the platform."""
-        out = self.pending_deliveries
-        self.pending_deliveries = []
+        call this on a tick and then POST to the platform. Locked so an
+        enqueue racing with the drain can't lose entries between the
+        list-read and the list-clear."""
+        with self._lock:
+            out = self.pending_deliveries
+            self.pending_deliveries = []
         return out
 
     def describe(self) -> str:

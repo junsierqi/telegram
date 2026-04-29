@@ -24,6 +24,7 @@ import hashlib
 import hmac
 import secrets
 import struct
+import threading
 import time
 import urllib.parse
 from typing import Callable, Optional
@@ -97,6 +98,11 @@ class TwoFAService:
         self._clock = clock or time.time
         # user_id -> pending_secret_b32 (enrollment in flight, not yet flipped on)
         self._pending: dict[str, str] = {}
+        # Same threading rationale as PhoneOtpService: ThreadedTCPServer can
+        # run two dispatch calls in parallel, so a confirm racing against a
+        # second confirm could pop _pending after the first read and the
+        # second sees None. One lock guards every mutation here.
+        self._lock = threading.Lock()
 
     def is_enabled(self, user_id: str) -> bool:
         user = self._state.users.get(user_id)
@@ -111,23 +117,34 @@ class TwoFAService:
         if user.two_fa_secret:
             raise ServiceError(ErrorCode.TWO_FA_ALREADY_ENABLED)
         secret_b32 = _generate_secret_b32()
-        self._pending[user_id] = secret_b32
+        with self._lock:
+            self._pending[user_id] = secret_b32
         uri = provisioning_uri(user.username, secret_b32)
         return secret_b32, uri
 
     def confirm_enable(self, user_id: str, code: str) -> UserRecord:
-        secret_b32 = self._pending.get(user_id)
-        if secret_b32 is None:
-            raise ServiceError(ErrorCode.TWO_FA_NOT_ENABLED)
-        if not verify_totp(secret_b32, code, at=self._clock()):
-            raise ServiceError(ErrorCode.INVALID_TWO_FA_CODE)
-        user = self._state.users.get(user_id)
-        if user is None:
-            raise ServiceError(ErrorCode.UNKNOWN_USER)
-        user.two_fa_secret = secret_b32
-        self._pending.pop(user_id, None)
+        with self._lock:
+            secret_b32 = self._pending.get(user_id)
+            if secret_b32 is None:
+                raise ServiceError(ErrorCode.TWO_FA_NOT_ENABLED)
+            if not verify_totp(secret_b32, code, at=self._clock()):
+                raise ServiceError(ErrorCode.INVALID_TWO_FA_CODE)
+            user = self._state.users.get(user_id)
+            if user is None:
+                raise ServiceError(ErrorCode.UNKNOWN_USER)
+            user.two_fa_secret = secret_b32
+            self._pending.pop(user_id, None)
         self._state.save_runtime_state()
         return user
+
+    def discard_pending_enrollment(self, user_id: str) -> None:
+        """Called by the account lifecycle service when a user is being
+        deleted to release any pending 2FA enrollment that never confirmed.
+        Without this, the secret would dangle forever in _pending and (if
+        a future user_id ever recycled the same string) would be picked up
+        on the next confirm_enable. Safe to call when no enrollment exists."""
+        with self._lock:
+            self._pending.pop(user_id, None)
 
     # ---- runtime use ----
 

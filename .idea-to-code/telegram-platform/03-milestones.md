@@ -3,8 +3,8 @@
 ## Current Phase
 
 - Status: in_progress
-- Current focus: Apple paths shipped under audit-hardened guards; Windows/Linux/Android proven byte-equivalent before vs after Apple addition.
-- Next gate: Wait for upstream CI macOS verification
+- Current focus: chat completeness gap-fill
+- Next gate: Verification
 
 ## Milestone History
 
@@ -774,4 +774,60 @@
 - Verified: validate_apple_build_path.py 9/9 (was 8); validate_ci_workflow.py 7/7; full sweep 51/51 in-process. Triple-platform reconfigure-and-build regression repeated POST review: Windows MSVC + Qt 6.11 8/8 targets clean + json_parser 9/9 + store 20/20; WSL Ubuntu 24.04 + Qt 6.4 8/8 targets clean + same C++ tests 9/9 + 20/20; Android NDK 30 + Qt 6.11 for Android full reconfigure + apk = 20,873,294 bytes (BYTE-IDENTICAL size to both pre-review build AND pre-Apple build, definitive proof the new local-boolean Apple guards stay invisible to NDK).
 - Next: Pick next direction; macOS-build runs on first push to GitHub
 - Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## Concurrency + leak fixes (M97) (gate: pass)
+
+- Timestamp: 2026-04-28T16:24:12+00:00
+- Delivered: Five M97 fixes from the post-Apple audit. (1) PhoneOtpService gets a threading.Lock guarding request_code (with opportunistic purge of expired entries) AND verify_code (atomic attempts increment + secret consume) — eliminates over-attempt-cap on parallel verify and bounds _codes growth at active-flow size. (2) TwoFAService gets a threading.Lock guarding _pending mutations (begin_enable + confirm_enable + new discard_pending_enrollment hook). (3) PushTokenService gets a threading.Lock guarding pending_deliveries appends (notify_offline_recipient) AND drain (drain_pending) — no lost entries when worker drains while message_send enqueues. (4) AccountLifecycleService.delete now optionally takes a TwoFAService and calls discard_pending_enrollment(user_id) before dropping the user — closes the leak where an unconfirmed 2FA secret would dangle in _pending after delete. (5) ServerApplication wires the new dependency. New scripts/validate_concurrency_fixes.py covers 5 scenarios: 8 parallel verify-with-wrong-code never overshoots MAX_VERIFY_ATTEMPTS and accounts for every attempt; request_code purges expired entries; parallel confirm_enable produces consistent final user.two_fa_secret state with no torn writes; 200 enqueue/drain race produces 200 drained (zero lost); account delete leaves _pending empty for the deleted user_id.
+- Verified: validate_concurrency_fixes.py 5/5; validate_phone_otp 5/5; validate_two_fa 4/4; validate_push_tokens 6/6; validate_push_dispatch 5/5; validate_account_lifecycle 5/5; full sweep 52/52 in-process.
+- Next: M98 block user + per-chat mute
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
+
+## Block user + per-conversation mute (M98) (gate: pass)
+
+- Timestamp: 2026-04-28T16:35:37+00:00
+- Delivered: Two related but independent surfaces. Block: 5 new MessageType (BLOCK_USER_REQUEST/UNBLOCK_USER_REQUEST/BLOCKED_USERS_LIST_REQUEST/_RESPONSE/BLOCK_USER_ACK), 4 typed payloads, 3 ErrorCodes (BLOCKED_BY_RECIPIENT/ALREADY_BLOCKED/NOT_BLOCKED). Per-(blocker, target) entries stored in state.blocked_users. ChatService.send_message dispatch path now checks: 1:1 conversation (exactly 2 participants) where the OTHER participant has the sender on their block list -> typed BLOCKED_BY_RECIPIENT, no message persisted, no fan-out. Group sends (>=3 members) unaffected — Telegram parity. Mute: 2 new MessageType (CONVERSATION_MUTE_UPDATE_REQUEST/_RESPONSE) + typed payloads. Per-(user, conversation) entries in state.conversation_mutes; muted_until_ms semantics 0=unmuted, -1=forever, N=ms-epoch with auto-clear when expired. New server/server/services/block_mute.py (threading.Lock, BlockMuteService.block/unblock/list_blocked/is_blocked_by/set_mute/get_mute). state.py adds BlockedUserEntry + ConversationMuteEntry + dict storage. ServerApplication wires the service + 4 dispatch branches + the 1:1 send-time block check. New scripts/validate_block_mute.py covers 6 scenarios: block round-trip, ALREADY_BLOCKED + NOT_BLOCKED idempotency, 1:1 DM rejected with BLOCKED_BY_RECIPIENT (no persistence), 3-member group send unaffected by 1:1 block, mute -1/future/0 round-trip, mute on unknown conversation rejected.
+- Verified: validate_block_mute.py 6/6; full sweep 53/53 in-process; bundle ok 72 reqs.
+- Next: M99 server-side drafts
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
+
+## M99 - server-side drafts (gate: pass)
+
+- Timestamp: 2026-04-28T16:44:56+00:00
+- Delivered: DraftsService + 6 protocol types + 3 dispatch branches; auto-clear on empty text + MESSAGE_SEND; participant validation
+- Verified: scripts/validate_drafts.py 7/7; full sweep 54/54 (4 SKIP_EXTERNAL)
+- Next: M100 - pinned + archived chats
+- Covers: REQ-D2
+
+## M100 - pinned + archived chats (gate: pass)
+
+- Timestamp: 2026-04-28T16:50:23+00:00
+- Delivered: ConversationFlagsService + 4 protocol types + 2 dispatch branches; conversation_sync injects per-user pinned/archived
+- Verified: scripts/validate_pin_archive.py 6/6; full sweep 55/55 (4 SKIP_EXTERNAL)
+- Next: M101 - profile + group avatars
+- Covers: REQ-D3
+
+## M101 - profile + group avatars (gate: pass)
+
+- Timestamp: 2026-04-28T16:55:38+00:00
+- Delivered: avatar_attachment_id on UserRecord/ConversationRecord; 4 protocol types; 2 dispatch branches; profile_response + conversation_sync surface the pointer
+- Verified: scripts/validate_avatars.py 4/4; full sweep 56/56 (4 SKIP_EXTERNAL)
+- Next: M102 - polls
+- Covers: REQ-D4
+
+## M102 - polls (gate: pass)
+
+- Timestamp: 2026-04-28T17:02:46+00:00
+- Delivered: PollsService + 4 protocol types + 5 error codes; messages can carry poll dict; conversation_sync surfaces poll tallies; POLL_UPDATED fanout on create/vote/close
+- Verified: scripts/validate_polls.py 10/10; full sweep 57/57 (4 SKIP_EXTERNAL)
+- Next: M103 - group permissions + admin roles
+- Covers: REQ-D5
+
+## M103 - group permissions + admin roles (gate: pass)
+
+- Timestamp: 2026-04-28T17:14:06+00:00
+- Delivered: ConversationRecord.roles + 1 protocol type + 3 error codes; chat.set_role/add_participant/remove_participant gated; ConversationDescriptor.roles surfaced; backwards compat for legacy 1:1
+- Verified: scripts/validate_group_roles.py 10/10; full sweep 58/58 (4 SKIP_EXTERNAL, no regression in incremental_sync)
+- Next: End of immediate ROI batch — review for next priorities
+- Covers: REQ-D6
 

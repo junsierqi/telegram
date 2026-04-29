@@ -400,6 +400,9 @@ class ChatService:
             messages=[],
             title=title,
         )
+        # M103: creator becomes the owner. Other participants are
+        # implicit members (no entry until promoted).
+        record.roles[creator_user_id] = "owner"
         self._state.conversations[conversation_id] = record
         self._state.save_runtime_state()
         return self._descriptor(record)
@@ -408,6 +411,14 @@ class ChatService:
         self, *, conversation_id: str, actor_user_id: str, new_user_id: str
     ) -> ConversationDescriptor:
         conversation = self._require_participant(conversation_id, actor_user_id)
+        # M103: only admins/owner may add members. Legacy/seeded
+        # conversations with an empty roles map are exempt — gating
+        # only applies once a conversation has been explicitly stamped
+        # with roles via create_conversation. 1:1 conversations also
+        # skip gating: no concept of admin makes sense there.
+        if conversation.roles and len(conversation.participant_user_ids) > 2 \
+                and self._role_of(conversation, actor_user_id) not in ("owner", "admin"):
+            raise ServiceError(ErrorCode.CONVERSATION_PERMISSION_DENIED)
         if new_user_id not in self._state.users:
             raise ServiceError(ErrorCode.UNKNOWN_USER)
         if new_user_id in conversation.participant_user_ids:
@@ -423,10 +434,55 @@ class ChatService:
         conversation = self._require_participant(conversation_id, actor_user_id)
         if target_user_id not in conversation.participant_user_ids:
             raise ServiceError(ErrorCode.CONVERSATION_PARTICIPANT_NOT_PRESENT)
+        # M103: gate remove on role for groups. Self-removal (leaving)
+        # is always allowed. Owner can never be removed via this RPC —
+        # they must transfer ownership first (out of scope for M103).
+        # Legacy/seeded conversations (empty roles map) skip gating.
+        if conversation.roles and len(conversation.participant_user_ids) > 2 \
+                and target_user_id != actor_user_id:
+            actor_role = self._role_of(conversation, actor_user_id)
+            target_role = self._role_of(conversation, target_user_id)
+            if actor_role not in ("owner", "admin"):
+                raise ServiceError(ErrorCode.CONVERSATION_PERMISSION_DENIED)
+            if target_role == "owner":
+                raise ServiceError(ErrorCode.CONVERSATION_PERMISSION_DENIED)
+            # Admins can't kick other admins; only the owner can.
+            if target_role == "admin" and actor_role != "owner":
+                raise ServiceError(ErrorCode.CONVERSATION_PERMISSION_DENIED)
         conversation.participant_user_ids.remove(target_user_id)
+        # Drop the role entry too — it's meaningless once they're gone.
+        conversation.roles.pop(target_user_id, None)
         self._record_change(conversation, kind="conversation_updated")
         self._state.save_runtime_state()
         return self._descriptor(conversation)
+
+    # ---- M103 role management ---------------------------------------
+
+    _VALID_ROLES = ("admin", "member")
+
+    def set_role(
+        self, *, conversation_id: str, actor_user_id: str,
+        target_user_id: str, role: str,
+    ) -> ConversationDescriptor:
+        conversation = self._require_participant(conversation_id, actor_user_id)
+        if role not in self._VALID_ROLES:
+            raise ServiceError(ErrorCode.CONVERSATION_INVALID_ROLE)
+        if target_user_id not in conversation.participant_user_ids:
+            raise ServiceError(ErrorCode.CONVERSATION_PARTICIPANT_NOT_PRESENT)
+        if self._role_of(conversation, actor_user_id) != "owner":
+            raise ServiceError(ErrorCode.CONVERSATION_PERMISSION_DENIED)
+        if self._role_of(conversation, target_user_id) == "owner":
+            raise ServiceError(ErrorCode.CONVERSATION_OWNER_ROLE_IMMUTABLE)
+        if role == "member":
+            conversation.roles.pop(target_user_id, None)
+        else:
+            conversation.roles[target_user_id] = role
+        self._record_change(conversation, kind="conversation_updated")
+        self._state.save_runtime_state()
+        return self._descriptor(conversation)
+
+    def _role_of(self, conversation: ConversationRecord, user_id: str) -> str:
+        return conversation.roles.get(user_id, "member")
 
     def edit_message(
         self,
@@ -741,6 +797,7 @@ class ChatService:
                     forwarded_from_sender_user_id=str(message.get("forwarded_from_sender_user_id", "")),
                     reaction_summary=self._reaction_summary(message),
                     pinned=bool(message.get("pinned", False)),
+                    poll=self._poll_descriptor(message),
                 )
                 for message in source_messages
             ],
@@ -767,6 +824,8 @@ class ChatService:
             ],
             next_before_message_id=next_before_message_id,
             has_more=has_more,
+            avatar_attachment_id=conversation.avatar_attachment_id,
+            roles=dict(conversation.roles),
         )
 
     def _message_history_page(
@@ -809,6 +868,27 @@ class ChatService:
                 continue
             parts.append(f"{emoji}:{len(users)}")
         return ",".join(parts)
+
+    def _poll_descriptor(self, message: dict):
+        # Imports here to avoid a top-of-module cycle: protocol imports
+        # state/chat for some types and we don't need PollsService at
+        # parse-time. Returns a PollDescriptor dataclass or None for
+        # non-poll messages so the field stays None on the wire.
+        from ..protocol import PollDescriptor, PollOptionDescriptor
+        from .polls import PollsService
+
+        raw = PollsService.descriptor_from_message(message)
+        if raw is None:
+            return None
+        return PollDescriptor(
+            options=[
+                PollOptionDescriptor(text=o["text"], vote_count=o["vote_count"])
+                for o in raw["options"]
+            ],
+            multiple_choice=raw["multiple_choice"],
+            closed=raw["closed"],
+            total_voters=raw["total_voters"],
+        )
 
     def _messages_after(
         self, conversation: ConversationRecord, cursor_message_id: str

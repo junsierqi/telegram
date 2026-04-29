@@ -572,3 +572,45 @@
 - Verified: validate_apple_build_path.py 9/9 (was 8); validate_ci_workflow.py 7/7; full sweep 51/51 in-process. Triple-platform reconfigure-and-build regression repeated POST review: Windows MSVC + Qt 6.11 8/8 targets clean + json_parser 9/9 + store 20/20; WSL Ubuntu 24.04 + Qt 6.4 8/8 targets clean + same C++ tests 9/9 + 20/20; Android NDK 30 + Qt 6.11 for Android full reconfigure + apk = 20,873,294 bytes (BYTE-IDENTICAL size to both pre-review build AND pre-Apple build, definitive proof the new local-boolean Apple guards stay invisible to NDK).
 - Covers: REQ-VALIDATION, REQ-CHAT-CORE
 
+## Concurrency + leak fixes (M97) (gate: pass)
+
+- Timestamp: 2026-04-28T16:24:12+00:00
+- Verified: validate_concurrency_fixes.py 5/5; validate_phone_otp 5/5; validate_two_fa 4/4; validate_push_tokens 6/6; validate_push_dispatch 5/5; validate_account_lifecycle 5/5; full sweep 52/52 in-process.
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
+
+## Block user + per-conversation mute (M98) (gate: pass)
+
+- Timestamp: 2026-04-28T16:35:37+00:00
+- Verified: validate_block_mute.py 6/6; full sweep 53/53 in-process; bundle ok 72 reqs.
+- Covers: REQ-CHAT-CORE, REQ-VALIDATION
+
+## M99 - server-side drafts (gate: pass)
+
+- Timestamp: 2026-04-28T16:44:56+00:00
+- Verified: scripts/validate_drafts.py 7/7; full sweep 54/54 (4 SKIP_EXTERNAL)
+- Covers: REQ-D2
+
+## M100 - pinned + archived chats (gate: pass)
+
+- Timestamp: 2026-04-28T16:50:23+00:00
+- Verified: scripts/validate_pin_archive.py 6/6; full sweep 55/55 (4 SKIP_EXTERNAL)
+- Covers: REQ-D3
+
+## M101 - profile + group avatars (gate: pass)
+
+- Timestamp: 2026-04-28T16:55:38+00:00
+- Verified: scripts/validate_avatars.py 4/4; full sweep 56/56 (4 SKIP_EXTERNAL)
+- Covers: REQ-D4
+
+## M102 - polls (gate: pass)
+
+- Timestamp: 2026-04-28T17:02:46+00:00
+- Verified: scripts/validate_polls.py 10/10; full sweep 57/57 (4 SKIP_EXTERNAL)
+- Covers: REQ-D5
+
+## M103 - group permissions + admin roles (gate: pass)
+
+- Timestamp: 2026-04-28T17:14:06+00:00
+- Verified: scripts/validate_group_roles.py 10/10; full sweep 58/58 (4 SKIP_EXTERNAL, no regression in incremental_sync)
+- Covers: REQ-D6
+

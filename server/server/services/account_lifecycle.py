@@ -24,7 +24,7 @@ from typing import Callable, Optional
 from ..crypto import verify_password
 from ..protocol import ErrorCode, ServiceError
 from ..state import InMemoryState
-from .two_fa import verify_totp
+from .two_fa import TwoFAService, verify_totp
 
 
 TOMBSTONE_USER_ID = "u_deleted"
@@ -37,9 +37,14 @@ class AccountLifecycleService:
         state: InMemoryState,
         *,
         clock: Callable[[], float] | None = None,
+        two_fa_service: Optional[TwoFAService] = None,
     ) -> None:
         self._state = state
         self._clock = clock or time.time
+        # Optional dependency on TwoFAService so account delete can flush
+        # any pending 2FA enrollment that never confirmed (M97 leak fix).
+        # Optional because legacy tests construct the service standalone.
+        self._two_fa = two_fa_service
 
     # ---- export ----
 
@@ -153,6 +158,11 @@ class AccountLifecycleService:
                     msg["text"] = ""
                     msg["deleted"] = True
                     messages_tombstoned += 1
+
+        # Drop any in-flight 2FA enrollment for this user_id so the
+        # secret doesn't dangle in TwoFAService._pending forever.
+        if self._two_fa is not None:
+            self._two_fa.discard_pending_enrollment(user_id)
 
         # Finally drop the user record itself.
         self._state.users.pop(user_id, None)

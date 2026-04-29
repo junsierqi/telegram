@@ -29,6 +29,11 @@ class UserRecord:
     # this base32-encoded secret (RFC 6238). Persisted alongside the user
     # so password + secret travel together.
     two_fa_secret: str = ""
+    # M101: profile avatar. Empty string = default/no avatar. The actual
+    # bytes live in the chunked-upload attachment store; this field just
+    # points at whichever attachment the user picked. Clients fetch
+    # bytes via the existing ATTACHMENT_FETCH RPC.
+    avatar_attachment_id: str = ""
 
 
 @dataclass(slots=True)
@@ -60,6 +65,15 @@ class ConversationRecord:
     read_markers: dict[str, str] = field(default_factory=dict)
     change_seq: int = 0
     changes: list[dict[str, object]] = field(default_factory=list)
+    # M101: group avatar. Empty string = no custom avatar. Same model as
+    # UserRecord.avatar_attachment_id — points at chunk-uploaded bytes.
+    avatar_attachment_id: str = ""
+    # M103: per-conversation roles. user_id -> "owner"|"admin"|"member".
+    # The creator is the sole owner. Owners may promote/demote anyone;
+    # admins may add/remove members but not other admins. Missing entries
+    # default to "member" for backwards compatibility with old
+    # conversations created before M103 (and seeded fixtures).
+    roles: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -84,6 +98,39 @@ class AttachmentRecord:
     size_bytes: int
     content_b64: str = ""
     storage_key: str = ""
+
+
+@dataclass(slots=True)
+class BlockedUserEntry:
+    """M98: blocker_user_id put target_user_id on their block list at this
+    timestamp. Stored as a flat list rather than a set so iteration order
+    and JSON round-trip are deterministic."""
+    target_user_id: str
+    blocked_at_ms: int
+
+
+@dataclass(slots=True)
+class ConversationMuteEntry:
+    """M98: per-(user, conversation) mute state.
+       muted_until_ms == 0  -> not muted
+       muted_until_ms == -1 -> muted forever (until explicit unmute)
+       muted_until_ms == N  -> muted until wall-clock ms epoch N
+    """
+    user_id: str
+    conversation_id: str
+    muted_until_ms: int
+
+
+@dataclass(slots=True)
+class DraftRecord:
+    """M99: per-(user, conversation) unsent message text. Updated on every
+    DRAFT_SAVE; cleared on DRAFT_CLEAR or when the user sends the message
+    via MESSAGE_SEND."""
+    user_id: str
+    conversation_id: str
+    text: str
+    reply_to_message_id: str
+    updated_at_ms: int
 
 
 @dataclass(slots=True)
@@ -159,6 +206,20 @@ class InMemoryState:
         # to be O(N) anyway. Not persisted to JSON/SQLite/PG yet — see M84
         # checkpoint and PA-008 in 08-atlas-task-library.md.
         self.push_tokens: list[PushTokenRecord] = []
+        # M98: per-(blocker, target) block list + per-(user, conversation)
+        # mute state. Held in-memory; serialised to disk only when JSON
+        # state-file is enabled (covered by save_runtime_state's defensive
+        # JSON path); SQLite/PG persistence can come later.
+        self.blocked_users: dict[str, list[BlockedUserEntry]] = {}
+        self.conversation_mutes: dict[tuple[str, str], ConversationMuteEntry] = {}
+        # M99: per-(user, conversation) drafts.
+        self.drafts: dict[tuple[str, str], DraftRecord] = {}
+        # M100: per-user pinned/archived flag sets keyed by user_id.
+        # Held as set[str] of conversation_ids — sets give O(1) toggle
+        # and natural dedup. Per-user, so bob pinning conv_alice_bob
+        # does NOT pin alice's view of the same conversation.
+        self.pinned_conversations: dict[str, set[str]] = {}
+        self.archived_conversations: dict[str, set[str]] = {}
         self._load_runtime_state()
 
     @property
