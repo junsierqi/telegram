@@ -15,11 +15,20 @@ import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-SMOKE_CANDIDATES = [
-    REPO / "build-verify" / "client" / "src" / "Debug" / "remote_session_smoke.exe",
-    REPO / "build-codex" / "client" / "src" / "Debug" / "remote_session_smoke.exe",
-    REPO / "build" / "client" / "src" / "Debug" / "remote_session_smoke.exe",
-]
+def _binary_candidates(stem: str) -> list[Path]:
+    """Mirror scripts/_sweep_validators.py:_has_built_binary so the
+    binary the harness already detected isn't declared missing here.
+    Covers Windows (Debug/Release + .exe) AND POSIX (no subdir, no .exe)."""
+    candidates: list[Path] = []
+    for build in ("build-verify", "build-codex", "build", "build-macos",
+                  "build-linux", "build-wsl", "build-android"):
+        for cfg in ("", "Debug", "Release"):
+            for ext in ("", ".exe"):
+                candidates.append(REPO / build / "client" / "src" / cfg / f"{stem}{ext}")
+    return candidates
+
+
+SMOKE_CANDIDATES = _binary_candidates("remote_session_smoke")
 
 
 def _free_port() -> int:

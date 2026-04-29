@@ -141,11 +141,16 @@ if(Qt6_FOUND)
         endif()
     endif()
 
-    # M113: macOS analogue of windeployqt — embed the Qt frameworks +
+    # M113 / M118: macOS analogue of windeployqt — embed the Qt frameworks +
     # platform plugins inside app_desktop.app so distribution to non-dev
-    # Macs doesn't require Homebrew Qt staying at the same path. Skip with
-    # -DTELEGRAM_LIKE_SKIP_MACDEPLOYQT=ON for CI runs that already have
-    # Qt installed and want to keep build-link parity.
+    # Macs doesn't require Homebrew Qt staying at the same path. Wrapped in
+    # `sh -c "... || true"` so missing optional Qt deps on the host (QtPdf,
+    # QtSvg, QtVirtualKeyboard, libwebp, libsharpyuv, libbrotlicommon when
+    # Homebrew installs only `qt` without `qt6-svg` / `webp` / etc.) don't
+    # fail the build — the bundle is still produced and runnable when Qt is
+    # on the runtime path. Skip the step entirely with
+    # -DTELEGRAM_LIKE_SKIP_MACDEPLOYQT=ON for CI runs that prefer the
+    # explicit "Qt stays on PATH" contract.
     if(APPLE AND NOT TELEGRAM_LIKE_TARGET_IS_IOS AND NOT TELEGRAM_LIKE_SKIP_MACDEPLOYQT)
         find_program(TELEGRAM_LIKE_MACDEPLOYQT macdeployqt
             HINTS "${Qt6_DIR}/../../../bin"
@@ -153,10 +158,9 @@ if(Qt6_FOUND)
         )
         if(TELEGRAM_LIKE_MACDEPLOYQT)
             add_custom_command(TARGET app_desktop POST_BUILD
-                COMMAND "${TELEGRAM_LIKE_MACDEPLOYQT}"
-                        "$<TARGET_BUNDLE_DIR:app_desktop>"
+                COMMAND sh -c
+                    "'${TELEGRAM_LIKE_MACDEPLOYQT}' '$<TARGET_BUNDLE_DIR:app_desktop>' || echo '[telegram-like] WARN: macdeployqt failed for app_desktop.app -- bundle will need Qt on PATH'"
                 COMMENT "Embedding Qt frameworks into app_desktop.app via macdeployqt"
-                VERBATIM
             )
         else()
             message(STATUS "macdeployqt not found; app_desktop.app will require Qt on the runtime path")
@@ -257,15 +261,17 @@ if(Qt6_FOUND)
             )
         endif()
 
-        # M113: macOS bundle for app_mobile too — runs as a desktop preview.
+        # M113 / M118: macOS bundle for app_mobile too — runs as a desktop
+        # preview. Same non-fatal sh wrapper as app_desktop. Note the
+        # -qmldir= form is a SINGLE arg (no space, no extra quotes around
+        # the value) so qmlimportscanner doesn't receive a literal
+        # `"path"` with embedded quotes.
         if(APPLE AND NOT TELEGRAM_LIKE_TARGET_IS_IOS AND NOT TELEGRAM_LIKE_SKIP_MACDEPLOYQT
                 AND TELEGRAM_LIKE_MACDEPLOYQT)
             add_custom_command(TARGET app_mobile POST_BUILD
-                COMMAND "${TELEGRAM_LIKE_MACDEPLOYQT}"
-                        "$<TARGET_BUNDLE_DIR:app_mobile>"
-                        -qmldir="${CMAKE_CURRENT_SOURCE_DIR}/app_mobile/qml"
+                COMMAND sh -c
+                    "'${TELEGRAM_LIKE_MACDEPLOYQT}' '$<TARGET_BUNDLE_DIR:app_mobile>' '-qmldir=${CMAKE_CURRENT_SOURCE_DIR}/app_mobile/qml' || echo '[telegram-like] WARN: macdeployqt failed for app_mobile.app -- bundle will need Qt on PATH'"
                 COMMENT "Embedding Qt Quick runtime into app_mobile.app via macdeployqt"
-                VERBATIM
             )
         endif()
     else()

@@ -3,7 +3,7 @@
 ## Current Phase
 
 - Status: in_progress
-- Current focus: release-readiness — production deployment
+- Current focus: release-readiness — CI hardening
 - Next gate: User direction
 
 ## Milestone History
@@ -942,4 +942,12 @@
 - Verified: scripts/validate_auth_cache.py 9/9 on Windows + WSL Linux: no-cache regression, login + register write-through, cache hit short-circuits state lookup (proven by clearing state.sessions and confirming resolve still returns the session), TTL expiry double-evicts, unknown session invalidates, transport-down fallback, cache TTL default 60s when session_ttl=0, ServerApplication kwarg propagation. Full sweep regression: 68 passed | 0 failed | 4 SKIP_EXTERNAL.
 - Next: Optional: cross-service touch-fanout (PresenceService.touch refreshes auth cache too) for tighter horizontal-scale staleness. Or档2 asyncio rewrite when concurrency demands it.
 - Covers: REQ-CHAT-CORE, REQ-PERSISTENCE
+
+## M118 - CI hardening: macdeployqt non-fatal + cpp validator POSIX paths (gate: pass)
+
+- Timestamp: 2026-04-29T05:14:46+00:00
+- Delivered: Three real bugs surfaced by GitHub Actions CI run: (1) M113 macdeployqt POST_BUILD passed -qmldir="..." with literal embedded quotes, qmlimportscanner received a path wrapped in extra quotes and failed; (2) Homebrew Qt on the runner doesn't include QtPdf/QtSvg/QtVirtualKeyboard/libwebp/libsharpyuv/libbrotlicommon, macdeployqt couldn't resolve those rpaths and failed the entire build (the .app was actually produced fine, only embedding failed); (3) validate_cpp_chat_e2e.py, validate_cpp_remote_session.py, validate_cpp_tls_client.py only listed Windows-style binary paths (build-{verify,codex,}/client/src/Debug/<stem>.exe) — sweep harness's _has_built_binary glob saw the macOS/Linux binaries and ran the validators, which then printed [FAIL] not built. Fix: (1) use single-token "-qmldir=PATH" form with no embedded quotes, (2) wrap macdeployqt invocation in sh -c '... || echo WARN...' so missing optional deps emit a warning instead of failing the build, (3) add shared _binary_candidates(stem) helper to the 3 cpp validators that enumerates the same path tree the sweep harness searches (build-{verify,codex,,macos,linux,wsl,android}/client/src/{,Debug,Release}/<stem>{,.exe}).
+- Verified: Windows: 3 fixed cpp validators 3/3 + 9/9 + 2/2; full sweep 68 passed | 0 failed | 4 SKIP_EXTERNAL. WSL Linux: same 3 cpp validators 3/3 + 9/9 + 2/2 (find binaries at build-wsl/client/src/<stem>). validate_macos_scaffold.py still 5/5 (the ${TELEGRAM_LIKE_MACDEPLOYQT} variable expansion that the static check looks for survives inside the new sh -c wrapper).
+- Next: Optional: M119 update GitHub Actions workflow to make the macOS build pass DTELEGRAM_LIKE_SKIP_MACDEPLOYQT=ON for explicit Qt-on-PATH builds, or install QtPdf/QtSvg/etc. via Homebrew so macdeployqt can succeed end-to-end.
+- Covers: REQ-VALIDATION
 

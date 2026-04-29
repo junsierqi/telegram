@@ -698,3 +698,9 @@
 - Verified: scripts/validate_auth_cache.py 9/9 on Windows + WSL Linux: no-cache regression, login + register write-through, cache hit short-circuits state lookup (proven by clearing state.sessions and confirming resolve still returns the session), TTL expiry double-evicts, unknown session invalidates, transport-down fallback, cache TTL default 60s when session_ttl=0, ServerApplication kwarg propagation. Full sweep regression: 68 passed | 0 failed | 4 SKIP_EXTERNAL.
 - Covers: REQ-CHAT-CORE, REQ-PERSISTENCE
 
+## M118 - CI hardening: macdeployqt non-fatal + cpp validator POSIX paths (gate: pass)
+
+- Timestamp: 2026-04-29T05:14:46+00:00
+- Verified: Windows: 3 fixed cpp validators 3/3 + 9/9 + 2/2; full sweep 68 passed | 0 failed | 4 SKIP_EXTERNAL. WSL Linux: same 3 cpp validators 3/3 + 9/9 + 2/2 (find binaries at build-wsl/client/src/<stem>). validate_macos_scaffold.py still 5/5 (the ${TELEGRAM_LIKE_MACDEPLOYQT} variable expansion that the static check looks for survives inside the new sh -c wrapper).
+- Covers: REQ-VALIDATION
+
