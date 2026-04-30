@@ -49,6 +49,17 @@ public:
     Q_INVOKABLE QVariantList conversationList() const;
     Q_INVOKABLE QVariantList selectedMessages() const;
 
+    // M143: mobile parity with desktop's message-action context menu.
+    // Each method dispatches the existing transport RPC on a worker
+    // thread and re-emits storeChanged so QML re-pulls selectedMessages.
+    Q_INVOKABLE void replyMessage(const QString& targetMessageId, const QString& text);
+    Q_INVOKABLE void forwardMessage(const QString& sourceMessageId,
+                                    const QString& destinationConversationId);
+    Q_INVOKABLE void toggleReaction(const QString& messageId, const QString& emoji);
+    Q_INVOKABLE void pinMessage(const QString& messageId, bool pinned);
+    Q_INVOKABLE void editMessage(const QString& messageId, const QString& newText);
+    Q_INVOKABLE void deleteMessage(const QString& messageId);
+
     // M120: profile + contacts + devices RPCs (Q_INVOKABLE; results arrive
     // via the corresponding *Ready signals so QML can rebind ListView models).
     Q_INVOKABLE void refreshProfile();

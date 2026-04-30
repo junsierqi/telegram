@@ -1,7 +1,18 @@
+#include "app_desktop/bubble_list_view.h"
 #include "app_desktop/design_tokens.h"
 #include "app_desktop/desktop_chat_store.h"
+#include "app_desktop/typing_indicator.h"
 #include "transport/control_plane_client.h"
 
+#include <QDateTime>
+#include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QPropertyAnimation>
+#include <QSet>
+#include <QTimer>
+
+#include <QAction>
 #include <QApplication>
 #include <QCheckBox>
 #include <QFile>
@@ -18,6 +29,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMainWindow>
+#include <QMenu>
 #include <QMetaObject>
 #include <QMessageBox>
 #include <QPlainTextEdit>
@@ -25,14 +37,15 @@
 #include <QPushButton>
 #include <QPainter>
 #include <QPixmap>
+#include <QRadioButton>
 #include <QScrollArea>
+#include <QSettings>
 #include <QSizePolicy>
 #include <QSpinBox>
 #include <QSplitter>
 #include <QStackedWidget>
 #include <QStatusBar>
 #include <QString>
-#include <QTextBrowser>
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -461,11 +474,12 @@ public:
         profile_->setPlaceholderText("Profile appears here after connect.");
         set_profile_action_enabled(false);
 
-        messages_ = new QTextBrowser();
-        messages_->setReadOnly(true);
-        messages_->setOpenLinks(false);
-        messages_->setPlaceholderText("Connect to load recent messages. Incoming pushes appear here.");
-        messages_->setFrameShape(QFrame::NoFrame);
+        // M138: BubbleListView replaces the QTextBrowser-based timeline.
+        // Bubbles, ticks, gradients, avatars, reply quotes, forwarded
+        // headers, reaction chips, pinned markers + the right-click
+        // context menu are all painted by BubbleDelegate, so we no longer
+        // depend on Qt rich text supporting things it doesn't.
+        messages_ = new telegram_like::client::app_desktop::BubbleListView();
 
         chat_filter_ = new QLineEdit();
         chat_filter_->setPlaceholderText("Search chats");
@@ -654,8 +668,28 @@ public:
         auto* header_titles = new QVBoxLayout();
         header_titles->setSpacing(0);
         header_titles->addWidget(chat_header_title_);
-        header_titles->addWidget(chat_header_subtitle_);
+        // M140: subtitle row carries the static "online · participants"
+        // text + the animated typing indicator. The indicator hides itself
+        // when inactive so the subtitle reflows seamlessly.
+        auto* subtitle_row = new QHBoxLayout();
+        subtitle_row->setSpacing(8);
+        subtitle_row->setContentsMargins(0, 0, 0, 0);
+        subtitle_row->addWidget(chat_header_subtitle_);
+        typing_indicator_ = new telegram_like::client::app_desktop::TypingIndicator();
+        subtitle_row->addWidget(typing_indicator_);
+        subtitle_row->addStretch(1);
+        header_titles->addLayout(subtitle_row);
         chat_header_layout->addLayout(header_titles, 1);
+        // M145: chat info button — opens a non-modal dialog with the
+        // conversation summary (title, participants, pinned messages,
+        // attachment count). Sits next to load_older / server_search so
+        // the header reads left-to-right as identity → load → search → info.
+        chat_info_btn_ = new QToolButton();
+        chat_info_btn_->setObjectName("chatInfoBtn");
+        chat_info_btn_->setText(QString::fromUtf8("\xe2\x84\xb9"));  // ℹ
+        chat_info_btn_->setToolTip(QStringLiteral("Chat info"));
+        chat_info_btn_->setCursor(Qt::PointingHandCursor);
+        chat_header_layout->addWidget(chat_info_btn_);
         chat_header_layout->addWidget(load_older_);
         chat_header_layout->addWidget(server_search_);
         center_layout->addWidget(chat_header);
@@ -669,6 +703,20 @@ public:
         search_row->addWidget(next_match_);
         search_row->addWidget(search_status_);
         center_layout->addWidget(search_row_wrap);
+        // M144: Pin message top strip — sits above the bubble list and
+        // surfaces the most-recent pinned message snippet. Click jumps to
+        // the message in-line. Hidden entirely when nothing is pinned so
+        // the chat area gets the full vertical space.
+        pin_bar_ = new QPushButton();
+        pin_bar_->setObjectName("pinBar");
+        pin_bar_->setVisible(false);
+        pin_bar_->setCursor(Qt::PointingHandCursor);
+        pin_bar_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        pin_bar_->setMinimumHeight(36);
+        pin_bar_->setStyleSheet(
+            "QPushButton#pinBar { text-align:left; padding:6px 12px;"
+            " border:none; background:transparent; }");
+        center_layout->addWidget(pin_bar_);
         // timeline
         center_layout->addWidget(messages_, 1);
         // server search result panel (collapsible feel)
@@ -746,10 +794,30 @@ public:
         settings_nav_->setMaximumWidth(170);
         settings_nav_->setFrameShape(QFrame::NoFrame);
         settings_nav_->setSpacing(2);
-        for (const char* label : {"Profile", "Account", "Connection",
-                                  "Devices", "Contacts", "Find Users",
-                                  "Groups", "Attachments", "Remote", "Call"}) {
-            settings_nav_->addItem(label);
+        // M139: Telegram-style nav — each item gets a leading unicode glyph
+        // so the column reads as an icon list rather than a plain text
+        // list. Glyphs come from common Unicode planes; no external icon
+        // assets needed. New "Appearance" entry hosts the light/dark
+        // toggle below.
+        struct NavEntry { const char* glyph; const char* label; };
+        constexpr NavEntry nav_entries[] = {
+            {"\xf0\x9f\x91\xa4", "Profile"},      // 👤
+            {"\xf0\x9f\x94\x90", "Account"},      // 🔐
+            {"\xf0\x9f\x8e\xa8", "Appearance"},   // 🎨  (M139)
+            {"\xf0\x9f\x94\x97", "Connection"},   // 🔗
+            {"\xf0\x9f\x92\xbb", "Devices"},      // 💻
+            {"\xf0\x9f\x91\xa5", "Contacts"},     // 👥
+            {"\xf0\x9f\x94\x8e", "Find Users"},   // 🔎
+            {"\xf0\x9f\x91\xa5", "Groups"},       // 👥
+            {"\xf0\x9f\x93\x8e", "Attachments"},  // 📎
+            {"\xf0\x9f\x96\xa5\xef\xb8\x8f", "Remote"}, // 🖥️
+            {"\xf0\x9f\x93\x9e", "Call"},         // 📞
+        };
+        for (const auto& entry : nav_entries) {
+            const QString text = QString::fromUtf8(entry.glyph)
+                + QStringLiteral("   ")
+                + QString::fromUtf8(entry.label);
+            settings_nav_->addItem(text);
         }
         body_layout->addWidget(settings_nav_);
 
@@ -835,6 +903,33 @@ public:
         account_body->addLayout(acc_btns);
         settings_pages_->addWidget(
             make_page("Account", "Sign in or create a new account on this server.", account_body));
+
+        // === Appearance page (M139) — light/dark theme + cosmetic notes ===
+        // Telegram desktop's appearance section gives the user a visible
+        // toggle for the theme; we match that via two QRadioButton choices
+        // backed by a re-application of telegram_stylesheet() and a fresh
+        // bubble palette push. The choice persists in QSettings under
+        // "appearance/dark_theme" so subsequent launches start in the
+        // last-selected mode without needing the env var.
+        auto* appearance_body = new QVBoxLayout();
+        appearance_body->setSpacing(10);
+        auto* appearance_label = new QLabel("Theme");
+        appearance_label->setObjectName("fieldLabel");
+        appearance_body->addWidget(appearance_label);
+        appearance_light_ = new QRadioButton("Light");
+        appearance_dark_  = new QRadioButton("Dark");
+        appearance_light_->setChecked(!telegram_like::client::app_desktop::design::is_dark_theme());
+        appearance_dark_->setChecked(telegram_like::client::app_desktop::design::is_dark_theme());
+        appearance_body->addWidget(appearance_light_);
+        appearance_body->addWidget(appearance_dark_);
+        auto* appearance_hint = new QLabel(
+            "Light is the Telegram-Web-Z baseline; Dark mirrors the desktop \"Night\" palette. "
+            "Changes apply immediately and are saved to your local settings file.");
+        appearance_hint->setObjectName("pageSubtitle");
+        appearance_hint->setWordWrap(true);
+        appearance_body->addWidget(appearance_hint);
+        settings_pages_->addWidget(
+            make_page("Appearance", "Pick light or dark for the chat surface.", appearance_body));
 
         // === Connection page ===
         auto* connection_body = new QVBoxLayout();
@@ -1062,6 +1157,72 @@ public:
         update_chat_header();
         render_store();
 
+        // M140 demo hook: TELEGRAM_LIKE_DEMO_TYPING=1 spins up the typing
+        // indicator with a fake peer so the animation is visible without
+        // a real backend pulse. Real fanout (TYPING_START/TYPING_STOP) is
+        // a separate milestone — this primitive is the UI half.
+        if (typing_indicator_ != nullptr) {
+            const char* demo = std::getenv("TELEGRAM_LIKE_DEMO_TYPING");
+            if (demo != nullptr && demo[0] == '1') {
+                typing_indicator_->setActive(QStringLiteral("u_bob"), true);
+            }
+        }
+
+        // M139: appearance toggle — flip the active theme, repaint every
+        // surface (QSS for widgets + bubble palette for the message view)
+        // and persist the choice so the next launch picks the same mode.
+        auto apply_theme = [this](bool dark) {
+            namespace dt = telegram_like::client::app_desktop::design;
+            dt::set_active_theme(dark);
+            if (auto* app = qobject_cast<QApplication*>(QCoreApplication::instance())) {
+                app->setStyleSheet(telegram_stylesheet());
+            }
+            QSettings().setValue(QStringLiteral("appearance/dark_theme"), dark);
+            render_store();
+        };
+        QObject::connect(appearance_light_, &QRadioButton::toggled,
+            [this, apply_theme](bool checked) { if (checked) apply_theme(false); });
+        QObject::connect(appearance_dark_, &QRadioButton::toggled,
+            [this, apply_theme](bool checked) { if (checked) apply_theme(true); });
+        // M144: clicking the pin bar focuses the pinned message — same
+        // mechanism as in-chat search "Use Match" so the bubble scrolls
+        // into view + the focused outline lights up.
+        QObject::connect(pin_bar_, &QPushButton::clicked, [this] {
+            if (pin_bar_target_id_.isEmpty() || messages_ == nullptr) return;
+            messages_->setSearchHighlight(message_search_->text().trimmed(),
+                                          pin_bar_target_id_);
+        });
+        // M147: composer typing → debounced TYPING_PULSE(true). Only fires
+        // once every 2s so a fast typist doesn't generate a flood; the
+        // indicator on the receiving side decays 5s after the last
+        // inbound pulse via typing_decay_timer_.
+        typing_decay_timer_ = new QTimer(this);
+        typing_decay_timer_->setInterval(5000);
+        typing_decay_timer_->setSingleShot(true);
+        QObject::connect(typing_decay_timer_, &QTimer::timeout, [this] {
+            if (typing_indicator_ != nullptr) {
+                typing_indicator_->setActive(QString(), false);
+            }
+        });
+        QObject::connect(composer_, &QLineEdit::textEdited, [this](const QString& text) {
+            if (!client_ || text.isEmpty()) return;
+            const auto conv = store_.selected_conversation_id();
+            if (conv.empty()) return;
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
+            if (now - last_typing_sent_ms_ < 2000) return;
+            last_typing_sent_ms_ = now;
+            auto client = client_;
+            std::thread([client, conv] {
+                (void)client->send_typing_pulse(conv, true);
+            }).detach();
+        });
+        // M145: chat info button opens a non-modal dialog summarising the
+        // selected conversation. Constructed on each click so the
+        // participant + pinned + attachment lists reflect the latest sync.
+        QObject::connect(chat_info_btn_, &QToolButton::clicked, [this] {
+            show_chat_info_dialog();
+        });
+
         QObject::connect(connect_, &QPushButton::clicked, [this] { connect_and_sync(); });
         QObject::connect(register_, &QPushButton::clicked, [this] { register_and_sync(); });
         QObject::connect(send_, &QPushButton::clicked, [this] { send_message(); });
@@ -1075,14 +1236,33 @@ public:
         QObject::connect(delete_, &QPushButton::clicked, [this] { delete_message_action(); });
         QObject::connect(use_match_, &QPushButton::clicked, [this] { use_focused_message_as_action_target(); });
         QObject::connect(use_latest_, &QPushButton::clicked, [this] { use_latest_message_as_action_target(); });
-        QObject::connect(messages_, &QTextBrowser::anchorClicked, [this](const QUrl& url) {
-            if (url.scheme() != "msg") return;
-            const auto target = url.host().isEmpty() ? url.path().mid(1) : url.host();
-            if (!target.isEmpty()) {
-                message_action_id_->setText(target);
-                statusBar()->showMessage("Selected message " + target);
-            }
-        });
+        // M138: double-click a bubble to focus it as the current message
+        // action target (used by the bottom-bar Reply/Forward/etc. fallback
+        // controls, while the right-click context menu is the primary UX).
+        QObject::connect(messages_,
+            &telegram_like::client::app_desktop::BubbleListView::messageActivated,
+            [this](const QString& message_id) {
+                if (message_id.isEmpty()) return;
+                message_action_id_->setText(message_id);
+                statusBar()->showMessage("Selected message " + message_id, 2000);
+            });
+        QObject::connect(messages_,
+            &telegram_like::client::app_desktop::BubbleListView::messageContextMenuRequested,
+            [this](const QString& message_id, const QPoint& globalPos) {
+                if (message_id.isEmpty()) return;
+                message_action_id_->setText(message_id);
+                QMenu menu(this);
+                menu.addAction("Reply",   [this] { reply_message(); });
+                menu.addAction("Forward", [this] { forward_message(); });
+                menu.addAction("React",   [this] { react_to_message(); });
+                menu.addSeparator();
+                menu.addAction("Pin",   [this] { pin_message(true);  });
+                menu.addAction("Unpin", [this] { pin_message(false); });
+                menu.addSeparator();
+                menu.addAction("Edit",   [this] { edit_message_action(); });
+                menu.addAction("Delete", [this] { delete_message_action(); });
+                menu.exec(globalPos);
+            });
         QObject::connect(save_attachment_, &QPushButton::clicked, [this] { save_attachment(); });
         QObject::connect(refresh_devices_, &QPushButton::clicked, [this] { refresh_devices(); });
         QObject::connect(refresh_profile_, &QPushButton::clicked, [this] { refresh_profile(); });
@@ -1141,67 +1321,306 @@ public:
 
 private:
     void append_line(const QString& line) {
-        messages_->append(line.toHtmlEscaped());
+        // M138: BubbleListView only renders messages, not log/error lines.
+        // System info (errors, transfer progress, debug crumbs) used to be
+        // appended into the chat area as plain text — that polluted the
+        // bubble list. Route them to the status bar instead so they show
+        // briefly without breaking the timeline.
+        statusBar()->showMessage(line, 5000);
     }
 
     static QString telegram_stylesheet() {
-        // M125: tokens centralised in design_tokens.h; the QSS literal stays
-        // a single concatenated string so this stays cheap to parse, but
-        // the source-of-truth for any tweak is one constant in that header.
+        // M125 introduced design_tokens.h; M135 finishes the migration —
+        // every QSS color now reads from the active theme so dark mode
+        // toggling (TELEGRAM_LIKE_THEME=dark env var) actually changes
+        // every surface instead of a leaky half-themed window.
         namespace dt = telegram_like::client::app_desktop::design;
-        return QString::fromUtf8(
-            "QMainWindow, QWidget { background:%1; color:%2; font-family:%3; font-size:%4px; }"
-        ).arg(dt::kAppBackground, dt::kTextPrimary, dt::kFontStack, QString::number(dt::kFontPxBase)) +
-        QStringLiteral(
-            "QSplitter#mainSplitter::handle { background:#e1e4e8; width:1px; }"
-            "QWidget#sidebar { background:#ffffff; border-right:1px solid #e6e8eb; }"
-            "QWidget#sidebarSearch { background:#ffffff; border-bottom:1px solid #eef0f2; }"
-            "QWidget#sidebarFooter { background:#fafbfc; border-top:1px solid #eef0f2; }"
-            "QListWidget#chatList { background:#ffffff; border:none; padding:6px 4px; }"
-            "QListWidget#chatList::item { padding:10px 12px; border-radius:8px; margin:1px 4px; color:#0f1419; }"
-            "QListWidget#chatList::item:selected { background:#e7f0fb; color:#0f1419; }"
-            "QListWidget#chatList::item:hover { background:#f0f3f6; }"
-            "QWidget#centerPane { background:#e6ebee; }"
-            "QWidget#chatHeader { background:#ffffff; border-bottom:1px solid #e6e8eb; }"
-            "QLabel#chatHeaderTitle { font-weight:600; font-size:15px; color:#0f1419; }"
-            "QLabel#chatHeaderSubtitle { font-size:11px; color:#7c8a96; }"
-            "QWidget#inChatSearch { background:#f4f6f8; border-bottom:1px solid #e6e8eb; }"
-            "QLabel#searchStatus { color:#7c8a96; font-size:11px; padding-left:6px; }"
-            "QTextBrowser { background:#e6ebee; border:none; }"
-            "QWidget#composer { background:#ffffff; border-top:1px solid #e6e8eb; }"
-            "QWidget#messageActions { background:#f7f8fa; border-top:1px solid #eef0f2; }"
-            "QScrollArea#detailsPanel { background:#ffffff; border-left:1px solid #e6e8eb; }"
-            "QScrollArea#detailsPanel > QWidget > QWidget { background:#ffffff; }"
-            "QWidget#settingsHeader { background:#ffffff; border-bottom:1px solid #eef0f2; }"
-            "QLabel#settingsTitle { font-weight:700; font-size:15px; color:#0f1419; }"
-            "QToolButton#settingsClose { border:none; background:transparent; color:#7c8a96; font-size:14px; padding:4px 8px; border-radius:6px; }"
-            "QToolButton#settingsClose:hover { background:#f0f3f6; color:#0f1419; }"
-            "QListWidget#settingsNav { background:#fafbfc; border-right:1px solid #eef0f2; padding:8px 4px; }"
-            "QListWidget#settingsNav::item { padding:9px 12px; border-radius:8px; margin:1px 4px; color:#3a4853; }"
-            "QListWidget#settingsNav::item:selected { background:#e7f0fb; color:#0f1419; font-weight:600; }"
-            "QListWidget#settingsNav::item:hover { background:#f0f3f6; }"
-            "QStackedWidget#settingsPages { background:#ffffff; }"
-            "QLabel#pageHeading { font-size:18px; font-weight:600; color:#0f1419; }"
-            "QLabel#pageSubtitle { font-size:12px; color:#7c8a96; padding-bottom:4px; }"
-            "QLabel#fieldLabel { font-size:11px; font-weight:600; color:#7c8a96; text-transform:uppercase; letter-spacing:0.5px; }"
-            "QLabel#profileIdentity { font-size:13px; }"
-            "QGroupBox#detailsGroup { border:1px solid #e6e8eb; border-radius:10px; margin-top:8px; padding-top:8px; background:#ffffff; }"
-            "QGroupBox#detailsGroup::title { subcontrol-origin:margin; left:12px; padding:0 4px; color:#3390ec; font-weight:600; }"
-            "QLineEdit, QSpinBox, QPlainTextEdit { background:#ffffff; border:1px solid #d8dde2; border-radius:8px; padding:6px 9px; selection-background-color:#3390ec; }"
-            "QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus { border:1px solid #3390ec; }"
-            "QPushButton { background:#ffffff; border:1px solid #d8dde2; border-radius:8px; padding:6px 14px; color:#0f1419; }"
-            "QPushButton:hover { background:#f0f3f6; }"
-            "QPushButton:disabled { color:#9aa3ab; background:#f7f8fa; border:1px solid #e6e8eb; }"
-            "QPushButton#primary { background:#3390ec; color:#ffffff; border:1px solid #3390ec; font-weight:600; }"
-            "QPushButton#primary:hover { background:#2079d2; border:1px solid #2079d2; }"
-            "QPushButton#primary:disabled { background:#a8c8ec; color:#ffffff; border:1px solid #a8c8ec; }"
-            "QPushButton#ghost { background:transparent; border:none; color:#3390ec; padding:4px 8px; }"
-            "QPushButton#ghost:hover { background:#eaf3fc; }"
-            "QCheckBox { spacing:6px; }"
-            "QStatusBar { background:#ffffff; border-top:1px solid #e6e8eb; color:#7c8a96; }"
-            "QProgressBar { border:1px solid #d8dde2; border-radius:6px; background:#ffffff; height:14px; text-align:center; }"
-            "QProgressBar::chunk { background:#3390ec; border-radius:6px; }"
-        );
+        const auto& t = dt::active_theme();
+        QString css = QString::fromUtf8(R"(
+            QMainWindow, QWidget { background:{app_background}; color:{text_primary}; font-family:{font_stack}; font-size:{font_px}px; }
+            QSplitter#mainSplitter::handle { background:{splitter}; width:1px; }
+            QWidget#sidebar { background:{surface}; border-right:1px solid {border}; }
+            QWidget#sidebarSearch { background:{surface}; border-bottom:1px solid {border_subtle}; }
+            QWidget#sidebarFooter { background:{surface_muted}; border-top:1px solid {border_subtle}; }
+            QListWidget#chatList { background:{surface}; border:none; padding:6px 4px; }
+            QListWidget#chatList::item { padding:10px 12px; border-radius:8px; margin:1px 4px; color:{text_primary}; }
+            QListWidget#chatList::item:selected { background:{selection_tint}; color:{text_primary}; }
+            QListWidget#chatList::item:hover { background:{hover}; }
+            QWidget#centerPane { background:{chat_area}; }
+            QWidget#chatHeader { background:{surface}; border-bottom:1px solid {border}; }
+            QLabel#chatHeaderTitle { font-weight:600; font-size:15px; color:{text_primary}; }
+            QLabel#chatHeaderSubtitle { font-size:11px; color:{text_muted}; }
+            QWidget#inChatSearch { background:{in_chat_search_bg}; border-bottom:1px solid {border}; }
+            QLabel#searchStatus { color:{text_muted}; font-size:11px; padding-left:6px; }
+            QTextBrowser { background:{chat_area}; border:none; color:{text_primary}; }
+            QWidget#composer { background:{surface}; border-top:1px solid {border}; }
+            QWidget#messageActions { background:{secondary_header_tint}; border-top:1px solid {border_subtle}; }
+            QScrollArea#detailsPanel { background:{surface}; border-left:1px solid {border}; }
+            QScrollArea#detailsPanel > QWidget > QWidget { background:{surface}; }
+            QWidget#settingsHeader { background:{surface}; border-bottom:1px solid {border_subtle}; }
+            QLabel#settingsTitle { font-weight:700; font-size:15px; color:{text_primary}; }
+            QToolButton#settingsClose { border:none; background:transparent; color:{text_muted}; font-size:14px; padding:4px 8px; border-radius:6px; }
+            QToolButton#settingsClose:hover { background:{hover}; color:{text_primary}; }
+            QListWidget#settingsNav { background:{surface_muted}; border-right:1px solid {border_subtle}; padding:8px 4px; }
+            QListWidget#settingsNav::item { padding:9px 12px; border-radius:8px; margin:1px 4px; color:{text_secondary}; }
+            QListWidget#settingsNav::item:selected { background:{selection_tint}; color:{text_primary}; font-weight:600; }
+            QListWidget#settingsNav::item:hover { background:{hover}; }
+            QStackedWidget#settingsPages { background:{surface}; }
+            QLabel#pageHeading { font-size:18px; font-weight:600; color:{text_primary}; }
+            QLabel#pageSubtitle { font-size:12px; color:{text_muted}; padding-bottom:4px; }
+            QLabel#fieldLabel { font-size:11px; font-weight:600; color:{text_muted}; text-transform:uppercase; letter-spacing:0.5px; }
+            QLabel#profileIdentity { font-size:13px; color:{text_primary}; }
+            QGroupBox#detailsGroup { border:1px solid {border}; border-radius:10px; margin-top:8px; padding-top:8px; background:{surface}; color:{text_primary}; }
+            QGroupBox#detailsGroup::title { subcontrol-origin:margin; left:12px; padding:0 4px; color:{primary}; font-weight:600; }
+            QLineEdit, QSpinBox, QPlainTextEdit { background:{surface}; color:{text_primary}; border:1px solid {border_input}; border-radius:8px; padding:6px 9px; selection-background-color:{primary}; selection-color:#ffffff; }
+            QLineEdit:focus, QSpinBox:focus, QPlainTextEdit:focus { border:1px solid {primary}; }
+            QPushButton { background:{surface}; border:1px solid {border_input}; border-radius:8px; padding:6px 14px; color:{text_primary}; }
+            QPushButton:hover { background:{hover}; }
+            QPushButton:disabled { color:{text_disabled}; background:{secondary_header_tint}; border:1px solid {border}; }
+            QPushButton#primary { background:{primary}; color:#ffffff; border:1px solid {primary}; font-weight:600; }
+            QPushButton#primary:hover { background:{primary_hover}; border:1px solid {primary_hover}; }
+            QPushButton#primary:disabled { background:{primary_disabled}; color:#ffffff; border:1px solid {primary_disabled}; }
+            QPushButton#ghost { background:transparent; border:none; color:{primary}; padding:4px 8px; }
+            QPushButton#ghost:hover { background:{primary_ghost_hover}; }
+            QCheckBox { spacing:6px; color:{text_primary}; }
+            QStatusBar { background:{surface}; border-top:1px solid {border}; color:{text_muted}; }
+            QProgressBar { border:1px solid {border_input}; border-radius:6px; background:{surface}; color:{text_primary}; height:14px; text-align:center; }
+            QProgressBar::chunk { background:{primary}; border-radius:6px; }
+        )");
+        // Substitute the {name} placeholders with active-theme values. Done
+        // as a pass over named keys so the QSS source stays human-readable
+        // rather than a chain of ~30 .arg() calls.
+        const std::pair<const char*, const char*> subs[] = {
+            {"app_background",        t.app_background},
+            {"surface",               t.surface},
+            {"surface_muted",         t.surface_muted},
+            {"chat_area",             t.chat_area},
+            {"border",                t.border},
+            {"border_subtle",         t.border_subtle},
+            {"border_input",          t.border_input},
+            {"splitter",              t.splitter},
+            {"selection_tint",        t.selection_tint},
+            {"hover",                 t.hover},
+            {"primary",               t.primary},
+            {"primary_hover",         t.primary_hover},
+            {"primary_disabled",      t.primary_disabled},
+            {"primary_ghost_hover",   t.primary_ghost_hover},
+            {"secondary_header_tint", t.secondary_header_tint},
+            {"in_chat_search_bg",     t.in_chat_search_bg},
+            {"text_primary",          t.text_primary},
+            {"text_secondary",        t.text_secondary},
+            {"text_muted",            t.text_muted},
+            {"text_disabled",         t.text_disabled},
+        };
+        for (const auto& [name, value] : subs) {
+            css.replace(QString::fromUtf8("{") + QString::fromUtf8(name) + QString::fromUtf8("}"),
+                        QString::fromUtf8(value));
+        }
+        // font_stack + font_px aren't theme-dependent but stay in the same
+        // substitution scheme so the QSS template doesn't mix two styles.
+        css.replace(QStringLiteral("{font_stack}"), QString::fromUtf8(dt::kFontStack));
+        css.replace(QStringLiteral("{font_px}"),    QString::number(dt::kFontPxBase));
+        return css;
+    }
+
+    void request_thumbnails_for_visible_messages() {
+        // M148: scan the selected conversation for image-MIME attachments
+        // that aren't in the cache + aren't already being fetched, then
+        // kick a worker thread per miss. Cache is capped at 64 entries
+        // (newest wins) so a long history of images doesn't bloat memory.
+        if (client_ == nullptr) return;
+        const auto* conv = store_.selected_conversation();
+        if (conv == nullptr) return;
+        for (auto it = conv->messages.rbegin(); it != conv->messages.rend(); ++it) {
+            const auto& m = *it;
+            if (m.attachment_id.empty()) continue;
+            const QString key = qstr(m.attachment_id);
+            if (m.mime_type.rfind("image/", 0) != 0) continue;
+            if (thumbnail_cache_.contains(key)) continue;
+            if (thumbnail_inflight_.contains(key)) continue;
+            thumbnail_inflight_.insert(key);
+            const std::string aid = m.attachment_id;
+            auto client = client_;
+            std::thread([this, client, aid, key] {
+                const auto fetched = client->fetch_attachment(aid);
+                QMetaObject::invokeMethod(this, [this, key, fetched] {
+                    if (shutting_down_) return;
+                    thumbnail_inflight_.remove(key);
+                    if (!fetched.ok || fetched.content.empty()) return;
+                    QImage img;
+                    img.loadFromData(QByteArray::fromStdString(fetched.content));
+                    if (img.isNull()) return;
+                    if (img.width() > 480 || img.height() > 480) {
+                        img = img.scaled(480, 480, Qt::KeepAspectRatio,
+                                          Qt::SmoothTransformation);
+                    }
+                    if (thumbnail_cache_.size() >= 64) {
+                        // Drop an arbitrary entry to keep memory bounded.
+                        thumbnail_cache_.erase(thumbnail_cache_.begin());
+                    }
+                    thumbnail_cache_.insert(key, QPixmap::fromImage(img));
+                    if (messages_ != nullptr) {
+                        messages_->setThumbnailCache(thumbnail_cache_);
+                    }
+                }, Qt::QueuedConnection);
+            }).detach();
+            // Cap to ~8 inflight at a time so fast scrolls don't flood.
+            if (thumbnail_inflight_.size() >= 8) break;
+        }
+    }
+
+    void handle_typing_pulse_push(const std::string& envelope) {
+        // M147: parse the JSON envelope sent by the server (shape:
+        // {type:"typing_pulse", payload:{conversation_id, is_typing,
+        // sender_user_id}, ...}) and flip the indicator. Self-pulses are
+        // suppressed — server filters by `_fanout_to_conversation`'s
+        // origin_session_id but a defensive check costs nothing here.
+        if (typing_indicator_ == nullptr) return;
+        const QJsonDocument doc = QJsonDocument::fromJson(
+            QByteArray::fromStdString(envelope));
+        if (!doc.isObject()) return;
+        const QJsonObject root = doc.object();
+        const QJsonObject payload = root.value("payload").toObject();
+        const QString sender = payload.value("sender_user_id").toString();
+        const QString conv = payload.value("conversation_id").toString();
+        const bool is_typing = payload.value("is_typing").toBool(true);
+        if (sender.isEmpty() || sender == qstr(store_.current_user_id())) return;
+        // Only show typing for the currently-open conversation; pulses
+        // from other rooms would be confusing in the header subtitle.
+        if (conv != qstr(store_.selected_conversation_id())) return;
+        if (is_typing) {
+            typing_indicator_->setActive(sender, true);
+            if (typing_decay_timer_ != nullptr) typing_decay_timer_->start();
+        } else {
+            typing_indicator_->setActive(QString(), false);
+            if (typing_decay_timer_ != nullptr) typing_decay_timer_->stop();
+        }
+    }
+
+    void show_chat_info_dialog() {
+        // M145: Telegram-style chat-info popup. Shows
+        //   title + conv id (header)
+        //   participants list (each entry "uid · role" — owner/admin/member
+        //                      derived from M103 participant_role_for if
+        //                      available; falls back to plain id)
+        //   pinned messages list ("[id] sender · snippet")
+        //   summary footer (attachment count + last sync version)
+        // Built on every click so the lists stay current; closes on Esc / X.
+        const auto* conv = store_.selected_conversation();
+        if (conv == nullptr) {
+            QMessageBox::information(this, "Chat info",
+                "Pick a chat from the list first.");
+            return;
+        }
+        auto* dlg = new QDialog(this);
+        dlg->setWindowTitle("Chat info");
+        dlg->setAttribute(Qt::WA_DeleteOnClose);
+        // M150: dock as a frameless tool window on the right edge of the
+        // main window and slide in from off-screen-right via
+        // QPropertyAnimation. Closing animates it back out before
+        // accepting so the disappearance feels intentional rather than
+        // a hard pop.
+        dlg->setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
+        dlg->setAttribute(Qt::WA_TranslucentBackground, false);
+        const int panelW = 360;
+        const QRect mainGeo = this->geometry();
+        const int targetY = mainGeo.top() + 32;  // skip past system title
+        const int targetH = std::max(360, mainGeo.height() - 64);
+        const int targetX = mainGeo.right() - panelW - 8;
+        const QRect dockedGeo(targetX, targetY, panelW, targetH);
+        const QRect offGeo(mainGeo.right() + 8, targetY, panelW, targetH);
+        dlg->setGeometry(offGeo);
+
+        auto* root = new QVBoxLayout(dlg);
+        root->setSpacing(10);
+        root->setContentsMargins(16, 14, 16, 14);
+
+        const QString title = conv->title.empty()
+            ? qstr(conv->conversation_id)
+            : qstr(conv->title);
+        auto* title_label = new QLabel(QString("<b style='font-size:14pt'>%1</b>")
+            .arg(title.toHtmlEscaped()));
+        title_label->setTextFormat(Qt::RichText);
+        root->addWidget(title_label);
+        auto* sub_label = new QLabel(QString("<span style='color:#7c8a96'>%1 · %2 participants</span>")
+            .arg(qstr(conv->conversation_id).toHtmlEscaped())
+            .arg(conv->participant_user_ids.size()));
+        sub_label->setTextFormat(Qt::RichText);
+        root->addWidget(sub_label);
+
+        // Participants
+        auto* members_label = new QLabel("<b>Members</b>");
+        members_label->setTextFormat(Qt::RichText);
+        root->addWidget(members_label);
+        auto* members = new QListWidget();
+        members->setFrameShape(QFrame::NoFrame);
+        for (const auto& uid : conv->participant_user_ids) {
+            members->addItem(qstr(uid));
+        }
+        if (conv->participant_user_ids.empty()) {
+            members->addItem("(no participant data — try Connect to refresh)");
+        }
+        root->addWidget(members, 1);
+
+        // Pinned + attachments summary
+        std::size_t attachment_count = 0;
+        std::vector<const telegram_like::client::app_desktop::DesktopMessage*> pinned_list;
+        for (const auto& m : conv->messages) {
+            if (!m.attachment_id.empty()) ++attachment_count;
+            if (m.pinned && !m.deleted) pinned_list.push_back(&m);
+        }
+        auto* pinned_label = new QLabel(
+            QString("<b>Pinned (%1)</b>").arg(pinned_list.size()));
+        pinned_label->setTextFormat(Qt::RichText);
+        root->addWidget(pinned_label);
+        auto* pinned_widget = new QListWidget();
+        pinned_widget->setFrameShape(QFrame::NoFrame);
+        pinned_widget->setMaximumHeight(96);
+        for (const auto* m : pinned_list) {
+            pinned_widget->addItem(QString("[%1] %2  %3")
+                .arg(qstr(m->message_id),
+                     qstr(m->sender_user_id),
+                     qstr(m->text).left(48)));
+        }
+        if (pinned_list.empty()) pinned_widget->addItem("(nothing pinned)");
+        root->addWidget(pinned_widget);
+
+        auto* footer = new QLabel(QString("Attachments: %1   Sync version: %2")
+            .arg(attachment_count)
+            .arg(conv->sync_version));
+        footer->setStyleSheet("color:#7c8a96; font-size:11px;");
+        root->addWidget(footer);
+
+        auto* btn_row = new QHBoxLayout();
+        btn_row->addStretch(1);
+        auto* close_btn = new QPushButton("Close");
+        close_btn->setObjectName("primary");
+        // M150: closing animates the panel back off-screen-right before
+        // the dialog actually accepts, so the disappearance feels like
+        // a slide rather than a pop.
+        QObject::connect(close_btn, &QPushButton::clicked, dlg, [dlg, dockedGeo, offGeo] {
+            auto* outAnim = new QPropertyAnimation(dlg, "geometry", dlg);
+            outAnim->setDuration(180);
+            outAnim->setEasingCurve(QEasingCurve::InCubic);
+            outAnim->setStartValue(dockedGeo);
+            outAnim->setEndValue(offGeo);
+            QObject::connect(outAnim, &QPropertyAnimation::finished, dlg, &QDialog::accept);
+            outAnim->start(QAbstractAnimation::DeleteWhenStopped);
+        });
+        btn_row->addWidget(close_btn);
+        root->addLayout(btn_row);
+
+        dlg->show();
+        // M150: slide-in animation from off-screen right to the docked
+        // position. 220 ms with an out-cubic curve for a Telegram-feel
+        // swoosh. DeleteWhenStopped frees the QPropertyAnimation once
+        // the slide finishes.
+        auto* inAnim = new QPropertyAnimation(dlg, "geometry", dlg);
+        inAnim->setDuration(220);
+        inAnim->setEasingCurve(QEasingCurve::OutCubic);
+        inAnim->setStartValue(offGeo);
+        inAnim->setEndValue(dockedGeo);
+        inAnim->start(QAbstractAnimation::DeleteWhenStopped);
     }
 
     void update_chat_header() {
@@ -1296,7 +1715,69 @@ private:
 
     void render_store() {
         const auto focused_id = focused_search_message_id();
-        messages_->setHtml(qstr(store_.render_selected_timeline_html(str(message_search_->text().trimmed()), focused_id)));
+        // M138: drive the BubbleListView from the store + theme palette.
+        // The previous setHtml(render_selected_timeline_html(...)) path is
+        // kept on DesktopChatStore for store_test (which still verifies the
+        // HTML renderer) but app_desktop no longer points its main view at
+        // it — the bubble delegate paints directly.
+        namespace dt = telegram_like::client::app_desktop::design;
+        const auto& t = dt::active_theme();
+        telegram_like::client::app_desktop::DesktopBubblePalette palette;
+        palette.chat_area_bg     = t.chat_area;
+        palette.own_bubble       = t.own_bubble_bottom;
+        palette.own_bubble_text  = t.own_bubble_text;
+        palette.peer_bubble      = t.peer_bubble;
+        palette.peer_bubble_text = t.peer_bubble_text;
+        palette.primary          = t.primary;
+        palette.text_muted       = t.text_muted;
+        palette.tick_sent        = t.tick_unread;
+        palette.tick_read        = t.tick_read;
+        // failed_bubble stays at the default `#ffd7cf` — it's a neutral
+        // alarm signal independent of theme so the red shows in both modes.
+        messages_->setBubblePalette(palette);
+        messages_->setStore(&store_, store_.current_user_id());
+        messages_->setSearchHighlight(message_search_->text().trimmed(), qstr(focused_id));
+        messages_->setThumbnailCache(thumbnail_cache_);
+        messages_->refresh();
+        request_thumbnails_for_visible_messages();
+        // M140: theme the typing indicator from the same palette so the
+        // dots flip to the dark dot color when the user toggles theme.
+        if (typing_indicator_ != nullptr) {
+            typing_indicator_->setDotColor(QColor(t.text_muted));
+            typing_indicator_->setLabelColor(QColor(t.text_muted));
+        }
+        // M144: refresh the pin bar — show the first (oldest) pinned
+        // message in the conversation, hide the bar when nothing is pinned.
+        if (pin_bar_ != nullptr) {
+            const auto* conv = store_.selected_conversation();
+            const telegram_like::client::app_desktop::DesktopMessage* pinned = nullptr;
+            if (conv != nullptr) {
+                for (const auto& m : conv->messages) {
+                    if (m.pinned && !m.deleted) { pinned = &m; break; }
+                }
+            }
+            if (pinned == nullptr) {
+                pin_bar_->setVisible(false);
+                pin_bar_target_id_.clear();
+            } else {
+                pin_bar_target_id_ = qstr(pinned->message_id);
+                const QString sender = qstr(pinned->sender_user_id);
+                const QString snippet = qstr(pinned->text).left(80);
+                pin_bar_->setText(QString::fromUtf8(
+                    "\xf0\x9f\x93\x8c  <b>Pinned by %1</b>  %2")
+                    .arg(sender, snippet));
+                pin_bar_->setStyleSheet(QString::fromUtf8(
+                    "QPushButton#pinBar { text-align:left; padding:6px 12px; "
+                    "border:none; border-bottom:1px solid %1; "
+                    "background:%2; color:%3; } "
+                    "QPushButton#pinBar:hover { background:%4; }")
+                    .arg(QString::fromUtf8(t.border_subtle),
+                         QString::fromUtf8(t.surface_muted),
+                         QString::fromUtf8(t.text_primary),
+                         QString::fromUtf8(t.hover)));
+                pin_bar_->setVisible(true);
+            }
+        }
         render_conversation_list();
         render_search_status();
         update_chat_header();
@@ -1527,6 +2008,13 @@ private:
             next_client->set_push_handler([this](const std::string& type, const std::string& envelope) {
                 QMetaObject::invokeMethod(this, [this, type, envelope] {
                     if (shutting_down_) return;
+                    // M147: typing pulses are UI-only; they don't go through
+                    // the chat store at all. Parse the envelope, flip the
+                    // indicator with the (re)started 5s decay, return.
+                    if (type == "typing_pulse") {
+                        handle_typing_pulse_push(envelope);
+                        return;
+                    }
                     store_.apply_push(type, envelope);
                     save_cache();
                     render_store();
@@ -2498,6 +2986,11 @@ private:
     QLineEdit* device_ {nullptr};
     QPushButton* connect_ {nullptr};
     QPushButton* register_ {nullptr};
+    // M139: Appearance page light/dark radios. Toggling either re-applies
+    // the QApplication stylesheet + bubble palette and persists the
+    // choice in QSettings.
+    QRadioButton* appearance_light_ {nullptr};
+    QRadioButton* appearance_dark_ {nullptr};
     QLineEdit* chat_filter_ {nullptr};
     QLineEdit* message_search_ {nullptr};
     QPushButton* prev_match_ {nullptr};
@@ -2511,7 +3004,30 @@ private:
     QPushButton* save_profile_ {nullptr};
     QPlainTextEdit* profile_ {nullptr};
     QListWidget* conversations_ {nullptr};
-    QTextBrowser* messages_ {nullptr};
+    telegram_like::client::app_desktop::BubbleListView* messages_ {nullptr};
+    telegram_like::client::app_desktop::TypingIndicator* typing_indicator_ {nullptr};
+    // M144: top strip showing the most-recently pinned message snippet;
+    // click jumps to the message in the bubble view.
+    QPushButton* pin_bar_ {nullptr};
+    QString pin_bar_target_id_;
+    // M145: chat info dialog trigger; the dialog itself is constructed
+    // on-demand so the QListWidget contents stay in sync with the latest
+    // store snapshot.
+    QToolButton* chat_info_btn_ {nullptr};
+    // M147: client-side TYPING_PULSE state. last_typing_sent_ms_ debounces
+    // outgoing pulses to ~one every 2s while the composer is non-empty;
+    // typing_decay_timer_ clears the local indicator 5s after the most
+    // recent inbound pulse so a missed STOP doesn't leave the dots
+    // spinning forever.
+    qint64 last_typing_sent_ms_ {0};
+    QTimer* typing_decay_timer_ {nullptr};
+    // M148: image thumbnail cache keyed by attachment_id. Populated lazily
+    // by request_thumbnails_for_visible_messages — render_store iterates
+    // image attachments and kicks a worker per cache miss; on success the
+    // bytes get decoded into a QPixmap and BubbleListView::setThumbnailCache
+    // refreshes. Sized cap is enforced at decode time (240×240).
+    QHash<QString, QPixmap> thumbnail_cache_;
+    QSet<QString> thumbnail_inflight_;
     QLineEdit* composer_ {nullptr};
     QPushButton* attach_ {nullptr};
     QLineEdit* message_action_id_ {nullptr};
@@ -2600,6 +3116,19 @@ int main(int argc, char** argv) {
     }
 
     QApplication app(argc, argv);
+    QApplication::setOrganizationName(QStringLiteral("Telegram-like"));
+    QApplication::setApplicationName(QStringLiteral("app_desktop"));
+    // M139: load the persisted Appearance choice BEFORE the window
+    // constructor so the first stylesheet pass picks up the saved theme
+    // (env var still wins for the very first run when the setting is
+    // absent — see active_theme()'s lazy init).
+    {
+        QSettings prefs;
+        if (prefs.contains(QStringLiteral("appearance/dark_theme"))) {
+            telegram_like::client::app_desktop::design::set_active_theme(
+                prefs.value(QStringLiteral("appearance/dark_theme")).toBool());
+        }
+    }
     DesktopWindow window(args);
     window.show();
     return app.exec();

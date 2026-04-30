@@ -52,10 +52,29 @@ struct DesktopMessageSearchResult {
     long long created_at_ms {0};
 };
 
+// M137: bubble palette passed into render_selected_timeline_html so the
+// renderer stays Qt-free (chat_client_core has no Qt link) while the
+// caller (app_desktop main.cpp) can inject light/dark theme colors from
+// design::active_theme(). Defaults intentionally retain the M125 light
+// palette so existing call sites + the store_test smoke compile unchanged.
+struct DesktopBubblePalette {
+    const char* chat_area_bg     = "#e6ebee";
+    const char* own_bubble       = "#3390ec";
+    const char* own_bubble_text  = "#ffffff";
+    const char* peer_bubble      = "#ffffff";
+    const char* peer_bubble_text = "#0f1419";
+    const char* primary          = "#3390ec";
+    const char* text_muted       = "#7c8a96";
+    const char* tick_sent        = "#a8c8ec";
+    const char* tick_read        = "#3390ec";
+    const char* failed_bubble    = "#ffd7cf";
+};
+
 class DesktopChatStore {
 public:
     void clear();
     void set_current_user(std::string user_id);
+    [[nodiscard]] const std::string& current_user_id() const { return current_user_id_; }
     void set_selected_conversation(std::string conversation_id);
 
     void apply_sync(const transport::SyncResult& sync);
@@ -98,8 +117,15 @@ public:
     [[nodiscard]] std::vector<DesktopMessageSearchResult> search_selected_messages(const std::string& query) const;
     [[nodiscard]] std::string render_selected_transcript() const;
     [[nodiscard]] std::string render_selected_timeline_html(const std::string& search_query = {},
-                                                            const std::string& focused_message_id = {}) const;
+                                                            const std::string& focused_message_id = {},
+                                                            const DesktopBubblePalette& palette = {}) const;
     [[nodiscard]] std::string render_conversation_summary() const;
+    // M137: returns one of "pending"|"failed"|"sent"|"read"|"received" so the
+    // mobile QML bridge (which has no access to the file-local status_label
+    // helper in desktop_chat_store.cpp) can pick the right tick character.
+    // Empty string = unknown conversation/message.
+    [[nodiscard]] std::string delivery_tick(const std::string& conversation_id,
+                                            const std::string& message_id) const;
     [[nodiscard]] std::string last_message_id(const std::string& conversation_id) const;
     [[nodiscard]] std::string history_next_before_message_id(const std::string& conversation_id) const;
     [[nodiscard]] bool history_has_more(const std::string& conversation_id) const;

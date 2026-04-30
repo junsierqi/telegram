@@ -58,6 +58,7 @@ from .protocol import (
     TwoFaEnableResponsePayload,
     TwoFaVerifyRequestPayload,
     TwoFaVerifyResponsePayload,
+    TypingPulsePayload,
     TwoFaDisableRequestPayload,
     AccountExportResponsePayload,
     AccountDeleteRequestPayload,
@@ -1063,6 +1064,49 @@ class ServerApplication:
                     session_id=session_id,
                     actor_user_id=session.user_id,
                     payload=deleted,
+                ).to_dict()
+            except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.TYPING_PULSE:
+            # M146: pure passthrough — validate the sender belongs to the
+            # conversation, fill sender_user_id, then fan out to every
+            # OTHER participant. No server-side state; clients decay the
+            # animation locally after ~5s of no follow-up pulse.
+            try:
+                assert isinstance(payload, TypingPulsePayload)
+                conv = self.state.conversations.get(payload.conversation_id)
+                if conv is None:
+                    raise ServiceError(ErrorCode.UNKNOWN_CONVERSATION)
+                if session.user_id not in conv.participant_user_ids:
+                    raise ServiceError(ErrorCode.CONVERSATION_ACCESS_DENIED)
+                fanout = TypingPulsePayload(
+                    conversation_id=payload.conversation_id,
+                    is_typing=payload.is_typing,
+                    sender_user_id=session.user_id,
+                )
+                self._fanout_to_conversation(
+                    conversation_id=payload.conversation_id,
+                    origin_session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message_type=MessageType.TYPING_PULSE,
+                    payload=fanout,
+                    correlation_id=f"push_typing_{payload.conversation_id}_{session.user_id}",
+                )
+                # Acknowledge the sender with the same envelope so the
+                # client knows the pulse landed; nothing to render on the
+                # caller side.
+                return make_response(
+                    MessageType.TYPING_PULSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=fanout,
                 ).to_dict()
             except ValueError as exc:
                 return self._error_response(

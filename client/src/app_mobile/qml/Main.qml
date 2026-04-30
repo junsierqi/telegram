@@ -9,17 +9,29 @@ ApplicationWindow {
     visible: true
     title: qsTr("Telegram-like")
 
-    // Minimal Telegram-style palette (light theme).
-    readonly property color appBackground: "#f4f5f7"
-    readonly property color chatAreaBackground: "#e6ebee"
-    readonly property color sidebarBackground: "#ffffff"
-    readonly property color accentBlue: "#3390ec"
-    readonly property color outgoingBubble: "#eeffde"
-    readonly property color incomingBubble: "#ffffff"
-    readonly property color subtleText: "#7c8a96"
-    readonly property color primaryText: "#0f1419"
+    // M136: theme tokens live in Theme.qml so the desktop and mobile UIs
+    // share one palette spec. Toggling root.theme.darkMode flips every
+    // child page in one place. The legacy `appBackground / accentBlue / …`
+    // properties are kept as aliases pointing at the active palette so
+    // pages that haven't migrated yet still resolve.
+    readonly property Theme theme: Theme {
+        // `themeDarkMode` is a context property pushed by app_mobile/main.cpp
+        // after reading the TELEGRAM_LIKE_THEME env var (same contract as
+        // the desktop client). When the binary is loaded from a runtime
+        // that hasn't set the property (e.g. qmllint, designer preview) the
+        // typeof guard keeps QML from crashing on the missing identifier.
+        darkMode: typeof themeDarkMode !== "undefined" ? !!themeDarkMode : false
+    }
+    readonly property color appBackground:      theme.appBackground
+    readonly property color chatAreaBackground: theme.chatArea
+    readonly property color sidebarBackground:  theme.surface
+    readonly property color accentBlue:         theme.primary
+    readonly property color outgoingBubble:     theme.ownBubbleBottom
+    readonly property color incomingBubble:     theme.peerBubble
+    readonly property color subtleText:         theme.textMuted
+    readonly property color primaryText:        theme.textPrimary
 
-    color: appBackground
+    color: theme.appBackground
 
     StackView {
         id: nav

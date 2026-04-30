@@ -3,6 +3,7 @@
 #include <QMetaObject>
 #include <QVariantMap>
 
+#include <unordered_map>
 #include <utility>
 
 using telegram_like::client::transport::ControlPlaneClient;
@@ -547,6 +548,10 @@ QVariantList MobileChatBridge::selectedMessages() const {
     const auto* conv = store_.selected_conversation();
     if (conv == nullptr) return out;
     const auto self = client_ ? client_->user_id() : std::string {};
+    // M143: build a quick id->text lookup so reply quotes can render the
+    // referenced message inline without QML having to scan the list.
+    std::unordered_map<std::string, std::string> id_to_text;
+    for (const auto& m : conv->messages) id_to_text[m.message_id] = m.text;
     for (const auto& m : conv->messages) {
         QVariantMap row;
         row["messageId"] = to_q(m.message_id);
@@ -556,7 +561,138 @@ QVariantList MobileChatBridge::selectedMessages() const {
         row["pending"] = (m.delivery_state == "pending");
         row["failed"] = (m.delivery_state == "failed");
         row["createdAtMs"] = static_cast<qlonglong>(m.created_at_ms);
+        // M137: tick category drives the ✓ / ✓✓ / ⌛ / ✕ glyph in ChatPage.qml.
+        // Computed once per message via DesktopChatStore::delivery_tick so
+        // mobile + desktop stay on the same state machine.
+        row["deliveryTick"] = to_q(store_.delivery_tick(conv->conversation_id, m.message_id));
+        // M143: surface the reply / forward / reactions / pinned / edit
+        // attributes so the QML delegate can render them on parity with
+        // desktop's BubbleDelegate.
+        row["replyTo"]       = to_q(m.reply_to_message_id);
+        row["replyToText"]   = to_q(m.reply_to_message_id.empty()
+                                    ? std::string()
+                                    : id_to_text.count(m.reply_to_message_id)
+                                        ? id_to_text[m.reply_to_message_id]
+                                        : std::string("(") + m.reply_to_message_id + ")");
+        row["forwardedFrom"] = to_q(m.forwarded_from_sender_user_id.empty()
+                                    ? m.forwarded_from_conversation_id
+                                    : m.forwarded_from_sender_user_id);
+        row["reactions"]     = to_q(m.reaction_summary);
+        row["pinned"]        = m.pinned;
+        row["edited"]        = m.edited;
+        row["deleted"]       = m.deleted;
         out.append(row);
     }
     return out;
+}
+
+// ---- M143 mobile message actions ----
+
+void MobileChatBridge::replyMessage(const QString& targetMessageId, const QString& text) {
+    if (!client_ || text.trimmed().isEmpty()) return;
+    const auto conv = store_.selected_conversation_id();
+    if (conv.empty()) return;
+    const auto target = to_std(targetMessageId);
+    const auto body = to_std(text);
+    auto client = client_;
+    std::thread([this, client, conv, target, body] {
+        const auto sent = client->reply_message(conv, target, body);
+        QMetaObject::invokeMethod(this, [this, sent, conv] {
+            if (shutting_down_) return;
+            if (!sent.ok) { emit errorReported(to_q("reply " + sent.error_code + " " + sent.error_message)); return; }
+            // The message gets fanned back via push; nothing more to do here.
+            (void)conv;
+            emitStoreChanged();
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void MobileChatBridge::forwardMessage(const QString& sourceMessageId,
+                                      const QString& destinationConversationId) {
+    if (!client_) return;
+    const auto src_conv = store_.selected_conversation_id();
+    if (src_conv.empty()) return;
+    const auto src_id = to_std(sourceMessageId);
+    auto dest = to_std(destinationConversationId);
+    if (dest.empty()) dest = src_conv;  // forward into the same chat by default
+    auto client = client_;
+    std::thread([this, client, src_conv, src_id, dest] {
+        const auto sent = client->forward_message(src_conv, src_id, dest);
+        QMetaObject::invokeMethod(this, [this, sent] {
+            if (shutting_down_) return;
+            if (!sent.ok) { emit errorReported(to_q("forward " + sent.error_code + " " + sent.error_message)); return; }
+            emitStoreChanged();
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void MobileChatBridge::toggleReaction(const QString& messageId, const QString& emoji) {
+    if (!client_ || emoji.isEmpty()) return;
+    const auto conv = store_.selected_conversation_id();
+    if (conv.empty()) return;
+    const auto mid = to_std(messageId);
+    const auto e = to_std(emoji);
+    auto client = client_;
+    std::thread([this, client, conv, mid, e] {
+        const auto r = client->toggle_reaction(conv, mid, e);
+        QMetaObject::invokeMethod(this, [this, r] {
+            if (shutting_down_) return;
+            if (!r.ok) { emit errorReported(to_q("react " + r.error_code + " " + r.error_message)); return; }
+            store_.apply_reaction_summary(r.conversation_id, r.message_id, r.reaction_summary);
+            emitStoreChanged();
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void MobileChatBridge::pinMessage(const QString& messageId, bool pinned) {
+    if (!client_) return;
+    const auto conv = store_.selected_conversation_id();
+    if (conv.empty()) return;
+    const auto mid = to_std(messageId);
+    auto client = client_;
+    std::thread([this, client, conv, mid, pinned] {
+        const auto r = client->set_message_pin(conv, mid, pinned);
+        QMetaObject::invokeMethod(this, [this, r] {
+            if (shutting_down_) return;
+            if (!r.ok) { emit errorReported(to_q("pin " + r.error_code + " " + r.error_message)); return; }
+            store_.apply_pin_state(r.conversation_id, r.message_id, r.pinned);
+            emitStoreChanged();
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void MobileChatBridge::editMessage(const QString& messageId, const QString& newText) {
+    if (!client_) return;
+    const auto conv = store_.selected_conversation_id();
+    if (conv.empty()) return;
+    const auto mid = to_std(messageId);
+    const auto body = to_std(newText);
+    auto client = client_;
+    std::thread([this, client, conv, mid, body] {
+        const auto r = client->edit_message(conv, mid, body);
+        QMetaObject::invokeMethod(this, [this, r, conv, mid] {
+            if (shutting_down_) return;
+            if (!r.ok) { emit errorReported(to_q("edit " + r.error_code + " " + r.error_message)); return; }
+            store_.apply_message_edited(conv, mid, r.text);
+            emitStoreChanged();
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void MobileChatBridge::deleteMessage(const QString& messageId) {
+    if (!client_) return;
+    const auto conv = store_.selected_conversation_id();
+    if (conv.empty()) return;
+    const auto mid = to_std(messageId);
+    auto client = client_;
+    std::thread([this, client, conv, mid] {
+        const auto r = client->delete_message(conv, mid);
+        QMetaObject::invokeMethod(this, [this, r, conv, mid] {
+            if (shutting_down_) return;
+            if (!r.ok) { emit errorReported(to_q("delete " + r.error_code + " " + r.error_message)); return; }
+            // Apply locally; the server fanout will redundantly land later.
+            store_.apply_message_deleted(conv, mid);
+            emitStoreChanged();
+        }, Qt::QueuedConnection);
+    }).detach();
 }

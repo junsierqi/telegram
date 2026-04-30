@@ -410,6 +410,12 @@ public:
     [[nodiscard]] AttachmentFetchResult fetch_attachment(const std::string& attachment_id);
     [[nodiscard]] AckResult mark_read(const std::string& conversation_id,
                                       const std::string& message_id);
+    // M147: client-side typing pulse. Returns AckResult so callers can
+    // surface server-side rejection (e.g. CONVERSATION_ACCESS_DENIED) but
+    // most callers fire-and-forget — typing is an opportunistic UX
+    // signal and clients decay locally after ~5s.
+    [[nodiscard]] AckResult send_typing_pulse(const std::string& conversation_id,
+                                              bool is_typing);
     [[nodiscard]] MessageResult edit_message(const std::string& conversation_id,
                                              const std::string& message_id,
                                              const std::string& new_text);

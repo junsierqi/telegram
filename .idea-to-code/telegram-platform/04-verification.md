@@ -722,3 +722,87 @@
 - Verified: Full sweep regression: 70 passed | 0 failed | 4 SKIP_EXTERNAL — including validate_web_bridge.py 6/6 (manifest still parses + sw.js still has the push handler the validator asserts).
 - Covers: REQ-VALIDATION, REQ-CHAT-CORE
 
+## M135 - desktop theme tokens + dark mode (gate: pass)
+
+- Timestamp: 2026-04-29T12:24:15+00:00
+- Verified: scripts/validate_theme_tokens.py 6/6; full sweep 71 passed | 0 failed | 4 SKIP_EXTERNAL
+- Covers: REQ-UI-DARK-THEME
+
+## M136 - QML mobile theme parity (gate: pass)
+
+- Timestamp: 2026-04-29T12:42:29+00:00
+- Verified: scripts/validate_qml_theme.py 6/6 (light + dark token sets, desktop/mobile palette parity for 18 shared tokens, active palette switches on darkMode, Main.qml + main.cpp + CMakeLists wiring)
+- Covers: REQ-UI-DARK-THEME
+
+## M137 - Telegram-style bubble polish (gate: pass)
+
+- Timestamp: 2026-04-29T12:42:30+00:00
+- Verified: scripts/validate_bubble_polish.py 6/6 (palette struct + 10 fields, renderer uses 10 palette fields + 4 tick glyphs, render_store wires active_theme, bridge publishes deliveryTick, QML uses gradient + tokens + tick glyphs, 5-state vocab); full sweep 73 passed | 0 failed | 4 SKIP_EXTERNAL
+- Covers: REQ-UI-BUBBLE-POLISH
+
+## M138 - BubbleListView replaces QTextBrowser (gate: pass)
+
+- Timestamp: 2026-04-29T14:39:40+00:00
+- Verified: scripts/validate_bubble_list_view.py 6/6 + scripts/validate_bubble_polish.py 6/6 (updated for new path); cmake --build build-local Release succeeded with MSVC 2022 + Qt 6.11; snap_m138_{light,dark}.png show real Telegram-style bubbles
+- Covers: REQ-UI-BUBBLE-POLISH
+
+## M139 - Telegram-style settings page + runtime theme toggle (gate: pass)
+
+- Timestamp: 2026-04-29T14:39:40+00:00
+- Verified: scripts/validate_settings_page.py 4/4 (runtime helpers, 11 icon-prefixed nav entries with Appearance, Light/Dark radio + apply lambda + persistence, persisted seed before window); cmake --build build-local Release succeeded; full sweep 72 passed | 3 failed | 4 SKIP_EXTERNAL (3 failures are stale build-codex binaries unrelated, CI rebuilds them clean)
+- Covers: REQ-UI-DARK-THEME
+
+## M140 - desktop typing indicator (3-dot pulse) (gate: pass)
+
+- Timestamp: 2026-04-29T15:59:46+00:00
+- Verified: scripts/validate_typing_indicator.py 4/4; cmake --build build-local app_desktop succeeded; snap_m140_typing.png shows live animated typing line
+- Covers: REQ-UI-TYPING-ANIM
+
+## M141 + M143 - mobile QML message-action parity (gate: pass)
+
+- Timestamp: 2026-04-29T15:59:47+00:00
+- Verified: scripts/validate_mobile_message_actions.py 6/6; cmake --build build-local app_mobile succeeded; smoke launch reaches QML event loop
+- Covers: REQ-UI-REPLY-FORWARD-REACTION, REQ-UI-SWIPE-GESTURES
+
+## M144 - pin message top bar (gate: pass)
+
+- Timestamp: 2026-04-30T01:03:59+00:00
+- Verified: scripts/validate_pin_bar_info_dialog.py 5/5; cmake --build build-local app_desktop succeeded
+- Covers: REQ-UI-PIN-BAR
+
+## M145 - chat info dialog (gate: partial)
+
+- Timestamp: 2026-04-30T01:04:00+00:00
+- Verified: scripts/validate_pin_bar_info_dialog.py 5/5; cmake --build build-local app_desktop succeeded
+- Covers: REQ-UI-INFO-DRAWER
+
+## M146 - TYPING_PULSE protocol fanout (gate: pass)
+
+- Timestamp: 2026-04-30T01:04:00+00:00
+- Verified: scripts/validate_typing_pulse.py 4/4 (true + false propagation, non-participant rejected with conversation_access_denied + no leak, unknown_conversation surfaced); full sweep 76 passed | 3 failed | 4 SKIP_EXTERNAL
+- Covers: REQ-UI-TYPING-ANIM
+
+## M147 - typing pulse client wiring (desktop) (gate: pass)
+
+- Timestamp: 2026-04-30T01:27:14+00:00
+- Verified: scripts/validate_typing_client.py 5/5; cmake --build build-local app_desktop succeeded; M146 server validator round-trip confirms the wire shape
+- Covers: REQ-UI-TYPING-ANIM
+
+## M148 - desktop bubble image thumbnails (gate: pass)
+
+- Timestamp: 2026-04-30T01:27:15+00:00
+- Verified: scripts/validate_image_thumbnails.py 5/5; cmake --build build-local app_desktop succeeded with new QImage + QPixmap + QSet symbols; full sweep 78 passed | 3 failed | 4 SKIP_EXTERNAL
+- Covers: REQ-UI-INLINE-PREVIEW
+
+## M149 - mobile swipe-right-to-reply gesture (gate: pass)
+
+- Timestamp: 2026-04-30T02:04:30+00:00
+- Verified: scripts/validate_swipe_drawer.py 5/5 covering both M149 + M150; cmake --build build-local app_mobile succeeded
+- Covers: REQ-UI-SWIPE-GESTURES
+
+## M150 - sliding chat info drawer animation (gate: pass)
+
+- Timestamp: 2026-04-30T02:04:30+00:00
+- Verified: scripts/validate_swipe_drawer.py 5/5 (Tool + FramelessWindowHint + dockedGeo/offGeo + 220/180 ms QPropertyAnimation timings + close button finished -> accept); cmake --build build-local app_desktop succeeded with QPropertyAnimation linked; full sweep 79 passed | 3 failed | 4 SKIP_EXTERNAL
+- Covers: REQ-UI-INFO-DRAWER
+

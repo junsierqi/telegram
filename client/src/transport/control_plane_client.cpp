@@ -789,6 +789,35 @@ AttachmentFetchResult ControlPlaneClient::fetch_attachment(const std::string& at
     return result;
 }
 
+AckResult ControlPlaneClient::send_typing_pulse(const std::string& conversation_id,
+                                                bool is_typing) {
+    // M147: pure passthrough — server fanouts to other participants.
+    // Callers typically fire-and-forget; we still parse the response so
+    // a CONVERSATION_ACCESS_DENIED / UNKNOWN_CONVERSATION can surface
+    // through ok=false on the caller side.
+    AckResult result;
+    std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+                        + ",\"is_typing\":" + (is_typing ? "true" : "false") + "}";
+    auto response = send_and_wait("typing_pulse", payload);
+    if (!response) {
+        result.error_code = "transport_error";
+        return result;
+    }
+    const std::string type = extract_type(*response);
+    if (type == "typing_pulse") {
+        result.ok = true;
+    } else {
+        auto payload_obj = parse_payload(*response);
+        if (payload_obj) {
+            result.error_code = extract_string(*payload_obj, "code");
+            result.error_message = extract_string(*payload_obj, "message");
+        } else {
+            result.error_code = "bad_response";
+        }
+    }
+    return result;
+}
+
 AckResult ControlPlaneClient::mark_read(const std::string& conversation_id,
                                         const std::string& message_id) {
     AckResult result;

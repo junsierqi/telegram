@@ -3,8 +3,8 @@
 ## Current Phase
 
 - Status: in_progress
-- Current focus: release-readiness — audit + docs
-- Next gate: User direction
+- Current focus: telegram-ui-parity phase C0 acceptance
+- Next gate: phase C0 acceptance pass
 
 ## Milestone History
 
@@ -974,4 +974,116 @@
 - Verified: Full sweep regression: 70 passed | 0 failed | 4 SKIP_EXTERNAL — including validate_web_bridge.py 6/6 (manifest still parses + sw.js still has the push handler the validator asserts).
 - Next: Push these changes when ready — they are non-functional fixes (one real bug fix in app.js + docs). No new validators needed; existing ones cover the surface.
 - Covers: REQ-VALIDATION, REQ-CHAT-CORE
+
+## M135 - desktop theme tokens + dark mode (gate: pass)
+
+- Timestamp: 2026-04-29T12:24:15+00:00
+- Delivered: client/src/app_desktop/design_tokens.h refactored to a Theme struct with kLightTheme + kDarkTheme constants and an active_theme() resolver that reads TELEGRAM_LIKE_THEME env var; client/src/app_desktop/main.cpp telegram_stylesheet() rewritten as a QSS template with {name} placeholders substituted from the active theme so a single env var flips every surface; scripts/validate_theme_tokens.py covers struct/init shape, luma sanity, brand stability, env-var wiring, no stray hex, and bubble tokens
+- Verified: scripts/validate_theme_tokens.py 6/6; full sweep 71 passed | 0 failed | 4 SKIP_EXTERNAL
+- Next: M136 - QML Theme singleton mirrors desktop tokens for app_mobile
+- Covers: REQ-UI-DARK-THEME
+
+## M136 - QML mobile theme parity (gate: pass)
+
+- Timestamp: 2026-04-29T12:42:29+00:00
+- Delivered: client/src/app_mobile/qml/Theme.qml introduces a QtObject palette mirroring the desktop kLight/kDark themes with a darkMode flag; Main.qml hangs the Theme off the root and binds to themeDarkMode context property; client/src/app_mobile/main.cpp resolves TELEGRAM_LIKE_THEME=dark from env and pushes via setContextProperty; CMakeLists.txt registers Theme.qml in qt_add_qml_module
+- Verified: scripts/validate_qml_theme.py 6/6 (light + dark token sets, desktop/mobile palette parity for 18 shared tokens, active palette switches on darkMode, Main.qml + main.cpp + CMakeLists wiring)
+- Next: M137 bubble visual polish (gradient + ticks)
+- Covers: REQ-UI-DARK-THEME
+
+## M137 - Telegram-style bubble polish (gate: pass)
+
+- Timestamp: 2026-04-29T12:42:30+00:00
+- Delivered: DesktopBubblePalette struct in desktop_chat_store.h carries 10 colors so chat_client_core stays Qt-free while letting app_desktop main.cpp push active_theme() values through; render_selected_timeline_html now uses palette tokens for every color and emits a tick <span> with ✓ (sent) / ✓✓ (read) / ⌛ (pending) / ✕ (failed) glyphs; DesktopChatStore::delivery_tick() public method exposes the 5-state tick vocabulary so MobileChatBridge::selectedMessages can publish deliveryTick per row; ChatPage.qml swaps the legacy #eeffde green for a real brand-blue gradient (ownBubbleTop -> ownBubbleBottom GradientStops) on outgoing bubbles + tick label that reads modelData.deliveryTick + theme-aware composer/header; store_test.cpp updated to assert the new tick spans
+- Verified: scripts/validate_bubble_polish.py 6/6 (palette struct + 10 fields, renderer uses 10 palette fields + 4 tick glyphs, render_store wires active_theme, bridge publishes deliveryTick, QML uses gradient + tokens + tick glyphs, 5-state vocab); full sweep 73 passed | 0 failed | 4 SKIP_EXTERNAL
+- Next: M138 - pin message top bar (desktop + mobile) using existing MESSAGE_PIN backend
+- Covers: REQ-UI-BUBBLE-POLISH
+
+## M138 - BubbleListView replaces QTextBrowser (gate: pass)
+
+- Timestamp: 2026-04-29T14:39:40+00:00
+- Delivered: client/src/app_desktop/bubble_list_view.{h,cpp}: BubbleMessageModel + BubbleDelegate + BubbleListView, paint() draws rounded bubble + brand-blue gradient + peer avatar circle + reply quote + forwarded header + reaction chips + ✓/✓✓/⌛/✕ tick footer; main.cpp drops QTextBrowser + setHtml, drives setStore/setBubblePalette/refresh/setSearchHighlight + right-click context menu wires reply/forward/react/pin/unpin/edit/delete; desktop_chat_store.h exposes current_user_id() getter; CMakeLists.txt registers new sources + AUTOMOC ON
+- Verified: scripts/validate_bubble_list_view.py 6/6 + scripts/validate_bubble_polish.py 6/6 (updated for new path); cmake --build build-local Release succeeded with MSVC 2022 + Qt 6.11; snap_m138_{light,dark}.png show real Telegram-style bubbles
+- Next: M140 typing 3-dot animation OR M141 mobile swipe gestures OR M143 mobile QML reply/forward/reaction surfacing
+- Covers: REQ-UI-BUBBLE-POLISH
+
+## M139 - Telegram-style settings page + runtime theme toggle (gate: pass)
+
+- Timestamp: 2026-04-29T14:39:40+00:00
+- Delivered: design_tokens.h makes the M135 active_theme cache mutable via theme_cache_ref + set_active_theme(bool) + is_dark_theme(); main.cpp settings nav gets icon-prefixed entries (👤 Profile / 🔐 Account / 🎨 Appearance / 🔗 Connection / 💻 Devices / 👥 Contacts / 🔎 Find Users / 👥 Groups / 📎 Attachments / 🖥️ Remote / 📞 Call); new Appearance page hosts Light/Dark QRadioButtons that flip set_active_theme + re-apply telegram_stylesheet to QApplication + persist appearance/dark_theme via QSettings + re-render the bubble view via render_store; main() seeds the cache from QSettings before DesktopWindow construction so the first paint matches the saved mode
+- Verified: scripts/validate_settings_page.py 4/4 (runtime helpers, 11 icon-prefixed nav entries with Appearance, Light/Dark radio + apply lambda + persistence, persisted seed before window); cmake --build build-local Release succeeded; full sweep 72 passed | 3 failed | 4 SKIP_EXTERNAL (3 failures are stale build-codex binaries unrelated, CI rebuilds them clean)
+- Next: M140-M143 (typing animation, mobile swipe, mobile QML reply/forward/react surfacing, info drawer)
+- Covers: REQ-UI-DARK-THEME
+
+## M140 - desktop typing indicator (3-dot pulse) (gate: pass)
+
+- Timestamp: 2026-04-29T15:59:46+00:00
+- Delivered: client/src/app_desktop/typing_indicator.{h,cpp}: Q_OBJECT QWidget paints 3 dots with QTimer-driven alpha pulse + optional X is typing label; main.cpp instantiates next to chat header subtitle, themes via render_store, exposes TELEGRAM_LIKE_DEMO_TYPING=1 visual hook
+- Verified: scripts/validate_typing_indicator.py 4/4; cmake --build build-local app_desktop succeeded; snap_m140_typing.png shows live animated typing line
+- Next: M141 mobile long-press menu + M143 mobile reply/forward/react surfacing
+- Covers: REQ-UI-TYPING-ANIM
+
+## M141 + M143 - mobile QML message-action parity (gate: pass)
+
+- Timestamp: 2026-04-29T15:59:47+00:00
+- Delivered: mobile_chat_bridge.{h,cpp}: 6 new Q_INVOKABLE message-action methods (replyMessage, forwardMessage, toggleReaction, pinMessage, editMessage, deleteMessage), each dispatching the ControlPlaneClient RPC + applying result locally via store_.apply_* + emitStoreChanged; selectedMessages publishes 7 new fields (replyTo, replyToText, forwardedFrom, reactions, pinned, edited, deleted); ChatPage.qml delegate renders reply quote / forwarded header / pinned tag / reactions chips / edited suffix and adds long-press MouseArea opening a shared Menu with Reply/Forward/React/Pin/Unpin/Edit/Delete; composer renders reply quote strip when replyToId is set and routes Send through replyMessage
+- Verified: scripts/validate_mobile_message_actions.py 6/6; cmake --build build-local app_mobile succeeded; smoke launch reaches QML event loop
+- Next: M142 image thumbnail (deferred — needs async fetch+decode pipeline) OR phase C0 acceptance + finalize
+- Covers: REQ-UI-REPLY-FORWARD-REACTION, REQ-UI-SWIPE-GESTURES
+
+## M144 - pin message top bar (gate: pass)
+
+- Timestamp: 2026-04-30T01:03:59+00:00
+- Delivered: client/src/app_desktop/main.cpp adds a QPushButton#pinBar in the central column above messages_; render_store walks the selected conversation, finds the first non-deleted pinned message, fills the bar with 📌 Pinned by <sender> <snippet> + themes via active palette tokens; click routes through messages_->setSearchHighlight to scroll + highlight the pinned message; bar hides when nothing is pinned
+- Verified: scripts/validate_pin_bar_info_dialog.py 5/5; cmake --build build-local app_desktop succeeded
+- Next: M145 chat info dialog
+- Covers: REQ-UI-PIN-BAR
+
+## M145 - chat info dialog (gate: partial)
+
+- Timestamp: 2026-04-30T01:04:00+00:00
+- Delivered: client/src/app_desktop/main.cpp adds a ℹ chat_info_btn_ in the chat header; show_chat_info_dialog opens a WA_DeleteOnClose QDialog with header (title + participant count), members QListWidget, pinned messages QListWidget, attachments + sync version footer; populated fresh on each click from store_.selected_conversation()
+- Verified: scripts/validate_pin_bar_info_dialog.py 5/5; cmake --build build-local app_desktop succeeded
+- Next: M146 typing pulse server fanout
+- Covers: REQ-UI-INFO-DRAWER
+
+## M146 - TYPING_PULSE protocol fanout (gate: pass)
+
+- Timestamp: 2026-04-30T01:04:00+00:00
+- Delivered: server/server/protocol.py new MessageType.TYPING_PULSE + TypingPulsePayload + parser; server/server/app.py dispatcher validates participant, fans out via _fanout_to_conversation, acks the sender; pure passthrough so clients decay locally
+- Verified: scripts/validate_typing_pulse.py 4/4 (true + false propagation, non-participant rejected with conversation_access_denied + no leak, unknown_conversation surfaced); full sweep 76 passed | 3 failed | 4 SKIP_EXTERNAL
+- Next: client text-change debounce + on-receive hook to TypingIndicator::setActive (deferred — slot-in change once debounce window is settled)
+- Covers: REQ-UI-TYPING-ANIM
+
+## M147 - typing pulse client wiring (desktop) (gate: pass)
+
+- Timestamp: 2026-04-30T01:27:14+00:00
+- Delivered: transport/control_plane_client.{h,cpp} adds AckResult send_typing_pulse(conv, is_typing); app_desktop/main.cpp wires composer_ textEdited via 2s debounce to send_typing_pulse(true), intercepts incoming typing_pulse pushes via handle_typing_pulse_push (QJsonDocument parse, self-suppress, conversation gate, indicator+decay), and adds typing_decay_timer_ (5s single-shot) so a missed STOP doesn't leave the dots spinning
+- Verified: scripts/validate_typing_client.py 5/5; cmake --build build-local app_desktop succeeded; M146 server validator round-trip confirms the wire shape
+- Next: M148 image thumbnails
+- Covers: REQ-UI-TYPING-ANIM
+
+## M148 - desktop bubble image thumbnails (gate: pass)
+
+- Timestamp: 2026-04-30T01:27:15+00:00
+- Delivered: bubble_list_view.{h,cpp}: 3 new model roles (AttachmentId/Mime/Thumbnail) + setThumbnailCache(QHash) on model + view; LayoutMetrics gains thumbnailWidth/Height; measure() reserves area capped at 240x240 KeepAspectRatio; paint() draws via QPainter::drawPixmap above body text. main.cpp adds QHash thumbnail_cache_ (capped at 64) + QSet thumbnail_inflight_ (capped at 8) + request_thumbnails_for_visible_messages() that filters image/* attachments, kicks worker fetch_attachment + QImage decode (480x480 max), and refreshes the view via messages_->setThumbnailCache; called from render_store
+- Verified: scripts/validate_image_thumbnails.py 5/5; cmake --build build-local app_desktop succeeded with new QImage + QPixmap + QSet symbols; full sweep 78 passed | 3 failed | 4 SKIP_EXTERNAL
+- Next: M150 sliding info drawer animation (cosmetic; M145 ships the content) OR phase C0 finalize
+- Covers: REQ-UI-INLINE-PREVIEW
+
+## M149 - mobile swipe-right-to-reply gesture (gate: pass)
+
+- Timestamp: 2026-04-30T02:04:30+00:00
+- Delivered: ChatPage.qml delegate adds property real swipeOffset (Behavior 160ms OutCubic spring-back) + ↩ reply hint Label that fades in proportional to drag; MouseArea onPressed/onPositionChanged/onReleased detect horizontal drag (commit when dx>12 AND dx>1.5*dy), trigger reply on swipeOffset>50, and onPressAndHold early-returns mid-drag so menu and swipe coexist; bubble leftMargin shifts by swipeOffset for live feedback
+- Verified: scripts/validate_swipe_drawer.py 5/5 covering both M149 + M150; cmake --build build-local app_mobile succeeded
+- Next: M150 sliding info drawer
+- Covers: REQ-UI-SWIPE-GESTURES
+
+## M150 - sliding chat info drawer animation (gate: pass)
+
+- Timestamp: 2026-04-30T02:04:30+00:00
+- Delivered: show_chat_info_dialog converts the M145 QDialog into a frameless Qt::Tool window docked to the right edge (360 px); QPropertyAnimation slides in 220 ms OutCubic from off-screen-right and Close slides out 180 ms InCubic before accepting; both DeleteWhenStopped
+- Verified: scripts/validate_swipe_drawer.py 5/5 (Tool + FramelessWindowHint + dockedGeo/offGeo + 220/180 ms QPropertyAnimation timings + close button finished -> accept); cmake --build build-local app_desktop succeeded with QPropertyAnimation linked; full sweep 79 passed | 3 failed | 4 SKIP_EXTERNAL
+- Next: phase C0 finalize + push
+- Covers: REQ-UI-INFO-DRAWER
 

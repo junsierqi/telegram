@@ -72,12 +72,31 @@ if(Qt6_FOUND)
     if(COMMAND qt_add_executable)
         qt_add_executable(app_desktop
             app_desktop/main.cpp
+            # M138: BubbleListView replaces the QTextBrowser-based message
+            # area so layout (float/max-width/border-radius/gradient) works
+            # via QPainter instead of Qt's limited rich-text engine.
+            app_desktop/bubble_list_view.cpp
+            app_desktop/bubble_list_view.h
+            # M140: animated typing indicator (3-dot pulse) for the chat header.
+            app_desktop/typing_indicator.cpp
+            app_desktop/typing_indicator.h
         )
     else()
         add_executable(app_desktop
             app_desktop/main.cpp
+            app_desktop/bubble_list_view.cpp
+            app_desktop/bubble_list_view.h
+            app_desktop/typing_indicator.cpp
+            app_desktop/typing_indicator.h
         )
     endif()
+    # M138: BubbleListView / BubbleMessageModel / BubbleDelegate are
+    # Q_OBJECT types — AUTOMOC must be on so the build generates the
+    # moc_*.cpp glue. qt_add_executable does not flip this on by itself
+    # in every Qt 6 version; explicit set_target_properties is portable.
+    set_target_properties(app_desktop PROPERTIES
+        AUTOMOC ON
+    )
 
     target_link_libraries(app_desktop
         PRIVATE
@@ -210,6 +229,8 @@ if(Qt6_FOUND)
                 app_mobile/qml/SearchPage.qml
                 app_mobile/qml/AttachmentsPage.qml
                 app_mobile/qml/CallPage.qml
+                # M136: shared theme tokens (light + dark) for QML pages.
+                app_mobile/qml/Theme.qml
         )
         target_link_libraries(app_mobile
             PRIVATE

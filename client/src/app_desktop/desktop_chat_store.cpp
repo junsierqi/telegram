@@ -691,26 +691,46 @@ std::string DesktopChatStore::render_selected_transcript() const {
 }
 
 std::string DesktopChatStore::render_selected_timeline_html(const std::string& search_query,
-                                                            const std::string& focused_message_id) const {
+                                                            const std::string& focused_message_id,
+                                                            const DesktopBubblePalette& palette) const {
     const auto* conversation = selected_conversation();
     if (conversation == nullptr) return {};
 
+    // M137: bubble visual contract polished to match Telegram desktop —
+    // own messages right, peer left; own bubbles render in brand blue with
+    // white text; bottom-right of every own bubble carries a tick (✓ sent,
+    // ✓✓ read, ⌛ pending, ✕ failed). Colors flow in via DesktopBubblePalette
+    // so chat_client_core stays Qt-free and the same renderer covers both
+    // light and dark themes.
     std::ostringstream out;
     out << "<html><head><style>"
-        << "body{background:#e6ebee;font-family:'Segoe UI','Helvetica Neue',sans-serif;margin:0;padding:14px 18px;color:#0f1419;}"
-        << ".title{font-weight:600;margin:0 0 14px 0;color:#3390ec;font-size:14px;}"
+        << "body{background:" << palette.chat_area_bg
+        <<        ";font-family:'Segoe UI','Helvetica Neue',sans-serif;margin:0;padding:14px 18px;color:"
+        <<        palette.peer_bubble_text << ";}"
+        << ".title{font-weight:600;margin:0 0 14px 0;color:" << palette.primary << ";font-size:14px;}"
         << ".row{clear:both;margin:6px 0;overflow:auto;}"
         << ".bubble{max-width:72%;padding:8px 12px;border-radius:14px;box-shadow:0 1px 2px rgba(0,0,0,.08);}"
-        << ".out .bubble{float:right;background:#eeffde;border-bottom-right-radius:4px;}"
-        << ".in .bubble{float:left;background:#ffffff;border-bottom-left-radius:4px;}"
-        << ".meta{font-size:11px;color:#7c8a96;margin-bottom:3px;}"
-        << ".meta a{color:#3390ec;text-decoration:none;}"
-        << ".text{font-size:14px;line-height:1.4;color:#0f1419;}"
+        << ".out .bubble{float:right;background:" << palette.own_bubble
+        <<                ";color:" << palette.own_bubble_text
+        <<                ";border-bottom-right-radius:4px;}"
+        << ".in .bubble{float:left;background:" << palette.peer_bubble
+        <<                ";color:" << palette.peer_bubble_text
+        <<                ";border-bottom-left-radius:4px;}"
+        << ".meta{font-size:11px;color:" << palette.text_muted << ";margin-bottom:3px;}"
+        << ".out .meta{color:rgba(255,255,255,.78);}"
+        << ".meta a{color:" << palette.primary << ";text-decoration:none;}"
+        << ".out .meta a{color:rgba(255,255,255,.92);}"
+        << ".text{font-size:14px;line-height:1.4;}"
+        << ".tick{font-size:11px;float:right;margin-left:8px;letter-spacing:-1px;}"
+        << ".tick.sent{color:" << palette.tick_sent << ";}"
+        << ".tick.read{color:" << palette.tick_read << ";}"
+        << ".out .tick.sent,.out .tick.read{color:rgba(255,255,255,.92);}"
         << ".attach{font-size:12px;margin-top:6px;color:#3a6e5d;background:rgba(255,255,255,.55);padding:4px 6px;border-radius:8px;}"
-        << ".failed .bubble{background:#ffd7cf;}"
+        << ".out .attach{color:rgba(255,255,255,.92);background:rgba(255,255,255,.18);}"
+        << ".failed .bubble{background:" << palette.failed_bubble << ";color:#0f1419;}"
         << ".pending .meta{color:#b88a16;}"
         << ".match .bubble{border:2px solid #f6c344;}"
-        << ".focused .bubble{border:3px solid #3390ec;}"
+        << ".focused .bubble{border:3px solid " << palette.primary << ";}"
         << "</style></head><body>";
     out << "<div class='title'>" << html_escape(conversation->conversation_id);
     if (!conversation->title.empty()) out << " - " << html_escape(conversation->title);
@@ -721,6 +741,20 @@ std::string DesktopChatStore::render_selected_timeline_html(const std::string& s
         const auto& message = conversation->messages[i];
         const bool outgoing = message.sender_user_id == current_user_id_;
         const auto status = status_label(*conversation, message, current_user_id_);
+        // tick characters mirror Telegram desktop:
+        //   - own + pending → ⌛
+        //   - own + failed  → ✕
+        //   - own + sent    → ✓ (single)
+        //   - own + read    → ✓✓ (double)
+        //   - incoming      → no tick (caller renders 'received' as plain status)
+        const char* tick_char = "";
+        const char* tick_class = "";
+        if (outgoing) {
+            if (message.delivery_state == "pending")      { tick_char = "&#x231b;"; tick_class = "sent"; }      // hourglass
+            else if (message.delivery_state == "failed")  { tick_char = "&#x2715;"; tick_class = "sent"; }      // multiplication X
+            else if (status.rfind("read", 0) == 0)        { tick_char = "&#x2713;&#x2713;"; tick_class = "read"; } // ✓✓
+            else                                          { tick_char = "&#x2713;"; tick_class = "sent"; }      // ✓
+        }
         out << "<div class='row " << (outgoing ? "out" : "in");
         if (message.delivery_state == "pending") out << " pending";
         if (message.delivery_state == "failed") out << " failed";
@@ -728,12 +762,15 @@ std::string DesktopChatStore::render_selected_timeline_html(const std::string& s
         if (!focused_message_id.empty() && message.message_id == focused_message_id) out << " focused";
         out << "'><div class='bubble'>";
         out << "<div class='meta'>" << html_escape(format_time(message.created_at_ms))
-            << " · " << html_escape(message.sender_user_id)
-            << " · " << html_escape(status)
-            << " · <a href='msg://" << html_escape(message.message_id) << "'>"
+            << " &middot; " << html_escape(message.sender_user_id)
+            << " &middot; " << html_escape(status)
+            << " &middot; <a href='msg://" << html_escape(message.message_id) << "'>"
             << html_escape(message.message_id) << "</a></div>";
         out << "<div class='text'>" << html_escape(message.deleted ? std::string("<deleted>") : message.text);
         if (message.edited) out << " <span class='meta'>(edited)</span>";
+        if (outgoing) {
+            out << "<span class='tick " << tick_class << "'>" << tick_char << "</span>";
+        }
         out << "</div>";
         if (message.pinned || !message.reply_to_message_id.empty()
             || !message.forwarded_from_message_id.empty() || !message.reaction_summary.empty()) {
@@ -758,6 +795,47 @@ std::string DesktopChatStore::render_selected_timeline_html(const std::string& s
     }
     out << "</body></html>";
     return out.str();
+}
+
+std::string DesktopChatStore::delivery_tick(const std::string& conversation_id,
+                                            const std::string& message_id) const {
+    auto conv_it = std::find_if(conversations_.begin(), conversations_.end(),
+        [&](const auto& c) { return c.conversation_id == conversation_id; });
+    if (conv_it == conversations_.end()) return {};
+    const auto& conv = *conv_it;
+    auto msg_it = std::find_if(conv.messages.begin(), conv.messages.end(),
+        [&](const auto& m) { return m.message_id == message_id; });
+    if (msg_it == conv.messages.end()) return {};
+    const auto& message = *msg_it;
+    // Same state machine as the file-local status_label() — kept simple
+    // because the mobile bridge only needs a tick category, not the
+    // human-readable "read by alice,bob" detail. Logic for "did any peer's
+    // last_read_message_id reach this message?" is duplicated rather than
+    // reaching into the anonymous-namespace `readers_for` helper, since
+    // pulling that out would broaden the file's surface area for one
+    // call site.
+    if (message.sender_user_id != current_user_id_) return "received";
+    if (message.delivery_state == "pending") return "pending";
+    if (message.delivery_state == "failed") return "failed";
+    auto numeric_suffix = [](std::string_view id) {
+        const auto pos = id.rfind('_');
+        if (pos == std::string_view::npos || pos + 1 >= id.size()) return 0;
+        int value = 0;
+        for (std::size_t i = pos + 1; i < id.size(); ++i) {
+            const char ch = id[i];
+            if (ch < '0' || ch > '9') return 0;
+            value = value * 10 + (ch - '0');
+        }
+        return value;
+    };
+    const int message_key = numeric_suffix(message.message_id);
+    for (const auto& marker : conv.read_markers) {
+        if (marker.user_id.empty() || marker.user_id == current_user_id_) continue;
+        if (marker.last_read_message_id == message.message_id) return "read";
+        const int marker_key = numeric_suffix(marker.last_read_message_id);
+        if (message_key > 0 && marker_key >= message_key) return "read";
+    }
+    return "sent";
 }
 
 std::string DesktopChatStore::render_conversation_summary() const {

@@ -264,15 +264,25 @@ int main() {
     require(store.render_selected_transcript().find(">> [") != std::string::npos
                 && store.render_selected_transcript().find("u_alice | sent | msg_2") != std::string::npos,
             "rendered transcript missing outbound sent bubble state");
+    // M137: outbound bubble now uses the brand blue `#3390ec` instead of
+    // the legacy WhatsApp green `#eeffde`. The test confirms the row class
+    // is right-aligned (.row out), the bubble paints with the new color,
+    // and the bottom-right tick (single ✓ before read) is present.
     require(store.render_selected_timeline_html().find("class='row out") != std::string::npos
-                && store.render_selected_timeline_html().find("eeffde") != std::string::npos,
-            "rich timeline html missing outbound bubble styling");
+                && store.render_selected_timeline_html().find("#3390ec") != std::string::npos
+                && store.render_selected_timeline_html().find("class='tick sent'") != std::string::npos,
+            "rich timeline html missing outbound bubble styling + sent tick");
     require(store.render_selected_timeline_html().find("href='msg://msg_2'") != std::string::npos,
             "rich timeline html missing clickable message action target link");
 
     store.apply_push("message_read_update", read_push("conv_alice_bob", "u_bob", "msg_2"));
     require(store.render_selected_transcript().find("u_alice | read | msg_2") != std::string::npos,
             "read marker did not promote outbound message to read");
+    // M137: once the read marker lands, the timeline tick promotes to ✓✓
+    // (class='tick read'). This is the only signal users see in the bubble
+    // that the recipient actually opened the message.
+    require(store.render_selected_timeline_html().find("class='tick read'") != std::string::npos,
+            "read tick did not promote in rich timeline html after message_read_update");
 
     const auto failed_id = store.add_pending_message("conv_alice_bob", "will fail", 1710000006000);
     store.fail_pending_message("conv_alice_bob", failed_id, "transport_error");

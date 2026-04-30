@@ -229,6 +229,13 @@ class MessageType(StrEnum):
     MESSAGE_REACTION_UPDATED = "message_reaction_updated"
     MESSAGE_PIN = "message_pin"
     MESSAGE_PIN_UPDATED = "message_pin_updated"
+    # M146: client-driven typing presence pulse. Client sends one with
+    # is_typing=true while composing (debounced ~2s) and one with
+    # is_typing=false on send/blur. Server fans out to every other
+    # conversation participant; clients render via TypingIndicator
+    # with a 5s local decay so a missed STOP doesn't leave the dots
+    # spinning forever.
+    TYPING_PULSE = "typing_pulse"
     MESSAGE_SEARCH_REQUEST = "message_search_request"
     MESSAGE_SEARCH_RESPONSE = "message_search_response"
     MESSAGE_SEND_ATTACHMENT = "message_send_attachment"
@@ -640,6 +647,16 @@ class ConversationDescriptor:
     # implicit members; the client can still use this to render badges
     # or gate UI affordances.
     roles: dict[str, str] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class TypingPulsePayload:
+    """M146 typing pulse — request shape (sender_user_id stays empty;
+    server fills it before fanout) and fanout shape (sender_user_id
+    set to the originating session's user)."""
+    conversation_id: str
+    is_typing: bool = True
+    sender_user_id: str = ""
 
 
 @dataclass(slots=True)
@@ -1358,6 +1375,12 @@ def parse_request_payload(message_type: MessageType, payload: dict[str, Any]) ->
         return MessageReadRequestPayload(
             conversation_id=payload["conversation_id"],
             message_id=payload["message_id"],
+        )
+    if message_type == MessageType.TYPING_PULSE:
+        return TypingPulsePayload(
+            conversation_id=payload["conversation_id"],
+            is_typing=bool(payload.get("is_typing", True)),
+            sender_user_id=str(payload.get("sender_user_id", "")),
         )
     if message_type == MessageType.MESSAGE_EDIT:
         return MessageEditRequestPayload(
