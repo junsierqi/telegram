@@ -9,6 +9,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPropertyAnimation>
+#include <QResizeEvent>
 #include <QSet>
 #include <QTimer>
 
@@ -60,6 +61,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QMoveEvent>
 
 #include <atomic>
 #include <algorithm>
@@ -2490,6 +2492,8 @@ private:
             QToolButton#hamburgerButton, QToolButton#chatInfoBtn { border:none; background:transparent; color:{text_muted}; padding:7px 9px; border-radius:17px; font-size:24px; }
             QToolButton#hamburgerButton:hover, QToolButton#chatInfoBtn:hover { background:{hover}; color:{text_primary}; }
             QDialog#accountDrawer, QDialog#settingsModal, QDialog#loginModal { background:{surface}; }
+            QScrollArea#accountDrawerScroll { background:{surface}; border:none; }
+            QScrollArea#accountDrawerScroll > QWidget > QWidget { background:{surface}; }
             QWidget#drawerHeader { background:{surface}; border-bottom:1px solid {border_subtle}; }
             QLabel#drawerName { font-weight:700; font-size:15px; color:{text_primary}; }
             QLabel#drawerStatus { color:{primary}; font-size:13px; }
@@ -2808,29 +2812,47 @@ private:
         dlg->setObjectName("accountDrawer");
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
-        const QPoint mainTopLeft = mapToGlobal(QPoint(0, 0));
-        const int panelW = sidebar_panel_ != nullptr && sidebar_panel_->width() > 0
-            ? sidebar_panel_->width()
-            : 390;
-        const int panelH = height();
-        const QRect dockedGeo(mainTopLeft.x(), mainTopLeft.y(), panelW, panelH);
-        const QRect offGeo(mainTopLeft.x() - panelW, mainTopLeft.y(), panelW, panelH);
+        const QRect dockedGeo = account_drawer_geometry(false);
+        const QRect offGeo = account_drawer_geometry(true);
+        const int panelW = dockedGeo.width();
+        const int panelH = dockedGeo.height();
         dlg->setFixedSize(panelW, panelH);
         dlg->setGeometry(offGeo);
-        auto close_drawer = [dlg, dockedGeo, offGeo] {
+        auto close_drawer = [this, dlg] {
             if (dlg == nullptr || !dlg->isVisible()) return;
+            const QRect docked = account_drawer_geometry(false);
+            const QRect offscreen = account_drawer_geometry(true);
             auto* outAnim = new QPropertyAnimation(dlg, "geometry", dlg);
             outAnim->setDuration(160);
             outAnim->setEasingCurve(QEasingCurve::InCubic);
-            outAnim->setStartValue(dockedGeo);
-            outAnim->setEndValue(offGeo);
+            outAnim->setStartValue(docked);
+            outAnim->setEndValue(offscreen);
             QObject::connect(outAnim, &QPropertyAnimation::finished, dlg, &QDialog::accept);
             outAnim->start(QAbstractAnimation::DeleteWhenStopped);
         };
 
+        account_drawer_ = dlg;
+        QObject::connect(dlg, &QDialog::finished, this, [this, dlg] {
+            if (account_drawer_ == dlg) account_drawer_ = nullptr;
+        });
+
         auto* root = new QVBoxLayout(dlg);
         root->setContentsMargins(0, 0, 0, 0);
         root->setSpacing(0);
+        auto* scroll = new QScrollArea();
+        scroll->setObjectName("accountDrawerScroll");
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        auto* content = new QWidget();
+        content->setObjectName("accountDrawerContent");
+        content->setMinimumWidth(panelW);
+        scroll->setWidget(content);
+        root->addWidget(scroll, 1);
+        auto* content_layout = new QVBoxLayout(content);
+        content_layout->setContentsMargins(0, 0, 0, 0);
+        content_layout->setSpacing(0);
         auto* header = new QWidget();
         header->setObjectName("drawerHeader");
         auto* header_layout = new QVBoxLayout(header);
@@ -2852,7 +2874,7 @@ private:
         auto* status = new QLabel("Set Emoji Status");
         status->setObjectName("drawerStatus");
         header_layout->addWidget(status);
-        root->addWidget(header);
+        content_layout->addWidget(header);
 
         auto add_row = [&](const QString& icon_key, const QString& text, QObject* receiver = nullptr,
                            const char* slot = nullptr) -> QPushButton* {
@@ -2862,7 +2884,7 @@ private:
             btn->setIconSize(QSize(28, 28));
             btn->setMinimumHeight(64);
             btn->setCursor(Qt::PointingHandCursor);
-            root->addWidget(btn);
+            content_layout->addWidget(btn);
             if (receiver != nullptr && slot != nullptr) {
                 QObject::connect(btn, SIGNAL(clicked()), receiver, slot);
             } else if (text != "Settings" && text != "New Group"
@@ -2908,7 +2930,7 @@ private:
         auto* night = new QCheckBox();
         night->setChecked(telegram_like::client::app_desktop::design::is_dark_theme());
         night_layout->addWidget(night);
-        root->addWidget(night_wrap);
+        content_layout->addWidget(night_wrap);
         QObject::connect(night, &QCheckBox::toggled, [this](bool dark) {
             telegram_like::client::app_desktop::design::set_active_theme(dark);
             QSettings prefs;
@@ -2920,12 +2942,12 @@ private:
             render_store();
         });
 
-        root->addStretch(1);
+        content_layout->addStretch(1);
         auto* footer = new QLabel("Telegram Desktop<br>Version 6.7.5 x64 - About");
         footer->setObjectName("drawerFooter");
         footer->setTextFormat(Qt::RichText);
         footer->setContentsMargins(32, 14, 32, 30);
-        root->addWidget(footer);
+        content_layout->addWidget(footer);
         QObject::connect(qApp, &QApplication::focusChanged, dlg,
                          [dlg, close_drawer](QWidget*, QWidget* now) {
                              if (dlg == nullptr || !dlg->isVisible() || now == nullptr) return;
@@ -2938,10 +2960,41 @@ private:
         inAnim->setEasingCurve(QEasingCurve::OutCubic);
         inAnim->setStartValue(offGeo);
         inAnim->setEndValue(dockedGeo);
-        QObject::connect(inAnim, &QPropertyAnimation::finished, dlg, [dlg, dockedGeo] {
-            dlg->setGeometry(dockedGeo);
+        QObject::connect(inAnim, &QPropertyAnimation::finished, dlg, [this, dlg] {
+            if (dlg != nullptr && dlg->isVisible()) dlg->setGeometry(account_drawer_geometry(false));
         });
         inAnim->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+
+    QRect account_drawer_geometry(bool offscreen) const {
+        const QPoint mainTopLeft = mapToGlobal(QPoint(0, 0));
+        const int panelW = sidebar_panel_ != nullptr && sidebar_panel_->width() > 0
+            ? sidebar_panel_->width()
+            : 390;
+        const int panelH = height();
+        const int x = offscreen ? mainTopLeft.x() - panelW : mainTopLeft.x();
+        return QRect(x, mainTopLeft.y(), panelW, panelH);
+    }
+
+    void sync_account_drawer_geometry() {
+        if (account_drawer_ == nullptr || !account_drawer_->isVisible()) return;
+        const QRect docked = account_drawer_geometry(false);
+        account_drawer_->setFixedSize(docked.size());
+        account_drawer_->setGeometry(docked);
+        if (auto* content = account_drawer_->findChild<QWidget*>("accountDrawerContent")) {
+            content->setMinimumWidth(docked.width());
+        }
+    }
+
+protected:
+    void resizeEvent(QResizeEvent* event) override {
+        QMainWindow::resizeEvent(event);
+        sync_account_drawer_geometry();
+    }
+
+    void moveEvent(QMoveEvent* event) override {
+        QMainWindow::moveEvent(event);
+        sync_account_drawer_geometry();
     }
 
     void show_login_dialog() {
@@ -6465,6 +6518,7 @@ private:
     QLabel* chat_header_subtitle_ {nullptr};
     QToolButton* hamburger_button_ {nullptr};
     QWidget* sidebar_panel_ {nullptr};
+    QPointer<QDialog> account_drawer_;
     QScrollArea* details_panel_ {nullptr};
     QStackedWidget* details_stack_ {nullptr};
     QLabel* detail_avatar_label_ {nullptr};

@@ -29,6 +29,12 @@ def main() -> int:
         "sidebar_panel_",
         "sidebar_panel_->width()",
         "mapToGlobal(QPoint(0, 0))",
+        "account_drawer_geometry",
+        "sync_account_drawer_geometry",
+        "QScrollArea#accountDrawerScroll",
+        "accountDrawerContent",
+        "resizeEvent(QResizeEvent* event) override",
+        "moveEvent(QMoveEvent* event) override",
     ):
         require(token in main_cpp or token in gui_smoke, f"missing side-menu empty token: {token}")
     drawer_start = main_cpp.find("void show_account_drawer()")
