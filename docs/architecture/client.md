@@ -21,6 +21,7 @@ The remote-control direction is first-party. The desktop client is expected to g
 - login and registration screens
 - conversation list
 - chat view
+- Telegram Desktop-style right details panel with distinct channel, contact and group info layouts
 - settings
 - device management
 - remote-session dialogs
@@ -87,8 +88,10 @@ This layer should coordinate UI and transport without knowing storage details.
 - `client/src/devices/device_controller.*`
 - `client/src/remote_control/remote_session_controller.*`
 - `client/src/transport/session_gateway_client.*`
+- `client/src/app_desktop/main.cpp`
+- `client/src/app_desktop/desktop_chat_store.*`
 
-These files currently define module entry points and preserve the boundaries from this document. UI technology such as `Qt 6` will be introduced after the chat domain and transport contracts are expanded beyond placeholders.
+The placeholder controller files still preserve the original module boundaries, while the current runnable desktop UI lives in the Qt Widgets `app_desktop` target. `DesktopChatStore` is the GUI-facing cache/state boundary for conversation sync, local search, read markers, message actions, attachments and selected-conversation rendering. The `app_desktop` shell owns the current Telegram Desktop reference surfaces, including the three-pane chat layout, side menu, settings dialogs and the right details panel variants for channel, one-to-one contact and group info states.
 
 The later remote-control build-out should follow an AnyDesk-like product goal with a RustDesk-like engineering decomposition:
 

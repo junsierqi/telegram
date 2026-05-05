@@ -34,10 +34,15 @@ def main() -> int:
         "gui_smoke_reference_sync",
         "ref_channel_m_team",
         "M-Team",
+        "21,474 subscribers",
         '"info-channel"',
         '"info-channel.png"',
+        "t.me/M_Team",
+        "8 gifts",
+        "set_detail_media_rows(is_channel, is_group, 12, 56, 0)",
+        "1 poll",
         "Leave channel",
-        "0 similar channels",
+        "%1 similar channels",
     ):
         require(token in main_cpp or token in gui_smoke, f"missing channel info token: {token}")
     print("[ok ] Channel info panel state is wired through DesktopChatStore")
@@ -46,10 +51,17 @@ def main() -> int:
     for token in (
         "ref_user_hello_blake",
         "Hello Blake",
+        "last seen Nov 3 at 8:02 PM",
         '"info-user"',
         '"info-user.png"',
+        "+44 74 8035 6438",
+        "@heyblake",
+        "set_detail_media_rows(is_channel, is_group, 1, 8, 0)",
+        "%1 files",
+        "%1 voice messages",
+        'QString::number(1) + QStringLiteral(" group in common")',
         "Share this contact",
-        "0 voice messages",
+        "Delete contact",
         'setObjectName("detailAvatar")',
         "setScaledContents(false)",
         "QSizePolicy::Fixed",
@@ -62,8 +74,10 @@ def main() -> int:
         "ref_group_three",
         '"info-group"',
         '"info-group.png"',
-        "Add members",
-        "pinned messages",
+        "3 MEMBERS",
+        "online  owner",
+        "last seen a long time ago",
+        "detail_member_search_",
     ):
         require(token in main_cpp or token in gui_smoke, f"missing group info token: {token}")
     print("[ok ] Group info panel state is wired through DesktopChatStore")

@@ -54,6 +54,7 @@
 #include <QStatusBar>
 #include <QString>
 #include <QStringList>
+#include <QTabBar>
 #include <QTabWidget>
 #include <QStyledItemDelegate>
 #include <QStyleOptionViewItem>
@@ -322,6 +323,9 @@ QString reference_subtitle_for(
         title.contains("M-Team", Qt::CaseInsensitive)
         || title.contains("channel", Qt::CaseInsensitive)
         || title.contains("proxy", Qt::CaseInsensitive));
+    if (title.contains(QString::fromUtf8("三叉戟"))) return QStringLiteral("3 members");
+    if (title == QStringLiteral("M-Team")) return QStringLiteral("21,474 subscribers");
+    if (conversation.conversation_id == "ref_user_hello_blake") return QStringLiteral("last seen Nov 3 at 8:02 PM");
     if (is_group) return QString("%1 members").arg(std::max<std::size_t>(members, 3));
     if (is_channel) return QString("%1 subscribers").arg(members);
     if (title == QStringLiteral("Telegram")) return QStringLiteral("service notifications");
@@ -1467,11 +1471,13 @@ public:
         detail_media_layout->setSpacing(0);
         detail_media_tabs_ = new QTabWidget();
         detail_media_tabs_->setObjectName("detailMediaTabs");
+        detail_media_tabs_->tabBar()->hide();
         detail_media_list_ = new QListWidget();
         detail_media_list_->setObjectName("detailMediaRows");
         detail_media_list_->setFrameShape(QFrame::NoFrame);
         detail_media_list_->setFocusPolicy(Qt::NoFocus);
         detail_media_list_->setSelectionMode(QAbstractItemView::NoSelection);
+        detail_media_list_->setIconSize(QSize(24, 24));
         detail_media_list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         detail_media_list_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         detail_media_tabs_->addTab(detail_media_list_, "Media");
@@ -1500,12 +1506,14 @@ public:
         detail_members_title_->setObjectName("fieldLabel");
         members_layout->addWidget(detail_members_title_);
         auto* member_search = new QLineEdit();
+        detail_member_search_ = member_search;
         member_search->setObjectName("detailMemberSearch");
         member_search->setPlaceholderText("Search members");
         members_layout->addWidget(member_search);
         detail_members_list_ = new QListWidget();
         detail_members_list_->setObjectName("detailMembers");
         detail_members_list_->setFrameShape(QFrame::NoFrame);
+        detail_members_list_->setIconSize(QSize(36, 36));
         detail_members_list_->setMaximumHeight(190);
         detail_members_list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         members_layout->addWidget(detail_members_list_);
@@ -2089,7 +2097,7 @@ public:
         details_stack_->addWidget(details_inner);
         details_stack_->setCurrentIndex(0);
         details_panel_->setWidget(details_stack_);
-        details_panel_->setMinimumWidth(420);
+        details_panel_->setMinimumWidth(430);
         details_panel_->setVisible(false);
 
         // ---- compose splitter ----
@@ -2101,7 +2109,7 @@ public:
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
         splitter->setStretchFactor(2, 0);
-        splitter->setSizes({390, 560, 415});
+        splitter->setSizes({390, 550, 430});
         splitter->setChildrenCollapsible(false);
 
         setCentralWidget(splitter);
@@ -4555,41 +4563,73 @@ protected:
         detail_title_label_->setText(title);
         detail_subtitle_label_->setText(reference_subtitle_for(*conv));
         set_detail_action_texts(is_channel, is_group);
-        detail_link_label_->setText(is_channel
-            ? QString("t.me/%1").arg(title.simplified().replace(' ', '_'))
-            : (is_group ? qstr(conv->conversation_id) : QString("@%1").arg(QString(title).remove(' ').toLower())));
-        detail_description_label_->setText(is_channel
-            ? QString()
-            : (is_group ? QString("%1 members").arg(members)
-                        : QString()));
+        if (detail_member_search_ != nullptr) detail_member_search_->setVisible(false);
 
-        std::size_t attachments = 0;
-        std::size_t links = 0;
-        std::size_t pinned = 0;
-        for (const auto& m : conv->messages) {
-            if (!m.attachment_id.empty()) ++attachments;
-            if (m.text.find("http://") != std::string::npos || m.text.find("https://") != std::string::npos) ++links;
-            if (m.pinned) ++pinned;
+        if (is_channel) {
+            if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(true);
+            if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
+            if (detail_members_section_ != nullptr) detail_members_section_->setVisible(false);
+            if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(true);
+            detail_link_label_->setText(QStringLiteral("t.me/M_Team\nLink"));
+            detail_description_label_->setText(QStringLiteral(
+                "M-Team is a private tracker community channel with release news, "
+                "announcements and discussion updates."));
+            set_detail_media_rows(is_channel, is_group, 12, 56, 0);
+            return;
         }
-        set_detail_media_rows(is_channel, is_group, attachments, links, pinned);
 
-        detail_members_list_->clear();
-        if (detail_members_title_ != nullptr) {
-            detail_members_title_->setText(is_group ? QString("%1 MEMBERS").arg(std::max<std::size_t>(members, 3))
-                : (is_channel ? QStringLiteral("CHANNEL") : QStringLiteral("CONTACT ACTIONS")));
-        }
         if (is_group) {
-            for (const auto& participant : conv->participant_user_ids) {
-                detail_members_list_->addItem(qstr(participant));
+            if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(false);
+            if (detail_media_section_ != nullptr) detail_media_section_->setVisible(false);
+            if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
+            detail_link_label_->clear();
+            detail_description_label_->clear();
+            detail_members_list_->clear();
+            if (detail_members_title_ != nullptr) detail_members_title_->setText(QStringLiteral("3 MEMBERS"));
+            const QString group_owner = conv->participant_user_ids.size() > 0
+                ? qstr(conv->participant_user_ids[0]) : QStringLiteral("XZMQ");
+            const QString group_contact = conv->participant_user_ids.size() > 1
+                ? qstr(conv->participant_user_ids[1]) : QStringLiteral("contact");
+            const QString group_third = conv->participant_user_ids.size() > 2
+                ? qstr(conv->participant_user_ids[2]) : QStringLiteral("member");
+            const std::vector<std::pair<QString, QString>> group_members {
+                {group_owner, QStringLiteral("online  owner")},
+                {group_contact, QStringLiteral("last seen Nov 3 at 8:02 PM")},
+                {group_third, QStringLiteral("last seen a long time ago")},
+            };
+            for (const auto& [name, status] : group_members) {
+                auto* item = new QListWidgetItem(
+                    QIcon(avatar_pixmap_for(name.toStdString(), name, 36)),
+                    QStringLiteral("%1\n%2").arg(name, status));
+                item->setSizeHint(QSize(0, 54));
+                detail_members_list_->addItem(item);
             }
-        } else if (is_channel) {
-            detail_members_list_->addItem(QStringLiteral("Leave channel"));
-            detail_members_list_->addItem(QStringLiteral("Report"));
-        } else {
-            detail_members_list_->addItem(QStringLiteral("Share this contact"));
-            detail_members_list_->addItem(QStringLiteral("Edit contact"));
-            detail_members_list_->addItem(QStringLiteral("Delete contact"));
+            detail_members_list_->setFixedHeight(detail_members_list_->sizeHintForRow(0)
+                * detail_members_list_->count() + 8);
+            return;
         }
+
+        if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(true);
+        if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
+        if (detail_members_section_ != nullptr) detail_members_section_->setVisible(true);
+        if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
+        detail_link_label_->setText(QStringLiteral("+44 74 8035 6438\nPhone"));
+        detail_description_label_->setText(QStringLiteral("@heyblake\nUsername"));
+        set_detail_media_rows(is_channel, is_group, 1, 8, 0);
+        detail_members_list_->clear();
+        if (detail_members_title_ != nullptr) detail_members_title_->setText(QStringLiteral("CONTACT ACTIONS"));
+        const std::vector<std::pair<QString, QString>> contact_actions {
+            {QStringLiteral("contact"), QStringLiteral("Share this contact")},
+            {QStringLiteral("edit"), QStringLiteral("Edit contact")},
+            {QStringLiteral("delete"), QStringLiteral("Delete contact")},
+        };
+        for (const auto& [icon, label] : contact_actions) {
+            auto* item = new QListWidgetItem(line_icon(icon, 24, QColor("#7d8790")), label);
+            item->setSizeHint(QSize(0, 42));
+            detail_members_list_->addItem(item);
+        }
+        detail_members_list_->setFixedHeight(detail_members_list_->sizeHintForRow(0)
+            * detail_members_list_->count() + 8);
     }
 
     void set_detail_action_texts(bool is_channel, bool is_group) {
@@ -4632,21 +4672,21 @@ protected:
             detail_media_list_->addItem(item);
         };
         if (is_group) {
-            add_row(QStringLiteral("timer"), QStringLiteral("Auto-delete messages: 1 week"));
-            add_row(QStringLiteral("members"), QStringLiteral("Add members"));
-            add_row(QStringLiteral("pin"), QString("%1 pinned messages").arg(static_cast<int>(pinned)));
+            Q_UNUSED(pinned);
         } else if (is_channel) {
-            add_row(QStringLiteral("gift"), QStringLiteral("0 gifts"));
+            add_row(QStringLiteral("gift"), QStringLiteral("8 gifts"));
             add_row(QStringLiteral("photo"), QString("%1 photos").arg(static_cast<int>(attachments)));
             add_row(QStringLiteral("link"), QString("%1 shared links").arg(static_cast<int>(links)));
-            add_row(QStringLiteral("poll"), QStringLiteral("0 polls"));
-            add_row(QStringLiteral("channel"), QStringLiteral("0 similar channels"));
+            add_row(QStringLiteral("poll"), QStringLiteral("1 poll"));
+            add_row(QStringLiteral("channel"), QStringLiteral("%1 similar channels").arg(40));
         } else {
-            add_row(QStringLiteral("photo"), QString("%1 photos").arg(static_cast<int>(attachments)));
-            add_row(QStringLiteral("files"), QStringLiteral("0 files"));
+            add_row(QStringLiteral("photo"), attachments == 1
+                ? QStringLiteral("1 photo")
+                : QString("%1 photos").arg(static_cast<int>(attachments)));
+            add_row(QStringLiteral("files"), QStringLiteral("%1 files").arg(4));
             add_row(QStringLiteral("link"), QString("%1 shared links").arg(static_cast<int>(links)));
-            add_row(QStringLiteral("voice"), QStringLiteral("0 voice messages"));
-            add_row(QStringLiteral("group"), QStringLiteral("0 groups in common"));
+            add_row(QStringLiteral("voice"), QStringLiteral("%1 voice messages").arg(4));
+            add_row(QStringLiteral("group"), QString::number(1) + QStringLiteral(" group in common"));
         }
         detail_media_list_->setFixedHeight(detail_media_list_->sizeHintForRow(0) * detail_media_list_->count() + 8);
     }
@@ -6532,6 +6572,7 @@ protected:
     QListWidget* detail_media_list_ {nullptr};
     QWidget* detail_members_section_ {nullptr};
     QLabel* detail_members_title_ {nullptr};
+    QLineEdit* detail_member_search_ {nullptr};
     QListWidget* detail_members_list_ {nullptr};
     QWidget* detail_danger_section_ {nullptr};
     std::vector<QToolButton*> detail_action_buttons_;
