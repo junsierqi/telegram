@@ -141,8 +141,14 @@ class ServerApplication:
         session_ttl_seconds: float = 0.0,
         attachment_dir: str | None = None,
         redis_cache=None,
+        seed_defaults: bool = True,
     ) -> None:
-        self.state = InMemoryState(state_file=state_file, db_file=db_file, pg_dsn=pg_dsn)
+        self.state = InMemoryState(
+            state_file=state_file,
+            db_file=db_file,
+            pg_dsn=pg_dsn,
+            seed_defaults=seed_defaults,
+        )
         self.clock = clock or time.time
         self.auth_service = AuthService(
             self.state,
@@ -2347,6 +2353,7 @@ def create_app(
     attachment_dir: str | None = None,
     session_ttl_seconds: float = 0.0,
     redis_cache=None,
+    seed_defaults: bool = True,
 ) -> ServerApplication:
     return ServerApplication(
         state_file=state_file,
@@ -2355,4 +2362,5 @@ def create_app(
         attachment_dir=attachment_dir,
         session_ttl_seconds=session_ttl_seconds,
         redis_cache=redis_cache,
+        seed_defaults=seed_defaults,
     )

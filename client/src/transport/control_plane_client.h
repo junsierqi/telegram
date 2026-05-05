@@ -255,6 +255,36 @@ struct AckResult {
     std::string error_message;
 };
 
+struct TwoFaSetupResult {
+    bool ok {false};
+    std::string secret;
+    std::string provisioning_uri;
+    std::string error_code;
+    std::string error_message;
+};
+
+struct AccountExportResult {
+    bool ok {false};
+    std::string user_id;
+    long long exported_at_ms {0};
+    int devices {0};
+    int sessions {0};
+    int contacts {0};
+    int push_tokens {0};
+    int authored_messages {0};
+    std::string error_code;
+    std::string error_message;
+};
+
+struct PollActionResult {
+    bool ok {false};
+    std::string conversation_id;
+    std::string message_id;
+    bool closed {false};
+    std::string error_code;
+    std::string error_message;
+};
+
 struct RemoteSessionStateResult {
     bool ok {false};
     std::string remote_session_id;
@@ -438,6 +468,44 @@ public:
     [[nodiscard]] DeviceListResult update_device_trust(const std::string& device_id, bool trusted);
     [[nodiscard]] PresenceResult presence_query(const std::vector<std::string>& user_ids);
     [[nodiscard]] AckResult heartbeat_ping();
+
+    // RC-005: server-backed account, privacy, draft, chat-state, avatar,
+    // OTP/2FA and poll primitives exposed for desktop wrappers.
+    [[nodiscard]] AckResult phone_otp_request(const std::string& phone_number);
+    [[nodiscard]] LoginResult phone_otp_verify(const std::string& phone_number,
+                                               const std::string& code,
+                                               const std::string& device_id,
+                                               const std::string& display_name = {});
+    [[nodiscard]] TwoFaSetupResult two_fa_begin_enable();
+    [[nodiscard]] AckResult two_fa_confirm_enable(const std::string& code);
+    [[nodiscard]] AckResult two_fa_disable(const std::string& code);
+    [[nodiscard]] AccountExportResult account_export();
+    [[nodiscard]] AckResult account_delete(const std::string& password,
+                                           const std::string& two_fa_code = {});
+    [[nodiscard]] AckResult block_user(const std::string& target_user_id);
+    [[nodiscard]] AckResult unblock_user(const std::string& target_user_id);
+    [[nodiscard]] AckResult set_conversation_mute(const std::string& conversation_id,
+                                                  long long muted_until_ms);
+    [[nodiscard]] AckResult save_draft(const std::string& conversation_id,
+                                       const std::string& text,
+                                       const std::string& reply_to_message_id = {});
+    [[nodiscard]] AckResult clear_draft(const std::string& conversation_id);
+    [[nodiscard]] AckResult set_conversation_pinned(const std::string& conversation_id,
+                                                    bool pinned);
+    [[nodiscard]] AckResult set_conversation_archived(const std::string& conversation_id,
+                                                      bool archived);
+    [[nodiscard]] AckResult update_profile_avatar(const std::string& attachment_id);
+    [[nodiscard]] AckResult update_conversation_avatar(const std::string& conversation_id,
+                                                       const std::string& attachment_id);
+    [[nodiscard]] PollActionResult create_poll(const std::string& conversation_id,
+                                               const std::string& question,
+                                               const std::vector<std::string>& options,
+                                               bool multiple_choice = false);
+    [[nodiscard]] PollActionResult vote_poll(const std::string& conversation_id,
+                                             const std::string& message_id,
+                                             const std::vector<int>& option_indices);
+    [[nodiscard]] PollActionResult close_poll(const std::string& conversation_id,
+                                              const std::string& message_id);
 
     // Remote-control RPCs (modern client). The legacy session_gateway_client
     // covers the same surface for the scripted app_shell demo.

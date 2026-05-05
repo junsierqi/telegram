@@ -21,7 +21,7 @@ def _binary_candidates(stem: str) -> list[Path]:
     binary the harness already detected isn't declared missing here.
     Covers Windows (Debug/Release + .exe) AND POSIX (no subdir, no .exe)."""
     candidates: list[Path] = []
-    for build in ("build-verify", "build-codex", "build", "build-macos",
+    for build in ("build-ui-verify", "build-verify", "build-codex", "build", "build-macos",
                   "build-linux", "build-wsl", "build-android"):
         for cfg in ("", "Debug", "Release"):
             for ext in ("", ".exe"):
@@ -148,6 +148,9 @@ def main() -> int:
             return 1
         if "desktop group smoke ok:" not in result.stdout:
             print("[FAIL] group smoke success marker missing")
+            return 1
+        if "desktop advanced RC-005 smoke ok:" not in result.stdout:
+            print("[FAIL] advanced RC-005 smoke success marker missing")
             return 1
         if "desktop attachment smoke ok:" not in result.stdout:
             print("[FAIL] attachment smoke success marker missing")

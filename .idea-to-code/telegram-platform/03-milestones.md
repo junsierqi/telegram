@@ -3,8 +3,8 @@
 ## Current Phase
 
 - Status: in_progress
-- Current focus: telegram-ui-parity phase C0 acceptance
-- Next gate: phase C0 acceptance pass
+- Current focus: Telegram Desktop screenshot-by-screenshot restoration
+- Next gate: Build, 25-screenshot GUI smoke, 25/25 original-reference map, static UI validators, desktop smoke, and bundle verify must pass.
 
 ## Milestone History
 
@@ -1086,4 +1086,236 @@
 - Verified: scripts/validate_swipe_drawer.py 5/5 (Tool + FramelessWindowHint + dockedGeo/offGeo + 220/180 ms QPropertyAnimation timings + close button finished -> accept); cmake --build build-local app_desktop succeeded with QPropertyAnimation linked; full sweep 79 passed | 3 failed | 4 SKIP_EXTERNAL
 - Next: phase C0 finalize + push
 - Covers: REQ-UI-INFO-DRAWER
+
+## Desktop Telegram reference UI slice (gate: pass)
+
+- Timestamp: 2026-04-30T06:16:21+00:00
+- Delivered: Added a Telegram Desktop reference shell for the Qt Widgets desktop client: custom avatar conversation rows, hamburger/search/sidebar birthday banner, icon-style chat header controls, hidden developer-only chat strips by default, visible right details panel, and a green chat surface token. Added static validation and made desktop smoke prefer build-ui-verify binaries.
+- Verified: Configured build-ui-verify, built app_desktop Debug successfully, ran validate_desktop_telegram_reference_ui.py, validate_desktop_smoke.py, and validate_swipe_drawer.py successfully.
+- Next: Continue deeper screenshot parity: right info panel content should become live chat/contact/channel summaries, and settings should move from embedded right panel toward a centered modal/left drawer model.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY
+
+## Desktop 1:1 reference panels (gate: pass)
+
+- Timestamp: 2026-04-30T07:57:30+00:00
+- Delivered: Continued Telegram Desktop screenshot parity with a live right profile/channel/group summary page, a sliding left account drawer opened by the hamburger button, and a centered Settings modal matching the provided reference rows and interface-scale control. Extended static validation from 4 to 7 UI scenarios.
+- Verified: Built app_desktop in build-ui-verify Debug, ran validate_desktop_telegram_reference_ui.py 7/7, validate_desktop_smoke.py 1/1, and validate_swipe_drawer.py 5/5.
+- Next: Optional visual refinement: capture runtime screenshots and tune exact spacing/icon assets/wallpaper if pixel matching is required beyond Qt Widgets structural parity.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE
+
+## Desktop pixel parity and GUI interaction smoke (gate: pass)
+
+- Timestamp: 2026-04-30T08:09:31+00:00
+- Delivered: Added Telegram-like doodle wallpaper painting to BubbleListView, refined slider styling for the settings scale control, fixed the hamburger account drawer so it closes on outside focus and row clicks, added --gui-smoke to app_desktop, and added validate_desktop_gui_smoke.py to launch the real app and click through hamburger/drawer/settings/right-panel interactions.
+- Verified: Built app_desktop Debug in build-ui-verify, ran validate_desktop_telegram_reference_ui.py 8/8, validate_desktop_gui_smoke.py 1/1, validate_desktop_smoke.py 1/1, and validate_swipe_drawer.py 5/5.
+- Next: For stricter visual acceptance, capture and compare runtime screenshots against the five references, then tune exact icon assets and per-pixel spacing.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop screenshot evidence and pixel tuning (gate: pass)
+
+- Timestamp: 2026-04-30T08:33:34+00:00
+- Delivered: Extended --gui-smoke to save main-window.png, account-drawer.png, and settings-modal.png when --smoke-save-dir is supplied; validate_desktop_gui_smoke.py now asserts screenshots exist and are non-trivial. Captured persistent artifacts under artifacts/desktop-gui-smoke and tuned window proportions, right-panel action button widths, scrollbar styling, Settings modal width, and modal white-background selectors based on the screenshots.
+- Verified: Built app_desktop Debug in build-ui-verify; ran validate_desktop_telegram_reference_ui.py 8/8, validate_desktop_gui_smoke.py 1/1 with screenshot file checks, validate_desktop_smoke.py 1/1, and validate_swipe_drawer.py 5/5.
+- Next: If exact pixel comparison is required, add an image-diff validator against checked-in reference crops or approve bundling Telegram's exact icon/font assets.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Desktop strict pixel lock validator (gate: pass)
+
+- Timestamp: 2026-04-30T08:41:05+00:00
+- Delivered: Added scripts/validate_desktop_image_diff.py, a standard-library PNG decoder and pixel-diff validator. Added artifacts/desktop-reference-baseline baselines for main window, account drawer, and settings modal. Wired validate_desktop_gui_smoke.py to copy fresh screenshots into artifacts/desktop-gui-smoke and automatically run image diff. Extended the static reference UI validator to require the image diff path.
+- Verified: Ran validate_desktop_image_diff.py --update-baseline after intentional settings visual tuning, then validate_desktop_gui_smoke.py passed with chained image diff showing 0.0000% changed for all three screenshots. Built app_desktop and reran desktop smoke plus swipe drawer validators successfully.
+- Next: Replace or supplement the current generated baselines with cropped original Telegram reference images if exact external-reference matching is required.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE, REQ-DESKTOP-SCREENSHOT-EVIDENCE, REQ-DESKTOP-STRICT-PIXEL-LOCK
+
+## Desktop reference UI first-pass shell parity (gate: pass)
+
+- Timestamp: 2026-04-30T10:01:48+00:00
+- Delivered: Renamed the Telegram reference screenshots into stable semantic filenames, then adjusted app_desktop first-pass parity: 1492x1009 reference window, wider Telegram-like conversation rows, hidden in-chat search strip by default, reference-style fallback chat titles/subtitles, larger account drawer, larger settings modal, line-glyph header search, updated GUI smoke screenshots and pixel baseline.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; python scripts\validate_desktop_telegram_reference_ui.py passed 8/8; python scripts\validate_desktop_gui_smoke.py passed with PNG diff 0.0000 percent changed on main-window/account-drawer/settings-modal.
+- Next: Continue first-pass parity by replacing emoji/text fallback icons with closer line-painted icons, improving the right info panel actions per channel/user/group, then add screenshots for menus and composer popups.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop right info panel and header toggle parity (gate: pass)
+
+- Timestamp: 2026-04-30T10:27:43+00:00
+- Delivered: Adjusted app_desktop header to match the Telegram reference: added a dedicated split-panel right-info toggle beside the overflow menu, changed overflow to a lightweight menu, and exercised the toggle in GUI smoke. Updated the right info panel to render different content for contacts, channels, and groups, including tailored action buttons, contact action rows, channel leave/report rows, group member rows, and non-emoji line-style glyph placeholders. Refreshed PNG baselines for main-window/account-drawer/settings-modal.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; python scripts\validate_desktop_telegram_reference_ui.py passed 8/8; python scripts\validate_desktop_gui_smoke.py passed with PNG diff 0.0000 percent changed on all locked screenshots.
+- Next: Replace remaining emoji glyphs in settings/drawer rows with painted or font-stable line icons, then add reference screenshots for overflow/menu/composer popups before implementing those second-pass interactions.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop drawn line icon pass (gate: pass)
+
+- Timestamp: 2026-04-30T11:03:52+00:00
+- Delivered: Replaced remaining emoji-prefixed drawer and settings rows with a shared Qt QPainter line_icon helper and QIcon usage. Composer attachment, pin bar, drawer rows, night-mode row, settings-modal rows, hidden settings nav, and right-info action buttons now use stable monochrome line icons instead of system emoji glyphs. Updated static validator checks and refreshed GUI smoke pixel baselines.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; python scripts\validate_desktop_telegram_reference_ui.py passed 8/8; python scripts\validate_desktop_gui_smoke.py passed with PNG diff 0.0000 percent changed on main-window/account-drawer/settings-modal after baseline update.
+- Next: Fine-tune specific hand-drawn icons such as paperclip/moon against Telegram references, then implement top overflow, attachment, emoji/sticker, and message context menus once screenshots are available.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop right info panel icon rows (gate: pass)
+
+- Timestamp: 2026-04-30T13:28:57+00:00
+- Delivered: Changed right profile actions to icon-over-text QToolButtons and replaced rich-text media counts with Telegram-like line-icon rows for user/channel/group panels.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py after intentional baseline update.
+- Next: Continue with secondary interaction states: search focus/results, top overflow menu, attachment menu, emoji/sticker panel, and message context menu when references are available.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop real two-client contact chat flow (gate: pass)
+
+- Timestamp: 2026-04-30T14:02:23+00:00
+- Delivered: Added app_desktop --smoke-two-client-flow for real TCP backend Alice/Bob login, mutual contact add, and bidirectional messaging; added validate_desktop_two_client_flow.py; added a Telegram-style Contacts modal opened from the left drawer that uses real list_contacts/add_contact RPCs instead of the settings debug form.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py; python scripts\\validate_desktop_smoke.py.
+- Next: Continue converting remaining relationship/chat creation flows into screenshot-matched Telegram dialogs: New Group/New Channel, search results, top overflow, attachment menu, emoji panel, message context menu.
+- Covers: REQ-CONTACTS, REQ-CHAT-FANOUT, REQ-C1-DESKTOP-GUI, REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE
+
+## Desktop Telegram interaction entry migration (gate: pass)
+
+- Timestamp: 2026-04-30T14:14:27+00:00
+- Delivered: Moved New Group/New Channel into Telegram-style drawer-launched creation dialogs using the real create_conversation RPC, added a Telegram-style search results modal from sidebar/header search, and changed the composer attachment button into a Telegram-style Photo/File/Save menu while preserving the real backend two-client contact/chat flow.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_gui_smoke.py after intentional baseline refresh; python scripts\\validate_desktop_smoke.py.
+- Next: Continue with deeper reference states: top overflow expanded styling, attachment menu screenshot tuning, emoji/sticker panel, message context menu exact styling, group/member management, image/file message style, dark mode references.
+- Covers: REQ-CONTACTS, REQ-GROUP-CONVERSATIONS, REQ-CHAT-FANOUT, REQ-C1-DESKTOP-GUI, REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop login reconnect and no-network empty state (gate: pass)
+
+- Timestamp: 2026-04-30T15:02:38+00:00
+- Delivered: Removed screenshot-only Hello Blake/default conv_alice_bob runtime mapping, stopped the GUI from selecting a mock/default conversation on startup, added remembered-login reconnect state with Loading/no-network empty chat prompt matching reference-25-logined-no-network.png, and made Contacts add resolve username/display name through real search_users before add_contact.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_smoke.py; python scripts\\validate_desktop_gui_smoke.py after intended baseline refresh.
+- Next: Continue login-flow UI parity: explicit welcome/login screen when no remembered login, connection error banner styling, phone/QR login panels, and exact top overflow/attachment/emoji/menu states.
+- Covers: REQ-CONTACTS, REQ-CHAT-FANOUT, REQ-C1-DESKTOP-GUI, REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop first-run login prompt (gate: pass)
+
+- Timestamp: 2026-05-01T01:31:12+00:00
+- Delivered: Added a Telegram-style first-run login modal that appears when no remembered login exists, wires Start Messaging/Create Account to the real connect/register flows, and keeps gui-smoke independent from local remembered QSettings state.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py after intentional baseline refresh; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_smoke.py.
+- Next: Continue exact login-flow parity: phone number screen, QR login screen, better connection-error banner, and then top overflow/attachment/emoji/context-menu reference states.
+- Covers: REQ-DESKTOP-REGISTRATION-UI, REQ-C1-DESKTOP-GUI, REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop visible no-network notice (gate: pass)
+
+- Timestamp: 2026-05-01T01:37:51+00:00
+- Delivered: Added an in-window Telegram-style reconnect/no-network notice for remembered-login backend failures, kept the reference-25 empty/loading state behavior, refreshed GUI smoke pixel baselines, and updated the persistent project memory.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_smoke.py; manage_delivery_bundle.py verify
+- Next: Continue 1:1 Telegram UI restoration with login flow visual parity, explicit connection-error states, and remaining popup/menu surfaces.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-C1-DESKTOP-GUI
+
+## Desktop login modal waits for server auth (gate: pass)
+
+- Timestamp: 2026-05-03T11:35:21+00:00
+- Delivered: Fixed the first-run login modal so Start Messaging/Create Account no longer close immediately. The modal now disables actions, displays Connecting/Creating Account while the real ControlPlaneClient connect/login/register RPC runs, closes only after successful server auth, and keeps errors visible in the modal on connect/auth failure.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_smoke.py
+- Next: Add a dedicated GUI login-failure screenshot smoke and continue tightening Telegram login/onboarding parity.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-C1-DESKTOP-GUI
+
+## Desktop mock-data audit and no-seed mode (gate: pass)
+
+- Timestamp: 2026-05-03T12:07:29+00:00
+- Delivered: Removed visible desktop mock/default data from the login form and empty right info panel, stopped rendering fake Telegram reference counts/members for missing real data, added server --no-seed-data/TELEGRAM_NO_SEED_DATA=1 to run without built-in Alice/Bob/conv_alice_bob seed records, and audited ControlPlaneClient against server MessageType coverage.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_smoke.py; python scripts\\validate_registration.py; inline no-seed server auth smoke
+- Next: Implement missing desktop client wrappers/UI for server-backed account export/delete, block/mute, drafts, pin/archive, 2FA, phone OTP, polls, and avatar update; then migrate Telegram search/menu/media workflows.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-C1-DESKTOP-GUI, REQ-USER-REGISTRATION
+
+## Desktop remembered-login no-network parity (gate: pass)
+
+- Timestamp: 2026-05-04T04:31:57+00:00
+- Delivered: Aligned desktop startup with Telegram reference behavior: first-run without remembered credentials opens the login prompt, while remembered-login startup with the backend unavailable stays in the main shell with Loading state, Select-a-chat empty state, an in-window network notice, and a sidebar reconnect indicator. Updated static reference validation and refreshed GUI pixel baselines.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed; validate_desktop_telegram_reference_ui.py 11/11; validate_desktop_gui_smoke.py passed with PNG diff 0.0000 percent; validate_desktop_smoke.py passed; validate_no_seed_data.py 5/5; _sweep_validators.py 87 passed | 0 failed | 4 skipped external.
+- Next: Keep desktop startup behavior as main-shell reconnect for remembered logins; next release work is packaging/signing or resolving app_mobile AutoMoc environment before full-platform RC.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-C1-DESKTOP-GUI
+
+## Task library backlog reconciliation (gate: pass)
+
+- Timestamp: 2026-05-04T05:06:02+00:00
+- Delivered: Updated 08-atlas-task-library.md from the stale 2026-04-28 backlog into a 2026-05-04 current bundle snapshot, current open RC backlog, and refreshed pending external actions.
+- Verified: Ran bundle verify successfully: 91 requirements, 0 problems, 0 blockers; inspected the updated task library and diff.
+- Next: Use RC-001 as the next executable engineering item, or handle PA-005/008/009/010/011/012 when credentials/toolchains are procured.
+- Covers: REQ-ATLAS-TASK-LIBRARY
+
+## RC hardening implementation arc (gate: pass)
+
+- Timestamp: 2026-05-04T05:36:19+00:00
+- Delivered: RC-001 app_mobile AutoMoc/build verified on active build-ui-verify target; RC-005 added desktop ControlPlaneClient wrappers and Advanced settings UI for phone OTP, 2FA, account export/delete, block/mute, drafts, pin/archive, avatars and polls; RC-004 added emoji/sticker composer popup and locked all popup/menu states; RC-006 wired existing per-entity PostgreSQL writes for sessions and remote-session lifecycle; RC-003 added original Telegram reference crop mapping with calibrated tolerances and DPI-stable GUI smoke.
+- Verified: app_mobile build passed; validate_mobile_ui.py 9/9; validate_mobile_message_actions.py 6/6; validate_qml_theme.py 6/6; validate_desktop_smoke.py passed with RC-005 marker; validate_desktop_gui_smoke.py passed with pixel diff; validate_desktop_popup_states.py 4/4; validate_desktop_reference_map.py passed 3 mapped crops; validate_pg_transactional.py 6 scenarios; validate_cpp_remote_session.py 9/9; validate_cpp_tls_client.py 2/2.
+- Next: Remaining open RC items are external/blocker work such as signed Windows packaging, provider-backed push/SMS, iOS host, Redis live endpoint, codec/object-store follow-ups.
+- Covers: REQ-VALIDATION, REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-PIXEL-GUI-SMOKE, REQ-DESKTOP-SCREENSHOT-EVIDENCE, REQ-C1-DESKTOP-GUI, REQ-CHAT-CORE, REQ-C4-DURABLE-PERSISTENCE, REQ-POSTGRES-REPOSITORY-BOUNDARY
+
+## Desktop UI parity expansion 1-6 (gate: pass)
+
+- Timestamp: 2026-05-04T05:48:40+00:00
+- Delivered: Implemented the requested desktop UI optimization set: login modal now exposes password/welcome, phone and QR onboarding states; popup/menu surfaces have stable object names and message context edit/delete disables for non-owned/deleted messages; emoji/sticker popup has explicit emoji/sticker groups; bubble renderer now has file attachment, poll and system-message visual surfaces; right info panel has media/files/links/voice tabs and member search; account/privacy/chat settings now expose Advanced-backed actions as productized entry points while preserving the RC-005 Advanced panel.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed; validate_desktop_ui_expansion.py 4/4; validate_desktop_popup_states.py 4/4; validate_desktop_telegram_reference_ui.py 11/11; validate_desktop_smoke.py passed; validate_desktop_gui_smoke.py passed with pixel diff; validate_desktop_reference_map.py passed; validate_desktop_image_diff.py passed.
+- Next: Continue deeper parity with real screenshot states for login failure, phone/QR login, popup screenshots, and stricter designer-approved reference tolerances.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-PIXEL-GUI-SMOKE, REQ-DESKTOP-SCREENSHOT-EVIDENCE, REQ-C1-DESKTOP-GUI, REQ-CHAT-CORE
+
+## Telegram Desktop login reference shell (gate: pass)
+
+- Timestamp: 2026-05-04T06:14:28+00:00
+- Delivered: Updated architecture, final report, acceptance, and task library to reflect current Telegram Desktop parity state; added UI-001/UI-002/UI-003 original-screenshot restoration tasks; reworked desktop login welcome, QR, and phone-number shells toward the original Telegram Desktop screenshots while preserving local username/password/server fields behind Settings.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; validate_desktop_login_reference_ui.py 4/4; validate_desktop_ui_expansion.py 4/4; validate_desktop_telegram_reference_ui.py 11/11; validate_desktop_smoke.py passed; validate_desktop_gui_smoke.py passed with pixel diff; bundle verify passed 91 requirements, 0 problems.
+- Next: Extend GUI screenshot capture for login welcome, QR, and phone states, then add pixel/reference-map tolerances for those login substates.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-ATLAS-TASK-LIBRARY
+
+## Login screenshot GUI evidence (gate: pass)
+
+- Timestamp: 2026-05-04T12:28:44+00:00
+- Delivered: Extended desktop GUI smoke to capture login-welcome, login-qr, and login-phone screenshots before the existing main-window/account-drawer/settings flow; copied those captures into local ignored artifacts; added the three login states to the local original-reference map so reference-map validation now covers six states.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; validate_desktop_login_reference_ui.py 4/4; validate_desktop_ui_expansion.py 4/4; validate_desktop_gui_smoke.py passed and captured six screenshots; validate_desktop_reference_map.py passed 6 mapped crops; validate_desktop_telegram_reference_ui.py 11/11; validate_desktop_smoke.py passed.
+- Next: Continue screenshot-by-screenshot restoration by tightening login 01-03 layout/scale/icon fidelity and adding dedicated GUI navigation for login substate screenshots, then move to settings/proxy screenshots 04-07.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Settings and proxy screenshot states (gate: pass)
+
+- Timestamp: 2026-05-04T15:00:12+00:00
+- Delivered: Tightened login 01-03 reference-map thresholds to current observed bounds; added Settings General, Proxy settings empty-list, and Edit proxy SOCKS5 reference surfaces; extended GUI smoke to capture settings-general, proxy-list, and proxy-edit screenshots; added static validation for settings/proxy reference states.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; validate_desktop_settings_reference_ui.py 3/3; validate_desktop_login_reference_ui.py 4/4; validate_desktop_ui_expansion.py 4/4; validate_desktop_gui_smoke.py passed and captured nine screenshots; validate_desktop_reference_map.py passed 9 mapped crops; validate_desktop_telegram_reference_ui.py 11/11; validate_desktop_smoke.py passed; bundle verify passed 91 requirements, 0 problems.
+- Next: Continue screenshot-by-screenshot restoration with reference-08 empty chat list and reference-09/10/11 right-info panel states, then tighten thresholds after visual tuning.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Reference 08-11 shell and info-panel evidence (gate: pass)
+
+- Timestamp: 2026-05-05T03:03:33+00:00
+- Delivered: Added GUI-smoke captures for main-empty-chat-list plus channel/user/group right-info panel states using SyncResult-backed DesktopChatStore data; added static validator and expanded GUI screenshot expectations; updated local reference-map crops and calibrated tolerances for reference-08 through reference-11.
+- Verified: cmake app_desktop build passed; validate_desktop_info_reference_ui 4/4; validate_desktop_gui_smoke 13 screenshots plus locked diff pass; validate_desktop_reference_map 13 mapped crops pass; desktop smoke and existing Telegram reference validators pass.
+- Next: Continue screenshot-by-screenshot parity beyond reference-11, focusing next on side menu/settings/contact and chat-state screenshots with tighter visual deltas.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Reference 12-13 side menu and settings tightening (gate: pass)
+
+- Timestamp: 2026-05-05T05:08:10+00:00
+- Delivered: Added side-menu-overlay GUI-smoke evidence for reference-12, switched drawer/settings smoke background to the group info state after the locked main-window capture, aligned GUI-smoke drawer/settings identity to XZMQ/@xirmir reference data, enlarged settings identity and row typography, and calibrated reference-map tolerances for side-menu overlay and settings modal.
+- Verified: cmake app_desktop build passed; validate_desktop_gui_smoke generated 14 screenshots and locked diff passed; validate_desktop_reference_map passed 14 mapped crops; validate_desktop_telegram_reference_ui, settings/login/info/ui-expansion validators and desktop smoke passed.
+- Next: Continue screenshot-by-screenshot parity with reference-14 onward while reducing high-delta areas in chat list/content and settings subpages.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Reference 14-18 and 20 chat-state evidence (gate: pass)
+
+- Timestamp: 2026-05-05T06:33:01+00:00
+- Delivered: Expanded GUI smoke from 14 to 20 screenshots: added side-menu-empty scrolled/full captures for reference-14/15, Telegram service chat and service info-panel captures for reference-16/17, channel pinned/unread capture for reference-18, and group auto-delete empty capture for reference-20. Added DesktopChatStore-backed service seed data and a static chat reference-state validator; calibrated local original-reference map to 20 mapped crops.
+- Verified: cmake app_desktop build passed; validate_desktop_gui_smoke generated 20 screenshots and locked diff passed; validate_desktop_reference_map passed 20 mapped crops; validate_desktop_chat_reference_states, Telegram reference UI, login/settings/info/ui-expansion validators, and desktop smoke passed.
+- Next: Continue reference-21 through reference-24 modal/dialog states: profile modal, new group dialog, new channel dialog, and contacts dialog.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Reference 21-24 modal-dialog evidence (gate: pass)
+
+- Timestamp: 2026-05-05T08:32:32+00:00
+- Delivered: Added GUI-smoke overlay captures for profile modal, new group dialog, new channel dialog, and contacts dialog; added GUI-smoke-only profile and contacts evidence data; expanded reference-map to 24 mapped crops; added modal reference-state validator.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\validate_desktop_gui_smoke.py; python scripts\validate_desktop_reference_map.py; python scripts\validate_desktop_modal_reference_states.py; python scripts\validate_desktop_telegram_reference_ui.py; python scripts\validate_desktop_login_reference_ui.py; python scripts\validate_desktop_settings_reference_ui.py; python scripts\validate_desktop_info_reference_ui.py; python scripts\validate_desktop_ui_expansion.py; python scripts\validate_desktop_smoke.py
+- Next: Continue reference-25 logged-in no-network state and then tighten high-delta visual areas across existing 24 mapped crops.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Reference 25 no-network evidence and threshold tightening (gate: pass)
+
+- Timestamp: 2026-05-05T08:49:00+00:00
+- Delivered: Added GUI-smoke capture for reference-25 logged-in/no-network state; expanded GUI smoke to 25 screenshots; added no-network static reference validator; expanded original-reference map to 25 mapped crops; tightened high-delta thresholds for several already-mapped states based on observed diff output.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\validate_desktop_gui_smoke.py; python scripts\validate_desktop_reference_map.py; python scripts\validate_desktop_no_network_reference_ui.py; python scripts\validate_desktop_telegram_reference_ui.py; python scripts\validate_desktop_login_reference_ui.py; python scripts\validate_desktop_settings_reference_ui.py; python scripts\validate_desktop_info_reference_ui.py; python scripts\validate_desktop_chat_reference_states.py; python scripts\validate_desktop_modal_reference_states.py; python scripts\validate_desktop_ui_expansion.py; python scripts\validate_desktop_smoke.py
+- Next: Continue tightening highest-delta visual areas across the 25 mapped references, with priority on login/onboarding and dialog states where current thresholds remain broad.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Right panel no-login behavior and high-delta reference tightening (gate: pass)
+
+- Timestamp: 2026-05-05T09:02:39+00:00
+- Delivered: Fixed logged-out/no-network shell so the right details panel stays collapsed; fixed right info panel avatar layout by constraining the profile details page and avatar sizing so personal chat avatars render fully; refreshed the intentional locked GUI baseline for the corrected right panel; tightened reference-map tolerances for login welcome/QR/phone, new group/channel, and affected info-panel states while keeping 25 mapped references passing.
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\validate_desktop_gui_smoke.py; python scripts\validate_desktop_reference_map.py; python scripts\validate_desktop_info_reference_ui.py; python scripts\validate_desktop_no_network_reference_ui.py; python scripts\validate_desktop_telegram_reference_ui.py; python scripts\validate_desktop_login_reference_ui.py; python scripts\validate_desktop_settings_reference_ui.py; python scripts\validate_desktop_chat_reference_states.py; python scripts\validate_desktop_modal_reference_states.py; python scripts\validate_desktop_ui_expansion.py; python scripts\validate_desktop_smoke.py
+- Next: Continue visual tightening on the widest remaining reference gaps, prioritizing login welcome hero parity and create-dialog overlay/background differences.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
 

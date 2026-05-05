@@ -102,7 +102,10 @@ class AuthService:
                 device_id=device_id,
                 last_seen_at=now,
             )
-            self._state.save_runtime_state()
+            if existing_device is None:
+                self._state.save_runtime_state()
+            else:
+                self._state.persist_session(self._state.sessions[session_id])
             self._write_session_cache(session_id, user.user_id, device_id, now)
             return {
                 "session_id": session_id,

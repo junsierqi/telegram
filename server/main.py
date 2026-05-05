@@ -90,6 +90,15 @@ def main() -> None:
         help="Optional login session max age in seconds. 0 disables expiry.",
     )
     parser.add_argument(
+        "--no-seed-data",
+        action="store_true",
+        default=os.getenv("TELEGRAM_NO_SEED_DATA", "0") == "1",
+        help=(
+            "Start with no built-in Alice/Bob/dev conversation seed data. "
+            "Use this for production-like local runs; validators keep the default seeds."
+        ),
+    )
+    parser.add_argument(
         "--tls-cert-file",
         default=os.getenv("TELEGRAM_TLS_CERT_FILE", ""),
         help="Optional PEM certificate file for native TLS on the TCP control plane.",
@@ -191,6 +200,7 @@ def main() -> None:
         attachment_dir=attachment_dir,
         session_ttl_seconds=args.session_ttl_seconds,
         redis_cache=redis_cache,
+        seed_defaults=not args.no_seed_data,
     )
 
     screen_source = None

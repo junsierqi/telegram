@@ -806,3 +806,177 @@
 - Verified: scripts/validate_swipe_drawer.py 5/5 (Tool + FramelessWindowHint + dockedGeo/offGeo + 220/180 ms QPropertyAnimation timings + close button finished -> accept); cmake --build build-local app_desktop succeeded with QPropertyAnimation linked; full sweep 79 passed | 3 failed | 4 SKIP_EXTERNAL
 - Covers: REQ-UI-INFO-DRAWER
 
+## Desktop Telegram reference UI slice (gate: pass)
+
+- Timestamp: 2026-04-30T06:16:21+00:00
+- Verified: Configured build-ui-verify, built app_desktop Debug successfully, ran validate_desktop_telegram_reference_ui.py, validate_desktop_smoke.py, and validate_swipe_drawer.py successfully.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY
+
+## Desktop 1:1 reference panels (gate: pass)
+
+- Timestamp: 2026-04-30T07:57:30+00:00
+- Verified: Built app_desktop in build-ui-verify Debug, ran validate_desktop_telegram_reference_ui.py 7/7, validate_desktop_smoke.py 1/1, and validate_swipe_drawer.py 5/5.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE
+
+## Desktop pixel parity and GUI interaction smoke (gate: pass)
+
+- Timestamp: 2026-04-30T08:09:31+00:00
+- Verified: Built app_desktop Debug in build-ui-verify, ran validate_desktop_telegram_reference_ui.py 8/8, validate_desktop_gui_smoke.py 1/1, validate_desktop_smoke.py 1/1, and validate_swipe_drawer.py 5/5.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop screenshot evidence and pixel tuning (gate: pass)
+
+- Timestamp: 2026-04-30T08:33:34+00:00
+- Verified: Built app_desktop Debug in build-ui-verify; ran validate_desktop_telegram_reference_ui.py 8/8, validate_desktop_gui_smoke.py 1/1 with screenshot file checks, validate_desktop_smoke.py 1/1, and validate_swipe_drawer.py 5/5.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Desktop strict pixel lock validator (gate: pass)
+
+- Timestamp: 2026-04-30T08:41:05+00:00
+- Verified: Ran validate_desktop_image_diff.py --update-baseline after intentional settings visual tuning, then validate_desktop_gui_smoke.py passed with chained image diff showing 0.0000% changed for all three screenshots. Built app_desktop and reran desktop smoke plus swipe drawer validators successfully.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE, REQ-DESKTOP-SCREENSHOT-EVIDENCE, REQ-DESKTOP-STRICT-PIXEL-LOCK
+
+## Desktop reference UI first-pass shell parity (gate: pass)
+
+- Timestamp: 2026-04-30T10:01:48+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; python scripts\validate_desktop_telegram_reference_ui.py passed 8/8; python scripts\validate_desktop_gui_smoke.py passed with PNG diff 0.0000 percent changed on main-window/account-drawer/settings-modal.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop right info panel and header toggle parity (gate: pass)
+
+- Timestamp: 2026-04-30T10:27:43+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; python scripts\validate_desktop_telegram_reference_ui.py passed 8/8; python scripts\validate_desktop_gui_smoke.py passed with PNG diff 0.0000 percent changed on all locked screenshots.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop drawn line icon pass (gate: pass)
+
+- Timestamp: 2026-04-30T11:03:52+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; python scripts\validate_desktop_telegram_reference_ui.py passed 8/8; python scripts\validate_desktop_gui_smoke.py passed with PNG diff 0.0000 percent changed on main-window/account-drawer/settings-modal after baseline update.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop right info panel icon rows (gate: pass)
+
+- Timestamp: 2026-04-30T13:28:57+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py after intentional baseline update.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop real two-client contact chat flow (gate: pass)
+
+- Timestamp: 2026-04-30T14:02:23+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py; python scripts\\validate_desktop_smoke.py.
+- Covers: REQ-CONTACTS, REQ-CHAT-FANOUT, REQ-C1-DESKTOP-GUI, REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE
+
+## Desktop Telegram interaction entry migration (gate: pass)
+
+- Timestamp: 2026-04-30T14:14:27+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_gui_smoke.py after intentional baseline refresh; python scripts\\validate_desktop_smoke.py.
+- Covers: REQ-CONTACTS, REQ-GROUP-CONVERSATIONS, REQ-CHAT-FANOUT, REQ-C1-DESKTOP-GUI, REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop login reconnect and no-network empty state (gate: pass)
+
+- Timestamp: 2026-04-30T15:02:38+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_smoke.py; python scripts\\validate_desktop_gui_smoke.py after intended baseline refresh.
+- Covers: REQ-CONTACTS, REQ-CHAT-FANOUT, REQ-C1-DESKTOP-GUI, REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop first-run login prompt (gate: pass)
+
+- Timestamp: 2026-05-01T01:31:12+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py after intentional baseline refresh; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_smoke.py.
+- Covers: REQ-DESKTOP-REGISTRATION-UI, REQ-C1-DESKTOP-GUI, REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-REFERENCE-ONE-TO-ONE, REQ-DESKTOP-PIXEL-GUI-SMOKE
+
+## Desktop visible no-network notice (gate: pass)
+
+- Timestamp: 2026-05-01T01:37:51+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_smoke.py; manage_delivery_bundle.py verify
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-C1-DESKTOP-GUI
+
+## Desktop login modal waits for server auth (gate: pass)
+
+- Timestamp: 2026-05-03T11:35:21+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_smoke.py
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-C1-DESKTOP-GUI
+
+## Desktop mock-data audit and no-seed mode (gate: pass)
+
+- Timestamp: 2026-05-03T12:07:29+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\\validate_desktop_telegram_reference_ui.py; python scripts\\validate_desktop_gui_smoke.py; python scripts\\validate_desktop_two_client_flow.py; python scripts\\validate_desktop_smoke.py; python scripts\\validate_registration.py; inline no-seed server auth smoke
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-C1-DESKTOP-GUI, REQ-USER-REGISTRATION
+
+## Desktop remembered-login no-network parity (gate: pass)
+
+- Timestamp: 2026-05-04T04:31:57+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed; validate_desktop_telegram_reference_ui.py 11/11; validate_desktop_gui_smoke.py passed with PNG diff 0.0000 percent; validate_desktop_smoke.py passed; validate_no_seed_data.py 5/5; _sweep_validators.py 87 passed | 0 failed | 4 skipped external.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-C1-DESKTOP-GUI
+
+## Task library backlog reconciliation (gate: pass)
+
+- Timestamp: 2026-05-04T05:06:02+00:00
+- Verified: Ran bundle verify successfully: 91 requirements, 0 problems, 0 blockers; inspected the updated task library and diff.
+- Covers: REQ-ATLAS-TASK-LIBRARY
+
+## RC hardening implementation arc (gate: pass)
+
+- Timestamp: 2026-05-04T05:36:19+00:00
+- Verified: app_mobile build passed; validate_mobile_ui.py 9/9; validate_mobile_message_actions.py 6/6; validate_qml_theme.py 6/6; validate_desktop_smoke.py passed with RC-005 marker; validate_desktop_gui_smoke.py passed with pixel diff; validate_desktop_popup_states.py 4/4; validate_desktop_reference_map.py passed 3 mapped crops; validate_pg_transactional.py 6 scenarios; validate_cpp_remote_session.py 9/9; validate_cpp_tls_client.py 2/2.
+- Covers: REQ-VALIDATION, REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-PIXEL-GUI-SMOKE, REQ-DESKTOP-SCREENSHOT-EVIDENCE, REQ-C1-DESKTOP-GUI, REQ-CHAT-CORE, REQ-C4-DURABLE-PERSISTENCE, REQ-POSTGRES-REPOSITORY-BOUNDARY
+
+## Desktop UI parity expansion 1-6 (gate: pass)
+
+- Timestamp: 2026-05-04T05:48:40+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed; validate_desktop_ui_expansion.py 4/4; validate_desktop_popup_states.py 4/4; validate_desktop_telegram_reference_ui.py 11/11; validate_desktop_smoke.py passed; validate_desktop_gui_smoke.py passed with pixel diff; validate_desktop_reference_map.py passed; validate_desktop_image_diff.py passed.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-PIXEL-GUI-SMOKE, REQ-DESKTOP-SCREENSHOT-EVIDENCE, REQ-C1-DESKTOP-GUI, REQ-CHAT-CORE
+
+## Telegram Desktop login reference shell (gate: pass)
+
+- Timestamp: 2026-05-04T06:14:28+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; validate_desktop_login_reference_ui.py 4/4; validate_desktop_ui_expansion.py 4/4; validate_desktop_telegram_reference_ui.py 11/11; validate_desktop_smoke.py passed; validate_desktop_gui_smoke.py passed with pixel diff; bundle verify passed 91 requirements, 0 problems.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-ATLAS-TASK-LIBRARY
+
+## Login screenshot GUI evidence (gate: pass)
+
+- Timestamp: 2026-05-04T12:28:44+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; validate_desktop_login_reference_ui.py 4/4; validate_desktop_ui_expansion.py 4/4; validate_desktop_gui_smoke.py passed and captured six screenshots; validate_desktop_reference_map.py passed 6 mapped crops; validate_desktop_telegram_reference_ui.py 11/11; validate_desktop_smoke.py passed.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Settings and proxy screenshot states (gate: pass)
+
+- Timestamp: 2026-05-04T15:00:12+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop passed with existing getenv warnings; validate_desktop_settings_reference_ui.py 3/3; validate_desktop_login_reference_ui.py 4/4; validate_desktop_ui_expansion.py 4/4; validate_desktop_gui_smoke.py passed and captured nine screenshots; validate_desktop_reference_map.py passed 9 mapped crops; validate_desktop_telegram_reference_ui.py 11/11; validate_desktop_smoke.py passed; bundle verify passed 91 requirements, 0 problems.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Reference 08-11 shell and info-panel evidence (gate: pass)
+
+- Timestamp: 2026-05-05T03:03:33+00:00
+- Verified: cmake app_desktop build passed; validate_desktop_info_reference_ui 4/4; validate_desktop_gui_smoke 13 screenshots plus locked diff pass; validate_desktop_reference_map 13 mapped crops pass; desktop smoke and existing Telegram reference validators pass.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Reference 12-13 side menu and settings tightening (gate: pass)
+
+- Timestamp: 2026-05-05T05:08:10+00:00
+- Verified: cmake app_desktop build passed; validate_desktop_gui_smoke generated 14 screenshots and locked diff passed; validate_desktop_reference_map passed 14 mapped crops; validate_desktop_telegram_reference_ui, settings/login/info/ui-expansion validators and desktop smoke passed.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Reference 14-18 and 20 chat-state evidence (gate: pass)
+
+- Timestamp: 2026-05-05T06:33:01+00:00
+- Verified: cmake app_desktop build passed; validate_desktop_gui_smoke generated 20 screenshots and locked diff passed; validate_desktop_reference_map passed 20 mapped crops; validate_desktop_chat_reference_states, Telegram reference UI, login/settings/info/ui-expansion validators, and desktop smoke passed.
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Reference 21-24 modal-dialog evidence (gate: pass)
+
+- Timestamp: 2026-05-05T08:32:32+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\validate_desktop_gui_smoke.py; python scripts\validate_desktop_reference_map.py; python scripts\validate_desktop_modal_reference_states.py; python scripts\validate_desktop_telegram_reference_ui.py; python scripts\validate_desktop_login_reference_ui.py; python scripts\validate_desktop_settings_reference_ui.py; python scripts\validate_desktop_info_reference_ui.py; python scripts\validate_desktop_ui_expansion.py; python scripts\validate_desktop_smoke.py
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Reference 25 no-network evidence and threshold tightening (gate: pass)
+
+- Timestamp: 2026-05-05T08:49:00+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\validate_desktop_gui_smoke.py; python scripts\validate_desktop_reference_map.py; python scripts\validate_desktop_no_network_reference_ui.py; python scripts\validate_desktop_telegram_reference_ui.py; python scripts\validate_desktop_login_reference_ui.py; python scripts\validate_desktop_settings_reference_ui.py; python scripts\validate_desktop_info_reference_ui.py; python scripts\validate_desktop_chat_reference_states.py; python scripts\validate_desktop_modal_reference_states.py; python scripts\validate_desktop_ui_expansion.py; python scripts\validate_desktop_smoke.py
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+
+## Right panel no-login behavior and high-delta reference tightening (gate: pass)
+
+- Timestamp: 2026-05-05T09:02:39+00:00
+- Verified: cmake --build build-ui-verify --config Debug --target app_desktop; python scripts\validate_desktop_gui_smoke.py; python scripts\validate_desktop_reference_map.py; python scripts\validate_desktop_info_reference_ui.py; python scripts\validate_desktop_no_network_reference_ui.py; python scripts\validate_desktop_telegram_reference_ui.py; python scripts\validate_desktop_login_reference_ui.py; python scripts\validate_desktop_settings_reference_ui.py; python scripts\validate_desktop_chat_reference_states.py; python scripts\validate_desktop_modal_reference_states.py; python scripts\validate_desktop_ui_expansion.py; python scripts\validate_desktop_smoke.py
+- Covers: REQ-DESKTOP-SCREENSHOT-PARITY, REQ-DESKTOP-UI-VERIFY, REQ-DESKTOP-SCREENSHOT-EVIDENCE
+

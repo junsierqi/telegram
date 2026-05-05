@@ -176,6 +176,7 @@ class InMemoryState:
         state_file: str | None = None,
         db_file: str | None = None,
         pg_dsn: str | None = None,
+        seed_defaults: bool = True,
     ) -> None:
         self._state_file = Path(state_file).resolve() if state_file else None
         self._db_file = Path(db_file).resolve() if db_file else None
@@ -193,7 +194,7 @@ class InMemoryState:
                 password_hash=hash_password("bob_pw"),
                 display_name="Bob",
             ),
-        }
+        } if seed_defaults else {}
         self.devices: dict[str, DeviceRecord] = {
             "dev_alice_win": DeviceRecord(
                 device_id="dev_alice_win",
@@ -207,7 +208,7 @@ class InMemoryState:
                 label="Bob Desktop",
                 platform="windows",
             ),
-        }
+        } if seed_defaults else {}
         self.sessions: dict[str, SessionRecord] = {}
         self.conversations: dict[str, ConversationRecord] = {
             "conv_alice_bob": ConversationRecord(
@@ -221,7 +222,7 @@ class InMemoryState:
                     }
                 ],
             )
-        }
+        } if seed_defaults else {}
         self.remote_sessions: dict[str, RemoteSessionRecord] = {}
         # M109 voice/video calls — in-memory only; runtime restart drops
         # in-flight calls (acceptable for a real-time channel).
@@ -268,6 +269,25 @@ class InMemoryState:
             return
         self._state_file.parent.mkdir(parents=True, exist_ok=True)
         self._state_file.write_text(json.dumps(self._runtime_payload(), indent=2) + "\n", encoding="utf-8")
+
+    def persist_session(self, record: SessionRecord) -> None:
+        if self._pg_repository is not None:
+            self._pg_repository.upsert_session(asdict(record))
+            return
+        self.save_runtime_state()
+
+    def delete_session(self, session_id: str) -> None:
+        self.sessions.pop(session_id, None)
+        if self._pg_repository is not None:
+            self._pg_repository.delete_session(session_id)
+            return
+        self.save_runtime_state()
+
+    def persist_remote_session(self, record: RemoteSessionRecord) -> None:
+        if self._pg_repository is not None:
+            self._pg_repository.upsert_remote_session(asdict(record))
+            return
+        self.save_runtime_state()
 
     def _runtime_payload(self) -> dict:
         return {

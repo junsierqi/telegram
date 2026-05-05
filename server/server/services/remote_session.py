@@ -57,7 +57,7 @@ class RemoteSessionService:
             state="awaiting_approval",
         )
         self._state.remote_sessions[remote_session_id] = record
-        self._state.save_runtime_state()
+        self._state.persist_remote_session(record)
         return RemoteSessionStatePayload(
             remote_session_id=remote_session_id,
             state=record.state,
@@ -76,7 +76,7 @@ class RemoteSessionService:
         record.state = "approved"
         record.relay_region = "us-west"
         record.relay_endpoint = "relay-usw.example.internal:5000"
-        self._state.save_runtime_state()
+        self._state.persist_remote_session(record)
         return RemoteRelayAssignmentPayload(
             remote_session_id=remote_session_id,
             state=record.state,
@@ -93,7 +93,7 @@ class RemoteSessionService:
         if record.state != "awaiting_approval":
             raise ServiceError(ErrorCode.REMOTE_SESSION_NOT_AWAITING_APPROVAL)
         record.state = "rejected"
-        self._state.save_runtime_state()
+        self._state.persist_remote_session(record)
         return RemoteSessionStatePayload(
             remote_session_id=remote_session_id,
             state=record.state,
@@ -114,7 +114,7 @@ class RemoteSessionService:
         if record.state in self._TERMINAL_STATES:
             raise ServiceError(ErrorCode.REMOTE_SESSION_ALREADY_TERMINAL)
         record.state = "cancelled"
-        self._state.save_runtime_state()
+        self._state.persist_remote_session(record)
         return RemoteSessionTerminatedPayload(
             remote_session_id=remote_session_id,
             state=record.state,
@@ -139,7 +139,7 @@ class RemoteSessionService:
             else "target"
         )
         record.state = "terminated"
-        self._state.save_runtime_state()
+        self._state.persist_remote_session(record)
         return RemoteSessionTerminatedPayload(
             remote_session_id=remote_session_id,
             state=record.state,
@@ -158,13 +158,13 @@ class RemoteSessionService:
             raise ServiceError(ErrorCode.REMOTE_SESSION_NOT_READY_FOR_RENDEZVOUS)
         if record.state == "approved":
             record.state = "negotiating"
-            self._state.save_runtime_state()
+            self._state.persist_remote_session(record)
         # M106 / D9: lazily mint a per-session AES-256-GCM key the first time
         # either peer asks for rendezvous info; persist so both sides observe
         # the same key on subsequent calls.
         if not record.relay_key_b64:
             record.relay_key_b64 = generate_key_b64()
-            self._state.save_runtime_state()
+            self._state.persist_remote_session(record)
 
         candidates = [
             RemoteRendezvousCandidate(
@@ -217,7 +217,7 @@ class RemoteSessionService:
         if record.state not in self._ACTIVE_STATES:
             raise ServiceError(ErrorCode.REMOTE_SESSION_NOT_ACTIVE)
         record.state = "disconnected"
-        self._state.save_runtime_state()
+        self._state.persist_remote_session(record)
         return RemoteSessionTerminatedPayload(
             remote_session_id=remote_session_id,
             state=record.state,

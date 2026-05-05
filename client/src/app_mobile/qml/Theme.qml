@@ -20,10 +20,10 @@ QtObject {
     property bool darkMode: false
 
     // ---- light palette (Telegram-like baseline; matches desktop kLightTheme) ----
-    readonly property color lightAppBackground:      "#f4f5f7"
+    readonly property color lightAppBackground:      "#f2f3f5"
     readonly property color lightSurface:            "#ffffff"
     readonly property color lightSurfaceMuted:       "#fafbfc"
-    readonly property color lightChatArea:           "#e6ebee"
+    readonly property color lightChatArea:           "#d9e7bd"
     readonly property color lightBorder:             "#e6e8eb"
     readonly property color lightBorderSubtle:       "#eef0f2"
     readonly property color lightSelectionTint:      "#e7f0fb"

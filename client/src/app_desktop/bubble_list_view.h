@@ -26,6 +26,7 @@
 #include <QHash>
 #include <QListView>
 #include <QPixmap>
+#include <QPainterPath>
 #include <QStyledItemDelegate>
 #include <QString>
 
@@ -58,6 +59,8 @@ public:
         MatchRole,           // matches the active in-chat search query
         AttachmentIdRole,    // attachment_id (if any) — drives M148 lookup
         AttachmentMimeRole,  // mime_type so the delegate can detect images
+        FilenameRole,        // file display name for non-image attachments
+        SizeBytesRole,       // file size for attachment cards
         ThumbnailRole,       // QPixmap from M148 cache (null when missing)
     };
 
@@ -112,6 +115,9 @@ private:
         int pinnedHeight = 0;
         int thumbnailHeight = 0;
         int thumbnailWidth = 0;
+        int fileCardHeight = 0;
+        int pollCardHeight = 0;
+        int systemHeight = 0;
         int textHeight = 0;
         int reactionsHeight = 0;
         int footerHeight = 14;
@@ -132,6 +138,7 @@ public:
 
     void setStore(const DesktopChatStore* store, const std::string& current_user_id);
     void setBubblePalette(const DesktopBubblePalette& palette);
+    void setEmptyStateText(const QString& text);
     void refresh();
     void setSearchHighlight(const QString& query,
                             const QString& focused_message_id);
@@ -143,12 +150,16 @@ signals:
     void messageActivated(const QString& message_id);
 
 protected:
+    void paintEvent(QPaintEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
 
 private:
+    void paintTelegramDoodleWallpaper(QPainter& painter, const QRect& rect) const;
     BubbleMessageModel* model_ {nullptr};
     BubbleDelegate* delegate_ {nullptr};
+    DesktopBubblePalette palette_;
+    QString empty_state_text_ {QStringLiteral("Select a chat to start messaging")};
 };
 
 }  // namespace telegram_like::client::app_desktop

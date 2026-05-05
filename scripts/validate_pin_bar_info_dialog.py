@@ -15,9 +15,10 @@ Static analysis on client/src/app_desktop/main.cpp confirming:
       pinned message.
 
   M145 — Chat info dialog
-    - QToolButton* chat_info_btn_ in the chat header next to load_older /
-      server_search; uses the ℹ glyph + tooltip "Chat info".
-    - Click invokes show_chat_info_dialog() which constructs a
+    - QToolButton* chat_info_btn_ in the chat header is the overflow menu,
+      while details_toggle_btn_ owns the always-visible right-info toggle.
+    - The overflow menu exposes "Chat info" and invokes
+      show_chat_info_dialog() which constructs a
       WA_DeleteOnClose QDialog populated from store_.selected_conversation()
       with: title + participant count, members QListWidget, pinned
       messages QListWidget, attachment count + sync version footer.
@@ -79,13 +80,16 @@ def main() -> int:
     print("[scenario] M145 — chat_info_btn_ in header + show_chat_info_dialog wired")
     assert "QToolButton* chat_info_btn_" in m, "chat_info_btn_ member missing"
     assert 'chat_info_btn_->setObjectName("chatInfoBtn")' in m, "chat_info_btn_ object name"
-    # ℹ glyph (UTF-8 e2 84 b9) — accept the literal escape OR the literal char.
-    assert "\\xe2\\x84\\xb9" in m or "\u2139" in m, \
-        "chat info button must use the ℹ glyph"
-    assert "Chat info" in m, "tooltip / title text 'Chat info' missing"
-    assert "show_chat_info_dialog()" in m, \
-        "click handler must call show_chat_info_dialog()"
-    print("[ok ] header button + click handler wired")
+    assert "QToolButton* details_toggle_btn_" in m, "details_toggle_btn_ member missing"
+    assert 'details_toggle_btn_->setToolTip(QStringLiteral("Show or hide info panel"))' in m, \
+        "split-panel info toggle tooltip missing"
+    assert 'chat_info_btn_->setToolTip(QStringLiteral("More"))' in m, \
+        "overflow menu tooltip missing"
+    assert 'menu.addAction("Chat info", [this] { show_chat_info_dialog(); });' in m, \
+        "overflow menu must expose the legacy Chat info dialog"
+    assert "QObject::connect(details_toggle_btn_, &QToolButton::clicked" in m, \
+        "details toggle must be clickable"
+    print("[ok ] header overflow + split-panel info controls wired")
 
     print("[scenario] M145 — show_chat_info_dialog populates 4 sections")
     body_match = re.search(

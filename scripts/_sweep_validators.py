@@ -31,7 +31,9 @@ NEEDS_BINARY = {
     "validate_cpp_chat_e2e.py":         ["app_chat"],
     "validate_cpp_tls_client.py":       ["app_chat"],
     "validate_cpp_remote_session.py":   ["remote_session_smoke"],
+    "validate_desktop_gui_smoke.py":    ["app_desktop"],
     "validate_desktop_smoke.py":        ["app_desktop"],
+    "validate_desktop_two_client_flow.py": ["app_desktop"],
     "validate_windows_installer.py":    [],   # static; built artifact optional
 }
 
@@ -52,7 +54,7 @@ def _has_built_binary(stem: str) -> bool:
     candidates = [
         f"client/src/{cfg}/{stem}{ext}"
         for cfg in ("", "Debug", "Release")
-        for ext in ("", ".exe")
+        for ext in ((".exe",) if sys.platform == "win32" else ("", ".exe"))
     ]
     for build_root in REPO.glob("build*"):
         if not build_root.is_dir():
@@ -63,7 +65,10 @@ def _has_built_binary(stem: str) -> bool:
     return False
 
 env = os.environ.copy()
-env["PATH"] = r"C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem"
+env["PATH"] = (
+    r"C:\Windows\System32;C:\Windows;C:\Windows\System32\Wbem;"
+    + env.get("PATH", "")
+)
 # Force UTF-8 in the spawned validators' stdio. Otherwise Windows defaults
 # to cp1252 (because subprocess.run(...) sets stdout to a pipe, and Python
 # falls back to locale.getpreferredencoding() when stdout is not a tty).

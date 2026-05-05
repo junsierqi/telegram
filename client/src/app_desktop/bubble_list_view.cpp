@@ -7,6 +7,7 @@
 #include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPaintEvent>
 #include <QPen>
 
 #include <algorithm>
@@ -165,6 +166,8 @@ QVariant BubbleMessageModel::data(const QModelIndex& index, int role) const {
         }
         case AttachmentIdRole: return QString::fromStdString(m.attachment_id);
         case AttachmentMimeRole: return QString::fromStdString(m.mime_type);
+        case FilenameRole: return QString::fromStdString(m.filename);
+        case SizeBytesRole: return QVariant::fromValue<qlonglong>(m.size_bytes);
         case ThumbnailRole: {
             if (m.attachment_id.empty()) return QVariant::fromValue(QPixmap());
             const QString key = QString::fromStdString(m.attachment_id);
@@ -198,6 +201,8 @@ QHash<int, QByteArray> BubbleMessageModel::roleNames() const {
         {MatchRole,         "match"},
         {AttachmentIdRole,  "attachmentId"},
         {AttachmentMimeRole,"attachmentMime"},
+        {FilenameRole,      "filename"},
+        {SizeBytesRole,     "sizeBytes"},
         {ThumbnailRole,     "thumbnail"},
     };
 }
@@ -249,15 +254,20 @@ BubbleDelegate::LayoutMetrics BubbleDelegate::measure(const QModelIndex& index,
     const QString replyToText = index.data(BubbleMessageModel::ReplyToTextRole).toString();
     const QString forwarded = index.data(BubbleMessageModel::ForwardedFromRole).toString();
     const QString reactions = index.data(BubbleMessageModel::ReactionsRole).toString();
+    const QString filename = index.data(BubbleMessageModel::FilenameRole).toString();
+    const QString mimeType = index.data(BubbleMessageModel::AttachmentMimeRole).toString();
     const bool deleted = index.data(BubbleMessageModel::DeletedRole).toBool();
     const bool edited = index.data(BubbleMessageModel::EditedRole).toBool();
     const bool pinned = index.data(BubbleMessageModel::PinnedRole).toBool();
+    const bool systemMessage = text.startsWith(QStringLiteral("[system]"));
+    const bool pollMessage = text.startsWith(QStringLiteral("[poll]"));
 
     // Section heights — rough but consistent with paint().
     if (!outgoing && !sender.isEmpty()) m.senderHeight = 14;
     if (!forwarded.isEmpty())           m.forwardedHeight = 14;
     if (!replyTo.isEmpty())             m.replyHeight = 30;
     if (pinned)                         m.pinnedHeight = 12;
+    if (systemMessage)                  m.systemHeight = 30;
 
     // M148: image thumbnail occupies the top of the bubble content area.
     // Cap at 240 wide × 240 tall, scaled with KeepAspectRatio so the
@@ -272,6 +282,12 @@ BubbleDelegate::LayoutMetrics BubbleDelegate::measure(const QModelIndex& index,
         m.thumbnailWidth  = scaled.width();
         m.thumbnailHeight = scaled.height() + 6;  // 6px gap below image
     }
+    if (!filename.isEmpty() && !mimeType.startsWith(QStringLiteral("image/"))) {
+        m.fileCardHeight = 48;
+    }
+    if (pollMessage) {
+        m.pollCardHeight = 76;
+    }
 
     QString shownText = deleted ? QStringLiteral("<deleted>") : text;
     if (edited) shownText += QStringLiteral(" (edited)");
@@ -285,9 +301,13 @@ BubbleDelegate::LayoutMetrics BubbleDelegate::measure(const QModelIndex& index,
 
     int contentHeight = m.senderHeight + m.forwardedHeight + m.replyHeight
                         + m.pinnedHeight + m.thumbnailHeight
+                        + m.fileCardHeight + m.pollCardHeight + m.systemHeight
                         + m.textHeight + m.reactionsHeight
                         + m.footerHeight;
-    int contentWidth = std::max(textWidth, m.thumbnailWidth);
+    int contentWidth = std::max({textWidth, m.thumbnailWidth,
+                                 m.fileCardHeight > 0 ? 230 : 0,
+                                 m.pollCardHeight > 0 ? 250 : 0,
+                                 m.systemHeight > 0 ? 230 : 0});
     // Reply quote needs at least ~60% of max width to look right.
     if (!replyTo.isEmpty()) {
         contentWidth = std::max(contentWidth,
@@ -332,11 +352,16 @@ void BubbleDelegate::paint(QPainter* painter,
     const QString replyToText = index.data(BubbleMessageModel::ReplyToTextRole).toString();
     const QString forwarded   = index.data(BubbleMessageModel::ForwardedFromRole).toString();
     const QString reactions   = index.data(BubbleMessageModel::ReactionsRole).toString();
+    const QString filename    = index.data(BubbleMessageModel::FilenameRole).toString();
+    const QString mimeType    = index.data(BubbleMessageModel::AttachmentMimeRole).toString();
+    const qint64 sizeBytes    = index.data(BubbleMessageModel::SizeBytesRole).toLongLong();
     const bool pinned    = index.data(BubbleMessageModel::PinnedRole).toBool();
     const qint64 createdMs = index.data(BubbleMessageModel::CreatedAtMsRole).toLongLong();
     const QString avatarSeed = index.data(BubbleMessageModel::AvatarSeedRole).toString();
     const bool focused = index.data(BubbleMessageModel::FocusedRole).toBool();
     const bool match = index.data(BubbleMessageModel::MatchRole).toBool();
+    const bool systemMessage = text.startsWith(QStringLiteral("[system]"));
+    const bool pollMessage = text.startsWith(QStringLiteral("[poll]"));
 
     const auto layout = measure(index, option.rect.width());
     const QSize bubbleSize = layout.bubbleSize;
@@ -475,9 +500,73 @@ void BubbleDelegate::paint(QPainter* painter,
         y += layout.pinnedHeight;
     }
 
+    // System service message — compact centered pill inside the timeline.
+    if (systemMessage && layout.systemHeight > 0) {
+        QRect sysRect(content.left(), y, content.width(), layout.systemHeight - 6);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(outgoing && !failed ? QColor(255, 255, 255, 46)
+                                              : QColor(palette_.text_muted).lighter(185));
+        painter->drawRoundedRect(sysRect, 12, 12);
+        painter->setPen(metaText);
+        painter->setFont(base_font(10));
+        painter->drawText(sysRect.adjusted(8, 0, -8, 0), Qt::AlignCenter,
+                          text.mid(QStringLiteral("[system]").size()).trimmed());
+        y += layout.systemHeight;
+    }
+
+    // File attachment card — filename, type and size in a Telegram-like row.
+    if (layout.fileCardHeight > 0) {
+        QRect card(content.left(), y, content.width(), layout.fileCardHeight - 6);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(outgoing && !failed ? QColor(255, 255, 255, 42)
+                                              : QColor(palette_.text_muted).lighter(190));
+        painter->drawRoundedRect(card, 10, 10);
+        QRect icon(card.left() + 8, card.top() + 7, 32, 32);
+        painter->setBrush(QColor(palette_.primary));
+        painter->drawEllipse(icon);
+        painter->setPen(Qt::white);
+        painter->setFont(base_font(11, true));
+        painter->drawText(icon, Qt::AlignCenter, QStringLiteral("F"));
+        painter->setPen(primaryText);
+        painter->setFont(base_font(11, true));
+        painter->drawText(QRect(icon.right() + 8, card.top() + 6, card.width() - 54, 16),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          filename.isEmpty() ? QStringLiteral("Attachment") : filename);
+        painter->setPen(metaText);
+        painter->setFont(base_font(10));
+        const QString sizeText = sizeBytes > 0
+            ? QStringLiteral("%1 KB").arg(std::max<qint64>(1, sizeBytes / 1024))
+            : QStringLiteral("file");
+        painter->drawText(QRect(icon.right() + 8, card.top() + 24, card.width() - 54, 14),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          mimeType.isEmpty() ? sizeText : mimeType + QStringLiteral(" · ") + sizeText);
+        y += layout.fileCardHeight;
+    }
+
+    // Poll card — visual surface for poll messages while the server RPCs
+    // continue to own vote/close behavior.
+    if (pollMessage && layout.pollCardHeight > 0) {
+        QRect poll(content.left(), y, content.width(), layout.pollCardHeight - 6);
+        painter->setPen(QPen(QColor(palette_.primary), 1));
+        painter->setBrush(outgoing && !failed ? QColor(255, 255, 255, 36)
+                                              : QColor("#f6fbff"));
+        painter->drawRoundedRect(poll, 10, 10);
+        painter->setPen(primaryText);
+        painter->setFont(base_font(11, true));
+        painter->drawText(QRect(poll.left() + 10, poll.top() + 8, poll.width() - 20, 16),
+                          Qt::AlignLeft | Qt::AlignVCenter,
+                          text.mid(QStringLiteral("[poll]").size()).trimmed());
+        painter->setPen(QPen(QColor(palette_.primary), 1));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRoundedRect(QRect(poll.left() + 10, poll.top() + 32, poll.width() - 20, 14), 7, 7);
+        painter->drawRoundedRect(QRect(poll.left() + 10, poll.top() + 52, poll.width() - 20, 14), 7, 7);
+        y += layout.pollCardHeight;
+    }
+
     // Body text (with edit suffix).
     {
         QString shownText = deleted ? QStringLiteral("<deleted>") : text;
+        if (systemMessage || pollMessage) shownText.clear();
         if (edited) shownText += QStringLiteral(" (edited)");
         painter->setPen(failed ? QColor("#0f1419") : primaryText);
         painter->setFont(base_font(13));
@@ -556,12 +645,18 @@ void BubbleListView::setStore(const DesktopChatStore* store,
 }
 
 void BubbleListView::setBubblePalette(const DesktopBubblePalette& palette) {
+    palette_ = palette;
     delegate_->setPalette(palette);
     QPalette pal = this->palette();
     pal.setColor(QPalette::Base, QColor(palette.chat_area_bg));
     pal.setColor(QPalette::Text, QColor(palette.peer_bubble_text));
     setPalette(pal);
     // Force a repaint after the delegate's palette flips.
+    viewport()->update();
+}
+
+void BubbleListView::setEmptyStateText(const QString& text) {
+    empty_state_text_ = text;
     viewport()->update();
 }
 
@@ -590,6 +685,81 @@ void BubbleListView::setSearchHighlight(const QString& query,
 void BubbleListView::setThumbnailCache(const QHash<QString, QPixmap>& thumbnails) {
     model_->setThumbnailCache(thumbnails);
     viewport()->update();
+}
+
+void BubbleListView::paintTelegramDoodleWallpaper(QPainter& painter, const QRect& rect) const {
+    painter.save();
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    QLinearGradient bg(rect.topLeft(), rect.bottomRight());
+    bg.setColorAt(0.0, QColor("#dfe79d"));
+    bg.setColorAt(0.52, QColor(palette_.chat_area_bg));
+    bg.setColorAt(1.0, QColor("#8ac5b0"));
+    painter.fillRect(rect, bg);
+
+    QColor ink("#5f8f68");
+    ink.setAlpha(42);
+    QPen pen(ink, 1.4);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+
+    const int step = 92;
+    for (int y = rect.top() - step; y < rect.bottom() + step; y += step) {
+        for (int x = rect.left() - step; x < rect.right() + step; x += step) {
+            const int variant = ((x / step) + (y / step)) & 3;
+            const QPoint c(x + 46, y + 42);
+            if (variant == 0) {
+                painter.drawEllipse(QRect(c.x() - 14, c.y() - 12, 28, 24));
+                painter.drawLine(c.x() - 5, c.y() + 12, c.x() - 12, c.y() + 22);
+                painter.drawLine(c.x() + 5, c.y() + 12, c.x() + 12, c.y() + 22);
+            } else if (variant == 1) {
+                painter.drawRoundedRect(QRect(c.x() - 16, c.y() - 12, 32, 24), 6, 6);
+                painter.drawLine(c.x() - 8, c.y() - 18, c.x(), c.y() - 12);
+                painter.drawLine(c.x() + 8, c.y() - 18, c.x(), c.y() - 12);
+            } else if (variant == 2) {
+                QPainterPath path;
+                path.moveTo(c.x() - 16, c.y() + 10);
+                path.cubicTo(c.x() - 10, c.y() - 18, c.x() + 12, c.y() - 18, c.x() + 16, c.y() + 10);
+                path.cubicTo(c.x() + 5, c.y() + 2, c.x() - 5, c.y() + 2, c.x() - 16, c.y() + 10);
+                painter.drawPath(path);
+            } else {
+                painter.drawEllipse(QRect(c.x() - 11, c.y() - 11, 22, 22));
+                painter.drawLine(c.x() - 20, c.y(), c.x() - 14, c.y());
+                painter.drawLine(c.x() + 14, c.y(), c.x() + 20, c.y());
+                painter.drawLine(c.x(), c.y() - 20, c.x(), c.y() - 14);
+                painter.drawLine(c.x(), c.y() + 14, c.x(), c.y() + 20);
+            }
+        }
+    }
+    painter.restore();
+}
+
+void BubbleListView::paintEvent(QPaintEvent* event) {
+    QPainter painter(viewport());
+    paintTelegramDoodleWallpaper(painter, event->rect());
+    QListView::paintEvent(event);
+    if (model_ != nullptr && model_->rowCount() == 0 && !empty_state_text_.isEmpty()) {
+        painter.save();
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QFont font(QStringLiteral("Segoe UI"));
+        font.setPixelSize(26);
+        font.setBold(true);
+        painter.setFont(font);
+        const QFontMetrics fm(font);
+        const int w = fm.horizontalAdvance(empty_state_text_) + 42;
+        const int h = 52;
+        const QRect bubble((viewport()->width() - w) / 2,
+                           (viewport()->height() - h) / 2,
+                           w,
+                           h);
+        QColor bg("#3f7f5b");
+        bg.setAlpha(130);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(bg);
+        painter.drawRoundedRect(bubble, 22, 22);
+        painter.setPen(Qt::white);
+        painter.drawText(bubble, Qt::AlignCenter, empty_state_text_);
+        painter.restore();
+    }
 }
 
 QString BubbleListView::messageIdAtRow(int row) const {

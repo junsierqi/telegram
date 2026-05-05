@@ -23,6 +23,9 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 REPOSITORIES = REPO / "server" / "server" / "repositories.py"
+STATE = REPO / "server" / "server" / "state.py"
+AUTH = REPO / "server" / "server" / "services" / "auth.py"
+REMOTE = REPO / "server" / "server" / "services" / "remote_session.py"
 
 
 def scenario(label: str) -> None:
@@ -80,12 +83,42 @@ def run_remote_sessions_schema_has_relay_key():
         "migration must be idempotent (IF NOT EXISTS)"
 
 
+def run_state_exposes_focused_persistence_helpers():
+    scenario("InMemoryState exposes focused persistence helpers")
+    text = STATE.read_text(encoding="utf-8")
+    for needle in (
+        "def persist_session(self, record: SessionRecord)",
+        "self._pg_repository.upsert_session(asdict(record))",
+        "def delete_session(self, session_id: str)",
+        "self._pg_repository.delete_session(session_id)",
+        "def persist_remote_session(self, record: RemoteSessionRecord)",
+        "self._pg_repository.upsert_remote_session(asdict(record))",
+    ):
+        assert needle in text, f"missing focused state helper: {needle}"
+
+
+def run_services_use_focused_persistence_where_available():
+    scenario("Auth and remote-session services use focused PG writes where available")
+    auth = AUTH.read_text(encoding="utf-8")
+    remote = REMOTE.read_text(encoding="utf-8")
+    assert "self._state.persist_session(self._state.sessions[session_id])" in auth, \
+        "login should persist existing-device sessions through upsert_session"
+    assert "existing_device is None" in auth and "self._state.save_runtime_state()" in auth, \
+        "login must keep snapshot fallback for new-device writes"
+    assert "save_runtime_state()" not in remote, \
+        "remote_session.py should not use snapshot saves after per-entity helper wiring"
+    assert remote.count("persist_remote_session(record)") >= 7, \
+        "all remote-session state transitions should call persist_remote_session"
+
+
 def main() -> int:
     scenarios = [
         run_methods_present,
         run_upserts_use_on_conflict,
         run_each_method_opens_own_transaction,
         run_remote_sessions_schema_has_relay_key,
+        run_state_exposes_focused_persistence_helpers,
+        run_services_use_focused_persistence_where_available,
     ]
     for fn in scenarios:
         fn()

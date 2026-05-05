@@ -1086,4 +1086,292 @@ Engineering work outside this phase but on the roadmap:
 
 The release-ready engineering surface is now feature-complete on every platform that this dev environment can build for. The two highest-leverage next moves are: (a) the user procuring PA-005/008/009/010/011 so the next sprint can drop in real signing/push/SMS/macOS-build/Redis without further engineering, or (b) wiring the Redis bridge into `PresenceService` (one-milestone follow-up) so the cache surface starts paying its keep on the load path.
 
+## Desktop Telegram Reference UI Slice
 
+### Requirement Understanding
+
+The user supplied five Telegram Desktop reference screenshots and asked whether the current desktop UI can be improved to match them. The feasible scope for this slice is screenshot-directed shell parity in the existing Qt Widgets app: the main three-column frame, Telegram-style left chat list, header controls, composer, right details surface, and settings/details chrome. Full pixel-perfect parity remains a follow-up because the app still uses local demo/server data, Qt Widgets controls, and no bundled Telegram icon/font asset pack.
+
+### Completed Tasks
+
+- Added a `ChatListDelegate` that paints circular avatars, bold chat titles, last-message snippets, timestamps, selected-row color, hover color, and unread badges.
+- Reworked the sidebar top strip to match the screenshots: hamburger button, rounded `Search` field, and dismissible birthday banner.
+- Reworked the center chat shell toward Telegram Desktop: icon-like header actions, `Write a message...` composer placeholder, paperclip/send icon buttons, hidden developer-only search results / transfer / message-action strips by default, and a green Telegram-like chat background.
+- Kept the right details/settings panel visible by default so the first viewport reads as the three-pane Telegram Desktop layout.
+- Added `scripts/validate_desktop_telegram_reference_ui.py` and made `scripts/validate_desktop_smoke.py` prefer the fresh `build-ui-verify` binary.
+
+### Implementation Summary
+
+| Layer | Change | File(s) |
+|---|---|---|
+| Desktop shell | Sidebar/header/composer/details visibility and QSS polish. | `client/src/app_desktop/main.cpp` |
+| Desktop list rendering | Custom conversation row delegate with avatar/title/snippet/time/unread badge roles. | `client/src/app_desktop/main.cpp` |
+| Theme tokens | Light chat area shifted to the green Telegram-like wash. | `client/src/app_desktop/design_tokens.h` |
+| Validators | Static screenshot-parity shell check + fresh build directory preference for smoke. | `scripts/validate_desktop_telegram_reference_ui.py`, `scripts/validate_desktop_smoke.py` |
+
+### Test Flow
+
+- Configured a clean build directory because existing `build-*` CMake caches point at stale old paths.
+- Built `app_desktop` from `build-ui-verify`.
+- Ran the new static UI parity validator, the desktop smoke validator, and the existing sliding drawer validator.
+
+### Test Results
+
+| Run | Result |
+|---|---|
+| `cmake -S . -B build-ui-verify -DTELEGRAM_LIKE_SKIP_WINDEPLOYQT=ON` | PASS |
+| `cmake --build build-ui-verify --config Debug --target app_desktop` | PASS, existing MSVC `getenv` warnings only |
+| `python scripts\validate_desktop_telegram_reference_ui.py` | PASS, 4/4 scenarios |
+| `python scripts\validate_desktop_smoke.py` | PASS, 1/1 against `build-ui-verify/client/src/Debug/app_desktop.exe` |
+| `python scripts\validate_swipe_drawer.py` | PASS, 5/5 scenarios |
+
+### Acceptance Conclusion
+
+PASS for the first screenshot-parity slice. The desktop shell now resembles the provided Telegram Desktop references much more closely while keeping the chat/backend smoke path green.
+
+### Deferred Work And Risks
+
+- The right-side panel still hosts the existing settings pages rather than live per-chat/contact/channel profile summaries like screenshots #1-#3.
+- The hamburger action currently toggles the existing details panel; a true left slide-out account drawer like screenshot #4 should be a focused follow-up.
+- The settings view remains embedded in the right details surface; screenshot #5 calls for a centered modal-style settings window with Telegram-like rows and scale slider.
+- Pixel-perfect icons, doodle wallpaper, and exact font metrics would need asset work and runtime screenshot comparison.
+
+### Next-Phase Recommendation
+
+Continue with a second desktop UI phase: implement live right profile/channel/group summary pages, then move settings into a centered modal and add a real left account drawer.
+
+## Desktop 1:1 Reference Panels
+
+### Requirement Understanding
+
+The continuation request asked to complete the concrete gaps left by the first screenshot-parity slice: convert the right panel into real channel/contact/group profile pages, make the hamburger button open the screenshot #4 account drawer, and move Settings into a screenshot #5-style centered modal.
+
+### Completed Tasks
+
+- Added a live right-side profile/details page backed by the selected conversation: avatar, title, subscriber/member/contact subtitle, link/description, shared media counts, and member list.
+- Kept legacy functional settings forms available inside the details stack, but made the visible right panel default to the real profile summary rather than settings.
+- Added a Telegram-style sliding left account drawer with account header, My Profile, Wallet, New Group, New Channel, Contacts, Calls, Saved Messages, Settings, Night Mode, and footer version text.
+- Added a centered Settings modal with account identity, Telegram-style rows, Language trailing value, Default interface scale toggle/slider, Premium, and Stars.
+- Extended `scripts/validate_desktop_telegram_reference_ui.py` from 4 to 7 scenarios so the new 1:1 panel targets are statically locked.
+
+### Implementation Summary
+
+| Layer | Change | File(s) |
+|---|---|---|
+| Right panel | `details_stack_` with a live `profileDetailsPage`; refreshes from selected chat in `render_store()`. | `client/src/app_desktop/main.cpp` |
+| Left drawer | `show_account_drawer()` frameless sliding dialog opened from hamburger. | `client/src/app_desktop/main.cpp` |
+| Settings modal | `show_settings_dialog()` centered dialog with reference rows and scale slider. | `client/src/app_desktop/main.cpp` |
+| Verification | Static UI validator expanded to cover right panel, account drawer, settings modal. | `scripts/validate_desktop_telegram_reference_ui.py` |
+
+### Test Flow
+
+- Built the Qt desktop app from the clean `build-ui-verify` directory.
+- Ran the expanded static desktop reference UI validator.
+- Ran existing desktop smoke against the freshly built binary.
+- Ran existing swipe/drawer static validator to catch regressions around prior drawer animation work.
+
+### Test Results
+
+| Run | Result |
+|---|---|
+| `cmake --build build-ui-verify --config Debug --target app_desktop` | PASS, existing MSVC `getenv` warnings only |
+| `python scripts\validate_desktop_telegram_reference_ui.py` | PASS, 7/7 scenarios |
+| `python scripts\validate_desktop_smoke.py` | PASS, 1/1 |
+| `python scripts\validate_swipe_drawer.py` | PASS, 5/5 scenarios |
+
+### Acceptance Conclusion
+
+PASS for the requested 1:1 structural parity continuation. The desktop client now has the three missing reference surfaces: right live info pages, left account drawer, and centered Settings modal.
+
+### Deferred Work And Risks
+
+- The implementation uses Qt Widgets and Unicode icon approximations rather than Telegram's exact SVG/icon/font asset pack.
+- Runtime screenshot pixel tuning was not performed in this slice; verification is structural/static plus smoke.
+- Exact per-channel counts are derived from local conversation data where the backend lacks Telegram-style media indexes.
+
+### Next-Phase Recommendation
+
+If stricter pixel matching is required, the next slice should launch the GUI, capture screenshots, and tune spacing, icon assets, wallpaper texture, and modal geometry against the five references.
+
+## Desktop Pixel Parity And GUI Interaction Smoke
+
+### Requirement Understanding
+
+The user asked to continue beyond Qt Widgets structural parity into 1:1 visual details, and specifically called out the top-left hamburger drawer being unable to close. The scope for this slice is to add Telegram-like wallpaper/visual hardening, fix drawer close behavior, and actually run the desktop app through the new interactions rather than relying only on static checks.
+
+### Completed Tasks
+
+- Added Telegram-like doodle wallpaper rendering in `BubbleListView::paintEvent`, with a green/yellow wash and low-opacity repeated icon pattern behind bubbles.
+- Added settings scale slider styling so the centered Settings modal better matches screenshot #5.
+- Fixed the account drawer close problem: drawer rows close it, clicking/focusing outside closes it, and close uses a slide-out animation.
+- Added `--gui-smoke` to `app_desktop`; it launches the real Qt window, clicks the hamburger button, verifies the drawer opens, verifies it closes, reopens it, clicks drawer Settings, verifies the centered settings modal opens/closes, and confirms the right profile panel exists.
+- Added `scripts/validate_desktop_gui_smoke.py` so this GUI interaction path is repeatable from CI/local validation.
+- Extended `scripts/validate_desktop_telegram_reference_ui.py` to 8 scenarios, including doodle wallpaper and executable GUI smoke wiring.
+
+### Implementation Summary
+
+| Layer | Change | File(s) |
+|---|---|---|
+| Chat wallpaper | Custom doodle-pattern background behind bubbles. | `client/src/app_desktop/bubble_list_view.h`, `client/src/app_desktop/bubble_list_view.cpp` |
+| Drawer interaction | Outside-focus close, row-click close, animated slide-out, actual hamburger-click GUI smoke. | `client/src/app_desktop/main.cpp` |
+| Settings polish | Slider styling and GUI smoke for drawer Settings click. | `client/src/app_desktop/main.cpp` |
+| Validators | Static 8-scenario parity validator + executable GUI smoke wrapper. | `scripts/validate_desktop_telegram_reference_ui.py`, `scripts/validate_desktop_gui_smoke.py` |
+
+### Test Flow
+
+- Rebuilt the Qt desktop target.
+- Ran static UI parity validation.
+- Ran executable GUI smoke against the freshly built `app_desktop.exe`.
+- Ran the existing backend/desktop smoke and prior drawer animation validator.
+
+### Test Results
+
+| Run | Result |
+|---|---|
+| `cmake --build build-ui-verify --config Debug --target app_desktop` | PASS, existing MSVC `getenv` warnings only |
+| `python scripts\validate_desktop_telegram_reference_ui.py` | PASS, 8/8 scenarios |
+| `python scripts\validate_desktop_gui_smoke.py` | PASS, 1/1, real app clicked hamburger/drawer/settings interactions |
+| `python scripts\validate_desktop_smoke.py` | PASS, 1/1 |
+| `python scripts\validate_swipe_drawer.py` | PASS, 5/5 scenarios |
+
+### Acceptance Conclusion
+
+PASS. The hamburger drawer close bug is fixed and covered by a real GUI smoke. Visual parity is hardened with a Telegram-style wallpaper and modal/slider polish while core chat behavior remains green.
+
+### Deferred Work And Risks
+
+- The current iconography uses Qt/Unicode approximations instead of Telegram's exact asset pack.
+- Pixel comparison against the five reference screenshots is not yet automated.
+- Some Telegram counts remain derived from local app data because the backend does not yet expose Telegram-style media/gift/link indexes.
+
+### Next-Phase Recommendation
+
+If the next goal is true pixel acceptance, add screenshot capture artifacts from `--gui-smoke`, then compare/tune exact icon assets, wallpaper density, text metrics, and panel geometry against the five references.
+
+## Desktop Screenshot Evidence And Pixel Tuning
+
+### Requirement Understanding
+
+The user asked to continue into stricter pixel-level acceptance by making `--gui-smoke` save screenshots, then using those artifacts to tune spacing, icon treatment, wallpaper, and text geometry. The hamburger close issue also remains part of the acceptance path and must keep being tested through the real app.
+
+### Completed Tasks
+
+- Extended `--gui-smoke` to save PNG evidence when `--smoke-save-dir` is supplied:
+  - `main-window.png`
+  - `account-drawer.png`
+  - `settings-modal.png`
+- Updated `scripts/validate_desktop_gui_smoke.py` to pass a temporary screenshot directory and assert all three screenshots exist and are non-trivial.
+- Captured persistent review artifacts under `artifacts/desktop-gui-smoke/`.
+- Tuned the UI based on generated screenshots:
+  - main window resized to `1365x768` to better match the provided desktop aspect.
+  - right panel width increased and action buttons fixed so `Unmute`, `Discuss`, and `Gift` all fit.
+  - heavy native scrollbars replaced with thin Telegram-like scrollbars and horizontal scrollbars hidden.
+  - Settings modal widened to `700x720`.
+  - Settings modal header/content/list labels forced onto white/transparent backgrounds instead of inherited gray blocks.
+
+### Implementation Summary
+
+| Layer | Change | File(s) |
+|---|---|---|
+| GUI smoke evidence | Screenshot saving helper and three capture points. | `client/src/app_desktop/main.cpp` |
+| Visual tuning | Window proportions, right action button sizing, scrollbar styling, Settings modal width/backgrounds. | `client/src/app_desktop/main.cpp` |
+| Validator | Screenshot existence/size checks in executable GUI smoke. | `scripts/validate_desktop_gui_smoke.py` |
+| Artifacts | Current visual evidence PNGs. | `artifacts/desktop-gui-smoke/` |
+
+### Test Flow
+
+- Rebuilt `app_desktop`.
+- Ran static UI parity validation.
+- Ran GUI smoke validator that launches the real app, clicks through the drawer/settings flow, and validates screenshot files.
+- Ran desktop backend smoke and prior drawer animation validator.
+
+### Test Results
+
+| Run | Result |
+|---|---|
+| `cmake --build build-ui-verify --config Debug --target app_desktop` | PASS, existing MSVC `getenv` warnings only |
+| `python scripts\validate_desktop_telegram_reference_ui.py` | PASS, 8/8 scenarios |
+| `python scripts\validate_desktop_gui_smoke.py` | PASS, screenshots generated and checked |
+| `python scripts\validate_desktop_smoke.py` | PASS, 1/1 |
+| `python scripts\validate_swipe_drawer.py` | PASS, 5/5 scenarios |
+
+### Screenshot Evidence
+
+- `artifacts/desktop-gui-smoke/main-window.png`
+- `artifacts/desktop-gui-smoke/account-drawer.png`
+- `artifacts/desktop-gui-smoke/settings-modal.png`
+
+### Acceptance Conclusion
+
+PASS. The desktop app now produces screenshot artifacts during GUI smoke, the hamburger drawer close path is executable-tested, and the first screenshot-driven pixel tuning pass has been applied.
+
+### Deferred Work And Risks
+
+- The app still uses approximated Unicode icons rather than Telegram's exact icon pack.
+- No automated image-diff threshold exists yet against the five original reference screenshots.
+- The current screenshots are smoke-state captures with local demo data; reference-specific channel/contact names and media counts depend on richer backend data.
+
+### Next-Phase Recommendation
+
+For true pixel-lock, check in approved reference crops and add an image-diff validator with tolerances, or explicitly approve bundling Telegram-equivalent icon/font/wallpaper assets.
+
+## Desktop Strict Pixel Lock Validator
+
+### Requirement Understanding
+
+The user asked to continue with strict pixel-level acceptance. The available file-system truth is the generated GUI smoke screenshots; the original Telegram reference images are only present in the conversation, not as repository files. This slice therefore implements the pixel-lock mechanism and locks the current approved GUI smoke states. The same validator can compare against original reference crops once those are added to the baseline directory.
+
+### Completed Tasks
+
+- Added `scripts/validate_desktop_image_diff.py`, a standard-library PNG decoder and pixel-diff validator.
+- Added support for `--update-baseline` to intentionally refresh locked screenshots after approved visual changes.
+- Created locked baselines under `artifacts/desktop-reference-baseline/`:
+  - `main-window.png`
+  - `account-drawer.png`
+  - `settings-modal.png`
+- Updated `scripts/validate_desktop_gui_smoke.py` so every run:
+  - launches the real `app_desktop`
+  - saves current screenshots
+  - copies them to `artifacts/desktop-gui-smoke/`
+  - runs image diff against the locked baseline
+- Extended `scripts/validate_desktop_telegram_reference_ui.py` to require the pixel-diff path.
+
+### Implementation Summary
+
+| Layer | Change | File(s) |
+|---|---|---|
+| Pixel diff | PNG decode, filter reconstruction, RGBA comparison, dimension checks, thresholds, baseline update. | `scripts/validate_desktop_image_diff.py` |
+| GUI smoke | Screenshot copy to persistent artifact dir + chained pixel diff. | `scripts/validate_desktop_gui_smoke.py` |
+| Static guard | Ensures image-diff validator remains wired. | `scripts/validate_desktop_telegram_reference_ui.py` |
+| Baselines | Locked GUI smoke screenshot states. | `artifacts/desktop-reference-baseline/` |
+
+### Test Flow
+
+- Ran image-diff baseline update after intentional Settings visual tuning.
+- Ran GUI smoke; first diff caught the intentional visual change before baseline update, confirming the validator is sensitive.
+- Re-ran GUI smoke after updating baselines; all image diffs passed at 0 changed pixels.
+- Rebuilt and reran desktop smoke plus drawer validator.
+
+### Test Results
+
+| Run | Result |
+|---|---|
+| `python scripts\validate_desktop_image_diff.py --update-baseline` | PASS |
+| `python scripts\validate_desktop_gui_smoke.py` | PASS, chained image diff 0.0000% changed for all three screenshots |
+| `cmake --build build-ui-verify --config Debug --target app_desktop` | PASS |
+| `python scripts\validate_desktop_telegram_reference_ui.py` | PASS, 8/8 scenarios |
+| `python scripts\validate_desktop_smoke.py` | PASS, 1/1 |
+| `python scripts\validate_swipe_drawer.py` | PASS, 5/5 scenarios |
+
+### Acceptance Conclusion
+
+PASS. The desktop UI now has a strict screenshot lock over the three generated GUI smoke states. Any unapproved pixel drift in the main window, account drawer, or Settings modal will fail validation.
+
+### Deferred Work And Risks
+
+- The baseline currently represents the implemented/approved generated screenshots, not the original Telegram reference screenshots from the chat thread.
+- To compare directly against the five original references, add cropped reference PNGs into `artifacts/desktop-reference-baseline/` or extend the validator to handle named reference sets.
+
+### Next-Phase Recommendation
+
+Add reference-specific crops for the five supplied screenshots and map them to generated states, then run the same diff validator with calibrated tolerances for external-reference comparison.

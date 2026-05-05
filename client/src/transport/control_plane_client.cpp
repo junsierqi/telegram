@@ -37,6 +37,26 @@ std::string quote(std::string_view s) {
     return "\"" + json_escape(s) + "\"";
 }
 
+std::string quote_string_array(const std::vector<std::string>& values) {
+    std::string out = "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) out += ",";
+        out += quote(values[i]);
+    }
+    out += "]";
+    return out;
+}
+
+std::string int_array(const std::vector<int>& values) {
+    std::string out = "[";
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (i > 0) out += ",";
+        out += std::to_string(values[i]);
+    }
+    out += "]";
+    return out;
+}
+
 bool is_push_line(const std::string& line) {
     // push_ prefix check: naive scan for "correlation_id":"push_
     const std::string needle = "\"correlation_id\":\"push_";
@@ -66,6 +86,12 @@ long long extract_number(const JsonObject& obj, std::string_view key) {
         return static_cast<long long>(*d);
     }
     return 0;
+}
+
+int extract_array_size(const JsonObject& obj, std::string_view key) {
+    const auto* value = find_member(obj, key);
+    if (!value || !value->is_array()) return 0;
+    return static_cast<int>(value->as_array()->size());
 }
 
 std::string base64_encode(std::string_view bytes) {
@@ -162,6 +188,35 @@ void fill_message_result(MessageResult& result, const JsonObject& payload) {
     result.forwarded_from_sender_user_id = extract_string(payload, "forwarded_from_sender_user_id");
     result.reaction_summary = extract_string(payload, "reaction_summary");
     result.pinned = extract_bool(payload, "pinned");
+}
+
+std::string extract_type(const std::string& line);
+std::optional<JsonObject> parse_payload(const std::string& line);
+
+void fill_ack_error(AckResult& result, const JsonObject& payload) {
+    result.error_code = extract_string(payload, "code");
+    result.error_message = extract_string(payload, "message");
+}
+
+AckResult parse_ack_response(const std::optional<std::string>& response,
+                             std::string_view expected_type) {
+    AckResult result;
+    if (!response) {
+        result.error_code = "transport_error";
+        return result;
+    }
+    auto payload_obj = parse_payload(*response);
+    if (!payload_obj) {
+        result.error_code = "bad_response";
+        return result;
+    }
+    const std::string type = extract_type(*response);
+    if (type != expected_type) {
+        fill_ack_error(result, *payload_obj);
+        return result;
+    }
+    result.ok = true;
+    return result;
 }
 
 std::string extract_type(const std::string& line) {
@@ -1285,6 +1340,241 @@ AckResult ControlPlaneClient::heartbeat_ping() {
         } else {
             result.error_code = "bad_response";
         }
+    }
+    return result;
+}
+
+AckResult ControlPlaneClient::phone_otp_request(const std::string& phone_number) {
+    return parse_ack_response(
+        send_and_wait("phone_otp_request", "{\"phone_number\":" + quote(phone_number) + "}"),
+        "phone_otp_request_response");
+}
+
+LoginResult ControlPlaneClient::phone_otp_verify(const std::string& phone_number,
+                                                 const std::string& code,
+                                                 const std::string& device_id,
+                                                 const std::string& display_name) {
+    LoginResult result;
+    const std::string payload = "{\"phone_number\":" + quote(phone_number)
+        + ",\"code\":" + quote(code)
+        + ",\"device_id\":" + quote(device_id)
+        + ",\"display_name\":" + quote(display_name) + "}";
+    auto response = send_and_wait("phone_otp_verify_request", payload);
+    if (!response) { result.error_code = "transport_error"; return result; }
+    auto payload_obj = parse_payload(*response);
+    if (!payload_obj) { result.error_code = "bad_response"; return result; }
+    if (extract_type(*response) != "phone_otp_verify_response") {
+        result.error_code = extract_string(*payload_obj, "code");
+        result.error_message = extract_string(*payload_obj, "message");
+        return result;
+    }
+    result.ok = true;
+    result.session_id = extract_string(*payload_obj, "session_id");
+    result.user_id = extract_string(*payload_obj, "user_id");
+    result.display_name = extract_string(*payload_obj, "display_name");
+    result.device_id = extract_string(*payload_obj, "device_id");
+    session_id_ = result.session_id;
+    user_id_ = result.user_id;
+    return result;
+}
+
+TwoFaSetupResult ControlPlaneClient::two_fa_begin_enable() {
+    TwoFaSetupResult result;
+    auto response = send_and_wait("two_fa_enable_request", "{}");
+    if (!response) { result.error_code = "transport_error"; return result; }
+    auto payload_obj = parse_payload(*response);
+    if (!payload_obj) { result.error_code = "bad_response"; return result; }
+    if (extract_type(*response) != "two_fa_enable_response") {
+        result.error_code = extract_string(*payload_obj, "code");
+        result.error_message = extract_string(*payload_obj, "message");
+        return result;
+    }
+    result.ok = true;
+    result.secret = extract_string(*payload_obj, "secret");
+    result.provisioning_uri = extract_string(*payload_obj, "provisioning_uri");
+    return result;
+}
+
+AckResult ControlPlaneClient::two_fa_confirm_enable(const std::string& code) {
+    return parse_ack_response(
+        send_and_wait("two_fa_verify_request", "{\"code\":" + quote(code) + "}"),
+        "two_fa_verify_response");
+}
+
+AckResult ControlPlaneClient::two_fa_disable(const std::string& code) {
+    return parse_ack_response(
+        send_and_wait("two_fa_disable_request", "{\"code\":" + quote(code) + "}"),
+        "two_fa_disable_response");
+}
+
+AccountExportResult ControlPlaneClient::account_export() {
+    AccountExportResult result;
+    auto response = send_and_wait("account_export_request", "{}");
+    if (!response) { result.error_code = "transport_error"; return result; }
+    auto payload_obj = parse_payload(*response);
+    if (!payload_obj) { result.error_code = "bad_response"; return result; }
+    if (extract_type(*response) != "account_export_response") {
+        result.error_code = extract_string(*payload_obj, "code");
+        result.error_message = extract_string(*payload_obj, "message");
+        return result;
+    }
+    result.ok = true;
+    result.user_id = extract_string(*payload_obj, "user_id");
+    result.exported_at_ms = extract_number(*payload_obj, "exported_at_ms");
+    result.devices = extract_array_size(*payload_obj, "devices");
+    result.sessions = extract_array_size(*payload_obj, "sessions");
+    result.contacts = extract_array_size(*payload_obj, "contacts");
+    result.push_tokens = extract_array_size(*payload_obj, "push_tokens");
+    result.authored_messages = extract_array_size(*payload_obj, "authored_messages");
+    return result;
+}
+
+AckResult ControlPlaneClient::account_delete(const std::string& password,
+                                             const std::string& two_fa_code) {
+    const std::string payload = "{\"password\":" + quote(password)
+        + ",\"two_fa_code\":" + quote(two_fa_code) + "}";
+    return parse_ack_response(send_and_wait("account_delete_request", payload),
+                              "account_delete_response");
+}
+
+AckResult ControlPlaneClient::block_user(const std::string& target_user_id) {
+    return parse_ack_response(
+        send_and_wait("block_user_request", "{\"target_user_id\":" + quote(target_user_id) + "}"),
+        "block_user_ack");
+}
+
+AckResult ControlPlaneClient::unblock_user(const std::string& target_user_id) {
+    return parse_ack_response(
+        send_and_wait("unblock_user_request", "{\"target_user_id\":" + quote(target_user_id) + "}"),
+        "block_user_ack");
+}
+
+AckResult ControlPlaneClient::set_conversation_mute(const std::string& conversation_id,
+                                                    long long muted_until_ms) {
+    const std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+        + ",\"muted_until_ms\":" + std::to_string(muted_until_ms) + "}";
+    return parse_ack_response(send_and_wait("conversation_mute_update_request", payload),
+                              "conversation_mute_update_response");
+}
+
+AckResult ControlPlaneClient::save_draft(const std::string& conversation_id,
+                                         const std::string& text,
+                                         const std::string& reply_to_message_id) {
+    const std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+        + ",\"text\":" + quote(text)
+        + ",\"reply_to_message_id\":" + quote(reply_to_message_id) + "}";
+    return parse_ack_response(send_and_wait("draft_save_request", payload),
+                              "draft_save_response");
+}
+
+AckResult ControlPlaneClient::clear_draft(const std::string& conversation_id) {
+    return parse_ack_response(
+        send_and_wait("draft_clear_request", "{\"conversation_id\":" + quote(conversation_id) + "}"),
+        "draft_clear_response");
+}
+
+AckResult ControlPlaneClient::set_conversation_pinned(const std::string& conversation_id,
+                                                      bool pinned) {
+    const std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+        + ",\"pinned\":" + (pinned ? "true" : "false") + "}";
+    return parse_ack_response(send_and_wait("conversation_pin_toggle_request", payload),
+                              "conversation_pin_toggle_response");
+}
+
+AckResult ControlPlaneClient::set_conversation_archived(const std::string& conversation_id,
+                                                        bool archived) {
+    const std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+        + ",\"archived\":" + (archived ? "true" : "false") + "}";
+    return parse_ack_response(send_and_wait("conversation_archive_toggle_request", payload),
+                              "conversation_archive_toggle_response");
+}
+
+AckResult ControlPlaneClient::update_profile_avatar(const std::string& attachment_id) {
+    return parse_ack_response(
+        send_and_wait("profile_avatar_update_request",
+                      "{\"avatar_attachment_id\":" + quote(attachment_id) + "}"),
+        "profile_avatar_update_response");
+}
+
+AckResult ControlPlaneClient::update_conversation_avatar(const std::string& conversation_id,
+                                                         const std::string& attachment_id) {
+    const std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+        + ",\"avatar_attachment_id\":" + quote(attachment_id) + "}";
+    return parse_ack_response(send_and_wait("conversation_avatar_update_request", payload),
+                              "conversation_avatar_update_response");
+}
+
+PollActionResult ControlPlaneClient::create_poll(const std::string& conversation_id,
+                                                 const std::string& question,
+                                                 const std::vector<std::string>& options,
+                                                 bool multiple_choice) {
+    PollActionResult result;
+    const std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+        + ",\"question\":" + quote(question)
+        + ",\"options\":" + quote_string_array(options)
+        + ",\"multiple_choice\":" + (multiple_choice ? "true" : "false") + "}";
+    auto response = send_and_wait("poll_create_request", payload);
+    if (!response) { result.error_code = "transport_error"; return result; }
+    auto payload_obj = parse_payload(*response);
+    if (!payload_obj) { result.error_code = "bad_response"; return result; }
+    if (extract_type(*response) != "poll_updated") {
+        result.error_code = extract_string(*payload_obj, "code");
+        result.error_message = extract_string(*payload_obj, "message");
+        return result;
+    }
+    result.ok = true;
+    result.conversation_id = extract_string(*payload_obj, "conversation_id");
+    result.message_id = extract_string(*payload_obj, "message_id");
+    if (const auto* poll = find_member(*payload_obj, "poll"); poll && poll->is_object()) {
+        result.closed = extract_bool(*poll->as_object(), "closed");
+    }
+    return result;
+}
+
+PollActionResult ControlPlaneClient::vote_poll(const std::string& conversation_id,
+                                               const std::string& message_id,
+                                               const std::vector<int>& option_indices) {
+    PollActionResult result;
+    const std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+        + ",\"message_id\":" + quote(message_id)
+        + ",\"option_indices\":" + int_array(option_indices) + "}";
+    auto response = send_and_wait("poll_vote_request", payload);
+    if (!response) { result.error_code = "transport_error"; return result; }
+    auto payload_obj = parse_payload(*response);
+    if (!payload_obj) { result.error_code = "bad_response"; return result; }
+    if (extract_type(*response) != "poll_updated") {
+        result.error_code = extract_string(*payload_obj, "code");
+        result.error_message = extract_string(*payload_obj, "message");
+        return result;
+    }
+    result.ok = true;
+    result.conversation_id = extract_string(*payload_obj, "conversation_id");
+    result.message_id = extract_string(*payload_obj, "message_id");
+    if (const auto* poll = find_member(*payload_obj, "poll"); poll && poll->is_object()) {
+        result.closed = extract_bool(*poll->as_object(), "closed");
+    }
+    return result;
+}
+
+PollActionResult ControlPlaneClient::close_poll(const std::string& conversation_id,
+                                                const std::string& message_id) {
+    PollActionResult result;
+    const std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+        + ",\"message_id\":" + quote(message_id) + "}";
+    auto response = send_and_wait("poll_close_request", payload);
+    if (!response) { result.error_code = "transport_error"; return result; }
+    auto payload_obj = parse_payload(*response);
+    if (!payload_obj) { result.error_code = "bad_response"; return result; }
+    if (extract_type(*response) != "poll_updated") {
+        result.error_code = extract_string(*payload_obj, "code");
+        result.error_message = extract_string(*payload_obj, "message");
+        return result;
+    }
+    result.ok = true;
+    result.conversation_id = extract_string(*payload_obj, "conversation_id");
+    result.message_id = extract_string(*payload_obj, "message_id");
+    if (const auto* poll = find_member(*payload_obj, "poll"); poll && poll->is_object()) {
+        result.closed = extract_bool(*poll->as_object(), "closed");
     }
     return result;
 }

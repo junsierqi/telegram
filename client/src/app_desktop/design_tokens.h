@@ -57,10 +57,10 @@ struct Theme {
 
 // ---- light theme — the existing Telegram-Web-Z baseline ----
 inline constexpr Theme kLightTheme = {
-    /* app_background        */ "#f4f5f7",
+    /* app_background        */ "#f2f3f5",
     /* surface               */ "#ffffff",
     /* surface_muted         */ "#fafbfc",
-    /* chat_area             */ "#e6ebee",
+    /* chat_area             */ "#d9e7bd",
     /* border                */ "#e6e8eb",
     /* border_subtle         */ "#eef0f2",
     /* border_input          */ "#d8dde2",
