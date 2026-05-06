@@ -47,6 +47,7 @@ def main() -> int:
         "t.me/M_Team",
         "8 gifts",
         "set_detail_media_rows(is_channel, is_group, 12, 56, 0)",
+        'setObjectName("detailMediaTabBar")',
         "1 poll",
         "Leave channel",
         "%1 similar channels",

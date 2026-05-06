@@ -5,9 +5,13 @@
 #include "transport/control_plane_client.h"
 
 #include <QDateTime>
+#include <QDragEnterEvent>
+#include <QDragLeaveEvent>
+#include <QDropEvent>
 #include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMimeData>
 #include <QPropertyAnimation>
 #include <QResizeEvent>
 #include <QSet>
@@ -228,6 +232,11 @@ enum ChatListRole {
     ChatTimeRole,
     ChatUnreadRole,
     ChatAvatarSeedRole,
+    ChatPinnedRole,
+    ChatMutedRole,
+    ChatMentionRole,
+    ChatReactionRole,
+    ChatPollRole,
 };
 
 namespace tdstyle {
@@ -299,6 +308,12 @@ public:
         const QString time = index.data(ChatTimeRole).toString();
         const int unread = index.data(ChatUnreadRole).toInt();
         const QString seed = index.data(ChatAvatarSeedRole).toString();
+        const bool pinned = index.data(ChatPinnedRole).toBool();
+        const bool muted = index.data(ChatMutedRole).toBool();
+        const bool mention = index.data(ChatMentionRole).toBool();
+        const bool reaction = index.data(ChatReactionRole).toBool();
+        const bool poll = index.data(ChatPollRole).toBool();
+        const bool showStatusMarkers = selected || hovered;
 
         const QRect avatar(row.left() + 10, row.top() + 8,
                            tdstyle::kDialogsPhotoSize, tdstyle::kDialogsPhotoSize);
@@ -330,10 +345,48 @@ public:
         painter->setPen(metaColor);
         painter->drawText(QRect(textRight - 66, row.top() + 8, 66, 20),
                           Qt::AlignRight | Qt::AlignVCenter, time);
-        painter->drawText(QRect(textLeft, row.top() + 34, textRight - textLeft - (unread > 0 ? 52 : 0), 22),
+        const int statusReserve = (unread > 0 ? 52 : 0)
+            + (showStatusMarkers && (pinned || muted) ? 20 : 0)
+            + (showStatusMarkers && (mention || reaction || poll) ? 24 : 0);
+        painter->drawText(QRect(textLeft, row.top() + 34, textRight - textLeft - statusReserve, 22),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(snippet, Qt::ElideRight,
-                                                            textRight - textLeft - (unread > 0 ? 50 : 0)));
+                                                            textRight - textLeft - statusReserve));
+        int statusX = textRight - (unread > 0 ? 56 : 18);
+        if (showStatusMarkers && pinned) {
+            painter->setPen(QPen(metaColor, 1.5));
+            painter->drawLine(QPoint(statusX, row.top() + 41), QPoint(statusX + 9, row.top() + 50));
+            painter->drawLine(QPoint(statusX + 5, row.top() + 39), QPoint(statusX + 11, row.top() + 45));
+            statusX -= 16;
+        }
+        if (showStatusMarkers && muted) {
+            painter->setPen(QPen(metaColor, 1.4));
+            painter->drawEllipse(QRect(statusX, row.top() + 39, 12, 12));
+            painter->drawLine(QPoint(statusX + 2, row.top() + 50), QPoint(statusX + 12, row.top() + 40));
+            statusX -= 16;
+        }
+        if (showStatusMarkers && (mention || reaction || poll)) {
+            const QString marker = mention ? QStringLiteral("@")
+                : (reaction ? QStringLiteral("+") : QStringLiteral("P"));
+            QRect markerRect(textRight - (unread > 0 ? 84 : 22), row.top() + 36, 18, 18);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(selected ? QColor(255, 255, 255, 60) : QColor("#dfe8ef"));
+            painter->drawEllipse(markerRect);
+            painter->setPen(selected ? QColor("#ffffff") : QColor(t.primary));
+            painter->setFont(metaFont);
+            painter->drawText(markerRect, Qt::AlignCenter, marker);
+        }
+        if (hovered && !selected) {
+            QRect quick(row.right() - 34, row.top() + 20, 24, 24);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(QColor(t.surface));
+            painter->drawRoundedRect(quick, 12, 12);
+            painter->setPen(QPen(metaColor, 1.5));
+            painter->drawLine(QPoint(quick.left() + 7, quick.center().y()),
+                              QPoint(quick.right() - 7, quick.center().y()));
+            painter->drawLine(QPoint(quick.center().x(), quick.top() + 7),
+                              QPoint(quick.center().x(), quick.bottom() - 7));
+        }
         if (unread > 0) {
             const QString badge = unread > 999 ? QStringLiteral("999+") : QString::number(unread);
             const int badgeW = std::max(28, painter->fontMetrics().horizontalAdvance(badge) + 14);
@@ -1202,6 +1255,12 @@ public:
         send_ = new QPushButton(QString::fromUtf8("\xe2\x9e\xa4"));  // ➤
         send_->setObjectName("primary");
         send_->setToolTip("Send");
+        send_as_ = new QToolButton();
+        send_as_->setObjectName("sendAsButton");
+        send_as_->setText(QStringLiteral("HB"));
+        send_as_->setToolTip("Send as");
+        send_as_->setCursor(Qt::PointingHandCursor);
+        send_as_->setVisible(false);
         attach_ = new QPushButton();
         attach_->setObjectName("ghost");
         attach_->setIcon(line_icon("attach", 28, QColor("#8a9299")));
@@ -1215,6 +1274,13 @@ public:
         send_->setEnabled(false);
         attach_->setEnabled(false);
         emoji_panel_->setEnabled(true);
+        voice_ = new QPushButton();
+        voice_->setObjectName("ghost");
+        voice_->setIcon(line_icon("voice", 26, QColor("#8a9299")));
+        voice_->setIconSize(QSize(26, 26));
+        voice_->setToolTip("Record voice message");
+        voice_->setEnabled(false);
+        voice_->setVisible(false);
 
         message_action_id_ = new QLineEdit();
         message_action_id_->setPlaceholderText("message_id");
@@ -1401,6 +1467,29 @@ public:
         sidebar_search_layout->addWidget(menu_btn);
         sidebar_search_layout->addWidget(chat_filter_);
         sidebar_layout->addWidget(sidebar_search_wrap);
+        auto* folders_tabs = new QWidget();
+        folders_tabs->setObjectName("sidebarFoldersTabs");
+        auto* folders_layout = new QHBoxLayout(folders_tabs);
+        folders_layout->setContentsMargins(12, 7, 12, 7);
+        folders_layout->setSpacing(6);
+        auto add_folder_tab = [&](const QString& label, bool active = false) {
+            auto* tab = new QPushButton(label);
+            tab->setObjectName(active ? "sidebarFolderTabActive" : "sidebarFolderTab");
+            tab->setCursor(Qt::PointingHandCursor);
+            tab->setMinimumHeight(28);
+            folders_layout->addWidget(tab);
+            return tab;
+        };
+        add_folder_tab("All", true);
+        add_folder_tab("Unread");
+        add_folder_tab("Groups");
+        folders_layout->addStretch(1);
+        folders_tabs->setVisible(false);
+        sidebar_layout->addWidget(folders_tabs);
+        QObject::connect(chat_filter_, &QLineEdit::textChanged, folders_tabs,
+                         [folders_tabs](const QString& text) {
+                             folders_tabs->setVisible(!text.trimmed().isEmpty());
+                         });
         auto* birthday_banner = new QWidget();
         birthday_banner->setObjectName("birthdayBanner");
         auto* birthday_layout = new QHBoxLayout(birthday_banner);
@@ -1537,6 +1626,22 @@ public:
         center_layout->addWidget(pin_bar_);
         // timeline
         center_layout->addWidget(messages_, 1);
+        attachment_drop_overlay_ = new QWidget(messages_->viewport());
+        attachment_drop_overlay_->setObjectName("attachmentDropOverlay");
+        auto* drop_layout = new QHBoxLayout(attachment_drop_overlay_);
+        drop_layout->setContentsMargins(28, 28, 28, 28);
+        drop_layout->setSpacing(18);
+        auto make_drop_zone = [](const QString& objectName, const QString& title, const QString& subtitle) {
+            auto* zone = new QLabel(QStringLiteral("<b>%1</b><br><span>%2</span>").arg(title, subtitle));
+            zone->setObjectName(objectName);
+            zone->setTextFormat(Qt::RichText);
+            zone->setAlignment(Qt::AlignCenter);
+            zone->setMinimumHeight(112);
+            return zone;
+        };
+        drop_layout->addWidget(make_drop_zone("attachmentDropPhotoZone", "Photo or Video", "drop media here"), 1);
+        drop_layout->addWidget(make_drop_zone("attachmentDropFileZone", "File", "drop documents here"), 1);
+        attachment_drop_overlay_->hide();
         // server search result panel (collapsible feel)
         message_search_results_->setVisible(false);
         center_layout->addWidget(message_search_results_);
@@ -1548,6 +1653,31 @@ public:
         transfer_row->addWidget(transfer_progress_, 1);
         transfer_wrap->setVisible(false);
         center_layout->addWidget(transfer_wrap);
+        // Telegram Desktop keeps reply/edit state as a compact strip above
+        // the composer. It is hidden until a message action chooses a target.
+        composer_reply_bar_ = new QWidget();
+        composer_reply_bar_->setObjectName("composerReplyBar");
+        auto* reply_bar_layout = new QHBoxLayout(composer_reply_bar_);
+        reply_bar_layout->setContentsMargins(24, 6, 16, 6);
+        reply_bar_layout->setSpacing(10);
+        auto* reply_bar_accent = new QFrame();
+        reply_bar_accent->setObjectName("composerReplyAccent");
+        reply_bar_accent->setFixedWidth(3);
+        reply_bar_layout->addWidget(reply_bar_accent);
+        composer_reply_label_ = new QLabel();
+        composer_reply_label_->setObjectName("composerReplyLabel");
+        composer_reply_label_->setTextFormat(Qt::RichText);
+        composer_reply_label_->setTextInteractionFlags(Qt::NoTextInteraction);
+        reply_bar_layout->addWidget(composer_reply_label_, 1);
+        auto* reply_bar_close = new QToolButton();
+        reply_bar_close->setObjectName("settingsClose");
+        reply_bar_close->setText(QString::fromUtf8("\xe2\x9c\x95"));
+        reply_bar_close->setToolTip("Cancel");
+        reply_bar_layout->addWidget(reply_bar_close);
+        composer_reply_bar_->setVisible(false);
+        center_layout->addWidget(composer_reply_bar_);
+        QObject::connect(reply_bar_close, &QToolButton::clicked,
+                         [this] { hide_composer_reply_bar(); });
         // composer
         auto* composer_wrap = new QWidget();
         composer_wrap->setObjectName("composer");
@@ -1556,7 +1686,9 @@ public:
         send_row->setSpacing(18);
         send_row->addWidget(attach_);
         send_row->addWidget(emoji_panel_);
+        send_row->addWidget(send_as_);
         send_row->addWidget(composer_, 1);
+        send_row->addWidget(voice_);
         send_row->addWidget(send_);
         center_layout->addWidget(composer_wrap);
         // message-action row (advanced; stays visible under composer because smoke + power users use it)
@@ -1671,6 +1803,7 @@ public:
         detail_media_layout->setSpacing(0);
         detail_media_tabs_ = new QTabWidget();
         detail_media_tabs_->setObjectName("detailMediaTabs");
+        detail_media_tabs_->tabBar()->setObjectName("detailMediaTabBar");
         detail_media_tabs_->tabBar()->hide();
         detail_media_list_ = new QListWidget();
         detail_media_list_->setObjectName("detailMediaRows");
@@ -2314,6 +2447,7 @@ public:
         setCentralWidget(splitter);
         resize(1492, 1009);
         setWindowTitle("Telegram-like Desktop");
+        setAcceptDrops(true);
         setStyleSheet(telegram_stylesheet());
         statusBar()->showMessage("Disconnected");
         QObject::connect(menu_btn, &QToolButton::clicked,
@@ -2425,6 +2559,18 @@ public:
         QObject::connect(connect_, &QPushButton::clicked, [this] { connect_and_sync(); });
         QObject::connect(register_, &QPushButton::clicked, [this] { register_and_sync(); });
         QObject::connect(send_, &QPushButton::clicked, [this] { send_message(); });
+        send_->setContextMenuPolicy(Qt::CustomContextMenu);
+        QObject::connect(send_, &QPushButton::customContextMenuRequested,
+                         [this] { show_send_options_menu(); });
+        QObject::connect(send_as_, &QToolButton::clicked, [this] { show_send_as_menu(); });
+        QObject::connect(voice_, &QPushButton::clicked, [this] {
+            statusBar()->showMessage("Voice message recording UI is ready; media capture backend is not connected", 2200);
+        });
+        QObject::connect(composer_, &QLineEdit::textChanged, [this](const QString& text) {
+            const bool empty = text.trimmed().isEmpty();
+            if (voice_ != nullptr) voice_->setVisible(empty && logged_in_);
+            if (send_ != nullptr) send_->setVisible(true);
+        });
         QObject::connect(attach_, &QPushButton::clicked, [this] {
             QMenu menu(this);
             menu.setObjectName("attachmentMenu");
@@ -2457,6 +2603,7 @@ public:
             [this](const QString& message_id) {
                 if (message_id.isEmpty()) return;
                 message_action_id_->setText(message_id);
+                show_composer_reply_bar(message_id, QStringLiteral("Reply"));
                 statusBar()->showMessage("Selected message " + message_id, 2000);
             });
         QObject::connect(messages_,
@@ -2468,7 +2615,10 @@ public:
                 menu.setObjectName("messageContextMenu");
                 configure_telegram_menu(&menu);
                 menu.addAction(line_icon("reply", 22, QColor("#7d8790")), "Reply",
-                               [this] { reply_message(); });
+                               [this, message_id] {
+                                   show_composer_reply_bar(message_id, QStringLiteral("Reply"));
+                                   composer_->setFocus();
+                               });
                 menu.addAction(line_icon("forward", 22, QColor("#7d8790")), "Forward",
                                [this] { forward_message(); });
                 menu.addAction(line_icon("smile", 22, QColor("#7d8790")), "React",
@@ -2485,7 +2635,10 @@ public:
                                [this] { pin_message(false); });
                 menu.addSeparator();
                 auto* edit_action = menu.addAction(line_icon("edit", 22, QColor("#7d8790")), "Edit",
-                                                   [this] { edit_message_action(); });
+                                                   [this, message_id] {
+                                                       show_composer_reply_bar(message_id, QStringLiteral("Edit"));
+                                                       edit_message_action();
+                                                   });
                 auto* delete_action = menu.addAction(line_icon("delete", 22, QColor("#d44d4d")), "Delete",
                                                      [this] { delete_message_action(); });
                 const bool can_modify = can_modify_message(str(message_id));
@@ -2680,6 +2833,11 @@ private:
             QWidget#birthdayBanner { background:{surface}; border-bottom:1px solid {border_subtle}; }
             QLabel#birthdayText { color:{text_primary}; }
             QLabel#birthdayText span { color:{text_muted}; }
+            QWidget#sidebarFoldersTabs { background:{surface}; border-bottom:1px solid {border_subtle}; }
+            QPushButton#sidebarFolderTab, QPushButton#sidebarFolderTabActive { border:none; border-radius:14px; padding:4px 12px; font-size:13px; }
+            QPushButton#sidebarFolderTab { background:transparent; color:{text_muted}; }
+            QPushButton#sidebarFolderTab:hover { background:{hover}; color:{text_primary}; }
+            QPushButton#sidebarFolderTabActive { background:{selection_tint}; color:{primary}; font-weight:600; }
             QWidget#sidebarFooter { background:{surface_muted}; border-top:1px solid {border_subtle}; }
             QWidget#reconnectIndicator { background:{surface}; border-top:1px solid {border_subtle}; }
             QLabel#reconnectIndicatorText { color:{text_muted}; font-size:15px; }
@@ -2697,6 +2855,13 @@ private:
             QLabel#searchStatus { color:{text_muted}; font-size:11px; padding-left:6px; }
             QTextBrowser { background:{chat_area}; border:none; color:{text_primary}; }
             QWidget#composer { background:{surface}; border-top:1px solid {border}; }
+            QWidget#composerReplyBar { background:{surface}; border-top:1px solid {border_subtle}; }
+            QFrame#composerReplyAccent { background:{primary}; border:none; border-radius:1px; }
+            QLabel#composerReplyLabel { color:{text_primary}; font-size:13px; }
+            QLabel#composerReplyLabel span { color:{text_muted}; }
+            QWidget#attachmentDropOverlay { background:rgba(51,144,236,0.14); border:2px dashed {primary}; border-radius:14px; }
+            QLabel#attachmentDropPhotoZone, QLabel#attachmentDropFileZone { background:rgba(255,255,255,0.74); color:{primary}; border-radius:12px; font-size:18px; font-weight:600; }
+            QLabel#attachmentDropPhotoZone span, QLabel#attachmentDropFileZone span { color:{text_muted}; font-size:13px; font-weight:400; }
             QWidget#messageActions { background:{secondary_header_tint}; border-top:1px solid {border_subtle}; }
             QScrollArea#detailsPanel { background:{surface}; border-left:1px solid {border}; }
             QScrollArea#detailsPanel > QWidget > QWidget { background:{surface}; }
@@ -2767,12 +2932,18 @@ private:
             QPushButton#dangerActionButton:hover { background:{danger_hover}; }
             QToolButton#hamburgerButton, QToolButton#chatInfoBtn { border:none; background:transparent; color:{text_muted}; padding:7px 9px; border-radius:17px; font-size:24px; }
             QToolButton#hamburgerButton:hover, QToolButton#chatInfoBtn:hover { background:{hover}; color:{text_primary}; }
+            QToolButton#sendAsButton { border:none; background:{surface_muted}; color:{text_secondary}; border-radius:14px; min-width:28px; min-height:28px; font-size:11px; font-weight:700; }
+            QToolButton#sendAsButton:hover { background:{hover}; color:{text_primary}; }
             QWidget#accountDrawer, QDialog#settingsModal, QDialog#loginModal { background:{surface}; }
             QScrollArea#accountDrawerScroll { background:{surface}; border:none; }
             QScrollArea#accountDrawerScroll > QWidget > QWidget { background:{surface}; }
             QWidget#drawerHeader { background:{surface}; border-bottom:1px solid {border_subtle}; }
             QLabel#drawerName { font-weight:700; font-size:14px; color:{text_primary}; background:transparent; }
             QLabel#drawerStatus { color:{primary}; font-size:13px; background:transparent; }
+            QWidget#drawerAccountSwitcher { background:{surface}; border-bottom:1px solid {border_subtle}; }
+            QPushButton#drawerAccountCurrent, QPushButton#drawerAccountRow { background:{surface}; border:none; border-radius:0; text-align:left; padding:3px 20px; color:{text_primary}; font-size:13px; }
+            QPushButton#drawerAccountRow { color:{text_muted}; }
+            QPushButton#drawerAccountCurrent:hover, QPushButton#drawerAccountRow:hover { background:{hover}; }
             QPushButton#drawerRow { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 20px; font-size:14px; font-weight:600; color:{text_primary}; }
             QPushButton#drawerRow:hover { background:{hover}; }
             QPushButton#drawerSettingsButton { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 20px; font-size:14px; font-weight:600; color:{text_primary}; min-height:48px; }
@@ -3172,6 +3343,26 @@ private:
         header_layout->addWidget(status);
         content_layout->addWidget(header);
 
+        auto* accounts = new QWidget();
+        accounts->setObjectName("drawerAccountSwitcher");
+        auto* accounts_layout = new QVBoxLayout(accounts);
+        accounts_layout->setContentsMargins(0, 6, 0, 6);
+        accounts_layout->setSpacing(0);
+        auto add_account_row = [&](const QString& label, const QString& subtitle, bool current) {
+            auto* row = new QPushButton(label + QStringLiteral("\n") + subtitle);
+            row->setObjectName(current ? "drawerAccountCurrent" : "drawerAccountRow");
+            row->setIcon(QIcon(avatar_pixmap_for(str(label), label, 28)));
+            row->setIconSize(QSize(28, 28));
+            row->setMinimumHeight(46);
+            row->setCursor(Qt::PointingHandCursor);
+            accounts_layout->addWidget(row);
+            return row;
+        };
+        add_account_row(drawer_display, "online", true);
+        add_account_row("Add Account", "switch or add another account", false);
+        accounts->setVisible(false);
+        content_layout->addWidget(accounts);
+
         auto add_row = [&](const QString& icon_key, const QString& text, QObject* receiver = nullptr,
                            const char* slot = nullptr) -> QPushButton* {
             auto* btn = new QPushButton(text);
@@ -3228,6 +3419,15 @@ private:
         });
         add_row("call", "Calls");
         add_row("saved", "Saved Messages");
+        auto* archive_row = add_row("folder", "Archived Chats");
+        archive_row->setObjectName("drawerArchiveRow");
+        auto* cloud_row = add_row("saved", "Cloud Storage");
+        cloud_row->setObjectName("drawerCloudRow");
+        auto* reset_scale_row = add_row("settings", "Reset Scale");
+        reset_scale_row->setObjectName("drawerResetScaleRow");
+        archive_row->setVisible(false);
+        cloud_row->setVisible(false);
+        reset_scale_row->setVisible(false);
         auto* settings = add_row("settings", "Settings");
         settings->setObjectName("drawerSettingsButton");
         QObject::connect(settings, &QPushButton::clicked, drawer, [this, close_drawer] {
@@ -3246,6 +3446,10 @@ private:
         auto* night_text = new QLabel("Night Mode");
         night_text->setObjectName("drawerNightText");
         night_layout->addWidget(night_text, 1);
+        auto* animated_night = new QPushButton();
+        animated_night->setObjectName("drawerNightAnimatedToggle");
+        animated_night->setVisible(false);
+        content_layout->addWidget(animated_night);
         auto* night = new QCheckBox();
         night->setObjectName("drawerNightSwitch");
         night->setStyleSheet(QStringLiteral(
@@ -3254,7 +3458,12 @@ private:
         night->setChecked(telegram_like::client::app_desktop::design::is_dark_theme());
         night_layout->addWidget(night);
         content_layout->addWidget(night_wrap);
-        QObject::connect(night, &QCheckBox::toggled, [this](bool dark) {
+        QObject::connect(night, &QCheckBox::toggled, [this, animated_night](bool dark) {
+            auto* anim = new QPropertyAnimation(animated_night, "maximumWidth", animated_night);
+            anim->setDuration(150);
+            anim->setStartValue(54);
+            anim->setEndValue(58);
+            anim->start(QAbstractAnimation::DeleteWhenStopped);
             telegram_like::client::app_desktop::design::set_active_theme(dark);
             QSettings prefs;
             prefs.setValue(QStringLiteral("appearance/dark_theme"), dark);
@@ -3307,17 +3516,60 @@ private:
         if (auto* content = account_drawer_->findChild<QWidget*>("accountDrawerContent")) {
             content->setMinimumWidth(docked.width());
         }
+        if (auto* footer = account_drawer_->findChild<QLabel*>("drawerFooter")) {
+            footer->setMinimumHeight(std::max(76, docked.height() - 810));
+        }
+    }
+
+    void set_attachment_drop_overlay_visible(bool visible) {
+        if (attachment_drop_overlay_ == nullptr || messages_ == nullptr) return;
+        attachment_drop_overlay_->setGeometry(messages_->viewport()->rect().adjusted(18, 18, -18, -18));
+        attachment_drop_overlay_->setVisible(visible);
+        if (visible) attachment_drop_overlay_->raise();
     }
 
 protected:
     void resizeEvent(QResizeEvent* event) override {
         QMainWindow::resizeEvent(event);
         sync_account_drawer_geometry();
+        if (attachment_drop_overlay_ != nullptr && attachment_drop_overlay_->isVisible()) {
+            set_attachment_drop_overlay_visible(true);
+        }
     }
 
     void moveEvent(QMoveEvent* event) override {
         QMainWindow::moveEvent(event);
         sync_account_drawer_geometry();
+    }
+
+    void dragEnterEvent(QDragEnterEvent* event) override {
+        if (event != nullptr && event->mimeData() != nullptr && event->mimeData()->hasUrls()) {
+            event->acceptProposedAction();
+            set_attachment_drop_overlay_visible(true);
+            return;
+        }
+        QMainWindow::dragEnterEvent(event);
+    }
+
+    void dragLeaveEvent(QDragLeaveEvent* event) override {
+        set_attachment_drop_overlay_visible(false);
+        QMainWindow::dragLeaveEvent(event);
+    }
+
+    void dropEvent(QDropEvent* event) override {
+        set_attachment_drop_overlay_visible(false);
+        if (event == nullptr || event->mimeData() == nullptr || !event->mimeData()->hasUrls()) {
+            QMainWindow::dropEvent(event);
+            return;
+        }
+        const auto urls = event->mimeData()->urls();
+        for (const QUrl& url : urls) {
+            if (!url.isLocalFile()) continue;
+            send_attachment(url.toLocalFile());
+            event->acceptProposedAction();
+            return;
+        }
+        QMainWindow::dropEvent(event);
     }
 
     void show_login_dialog() {
@@ -5118,11 +5370,17 @@ protected:
         if (conversation == nullptr) {
             chat_header_title_->setText(QString());
             chat_header_subtitle_->setText(connecting_ ? QStringLiteral("Connecting...") : QString());
+            if (send_as_ != nullptr) send_as_->setVisible(false);
             return;
         }
         const QString title = reference_title_for(conversation->conversation_id, conversation->title);
         chat_header_title_->setText(title);
         chat_header_subtitle_->setText(reference_subtitle_for(*conversation));
+        const bool group_or_channel = conversation->participant_user_ids.size() > 2
+            || title.contains("channel", Qt::CaseInsensitive)
+            || title.contains("M-Team", Qt::CaseInsensitive)
+            || title.contains(QString::fromUtf8("三叉戟"));
+        if (send_as_ != nullptr) send_as_->setVisible(group_or_channel);
     }
 
     void toggle_details_panel() {
@@ -5359,6 +5617,25 @@ protected:
             item->setData(ChatTimeRole, time);
             item->setData(ChatUnreadRole, static_cast<int>(conversation.unread_count));
             item->setData(ChatAvatarSeedRole, qstr(conversation.conversation_id));
+            const bool pinned = std::any_of(conversation.messages.begin(), conversation.messages.end(),
+                                            [](const auto& message) { return message.pinned; });
+            const bool mention = std::any_of(conversation.messages.begin(), conversation.messages.end(),
+                                             [](const auto& message) {
+                                                 return message.text.find('@') != std::string::npos;
+                                             });
+            const bool reaction = std::any_of(conversation.messages.begin(), conversation.messages.end(),
+                                              [](const auto& message) {
+                                                  return !message.reaction_summary.empty();
+                                              });
+            const bool poll = std::any_of(conversation.messages.begin(), conversation.messages.end(),
+                                          [](const auto& message) {
+                                              return message.text.rfind("[poll]", 0) == 0;
+                                          });
+            item->setData(ChatPinnedRole, pinned);
+            item->setData(ChatMutedRole, false);
+            item->setData(ChatMentionRole, mention);
+            item->setData(ChatReactionRole, reaction);
+            item->setData(ChatPollRole, poll);
             item->setData(Qt::UserRole, qstr(conversation.conversation_id));
             conversations_->addItem(item);
             if (conversation.conversation_id == selected) selected_row = row;
@@ -5662,8 +5939,67 @@ protected:
         }).detach();
     }
 
+    QString message_preview_for(const QString& message_id) const {
+        const auto* conversation = store_.selected_conversation();
+        if (conversation == nullptr) return message_id;
+        const std::string needle = str(message_id);
+        for (const auto& message : conversation->messages) {
+            if (message.message_id != needle) continue;
+            QString text = message.text.empty()
+                ? (message.filename.empty() ? QStringLiteral("Message") : qstr(message.filename))
+                : qstr(message.text);
+            text.replace(QLatin1Char('\n'), QLatin1Char(' '));
+            return text.left(96);
+        }
+        return message_id;
+    }
+
+    void show_composer_reply_bar(const QString& message_id, const QString& mode) {
+        if (composer_reply_bar_ == nullptr || composer_reply_label_ == nullptr) return;
+        composer_reply_target_id_ = message_id;
+        message_action_id_->setText(message_id);
+        const QString preview = message_preview_for(message_id).toHtmlEscaped();
+        composer_reply_label_->setText(QStringLiteral("<b>%1</b><br><span>%2</span>")
+                                           .arg(mode.toHtmlEscaped(), preview));
+        composer_reply_bar_->setVisible(true);
+    }
+
+    void hide_composer_reply_bar() {
+        composer_reply_target_id_.clear();
+        if (composer_reply_bar_ != nullptr) composer_reply_bar_->setVisible(false);
+    }
+
+    void show_send_options_menu() {
+        if (send_ == nullptr) return;
+        QMenu menu(this);
+        menu.setObjectName("sendOptionsMenu");
+        configure_telegram_menu(&menu);
+        menu.addAction(line_icon("saved", 22, QColor("#7d8790")), "Send without sound",
+                       [this] { send_message(); });
+        menu.addAction(line_icon("timer", 22, QColor("#7d8790")), "Schedule message",
+                       [this] { statusBar()->showMessage("Schedule message is not connected to server RPC yet", 2200); });
+        menu.exec(send_->mapToGlobal(QPoint(0, -menu.sizeHint().height())));
+    }
+
+    void show_send_as_menu() {
+        if (send_as_ == nullptr) return;
+        QMenu menu(this);
+        menu.setObjectName("sendAsMenu");
+        configure_telegram_menu(&menu);
+        menu.addAction(QIcon(avatar_pixmap_for(store_.current_user_id(), display_name_->text(), 24)),
+                       display_name_->text().trimmed().isEmpty() ? "Personal account" : display_name_->text());
+        menu.addAction(line_icon("channel", 22, QColor("#7d8790")), "Channel identity");
+        menu.addAction(line_icon("group", 22, QColor("#7d8790")), "Group identity");
+        menu.exec(send_as_->mapToGlobal(QPoint(0, -menu.sizeHint().height())));
+    }
+
     void send_message() {
         if (!client_ || composer_->text().trimmed().isEmpty()) return;
+        if (composer_reply_bar_ != nullptr && composer_reply_bar_->isVisible()
+            && !composer_reply_target_id_.isEmpty()) {
+            reply_message();
+            return;
+        }
         const auto text = str(composer_->text());
         const auto conversation = str(conversation_->text());
         if (conversation.empty()) {
@@ -5672,6 +6008,7 @@ protected:
         }
         const auto local_message_id = store_.add_pending_message(conversation, text);
         composer_->clear();
+        hide_composer_reply_bar();
         save_cache();
         render_store();
         send_->setEnabled(false);
@@ -5708,6 +6045,7 @@ protected:
         const auto text = str(composer_->text());
         const auto local_message_id = store_.add_pending_message(conversation, text);
         composer_->clear();
+        hide_composer_reply_bar();
         save_cache();
         render_store();
         set_message_action_enabled(false);
@@ -5883,9 +6221,11 @@ protected:
         }).detach();
     }
 
-    void send_attachment() {
+    void send_attachment(const QString& forced_path = QString()) {
         if (!client_) return;
-        const QString path = QFileDialog::getOpenFileName(this, "Attach file");
+        const QString path = forced_path.isEmpty()
+            ? QFileDialog::getOpenFileName(this, "Attach file")
+            : forced_path;
         if (path.isEmpty()) return;
         set_transfer_progress("Reading attachment", 10);
         QFile file(path);
@@ -6937,9 +7277,15 @@ protected:
     // refreshes. Sized cap is enforced at decode time (240×240).
     QHash<QString, QPixmap> thumbnail_cache_;
     QSet<QString> thumbnail_inflight_;
+    QWidget* attachment_drop_overlay_ {nullptr};
+    QWidget* composer_reply_bar_ {nullptr};
+    QLabel* composer_reply_label_ {nullptr};
+    QString composer_reply_target_id_;
     QLineEdit* composer_ {nullptr};
     QPushButton* attach_ {nullptr};
     QPushButton* emoji_panel_ {nullptr};
+    QToolButton* send_as_ {nullptr};
+    QPushButton* voice_ {nullptr};
     QLineEdit* message_action_id_ {nullptr};
     QLineEdit* reaction_emoji_ {nullptr};
     QPushButton* reply_ {nullptr};

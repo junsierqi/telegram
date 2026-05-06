@@ -35,16 +35,21 @@ def main() -> int:
 
     print("[scenario] custom Telegram-style conversation row delegate")
     require("class ChatListDelegate final" in main_cpp, "ChatListDelegate is missing")
-    for role in ("ChatTitleRole", "ChatSnippetRole", "ChatTimeRole", "ChatUnreadRole", "ChatAvatarSeedRole"):
+    for role in ("ChatTitleRole", "ChatSnippetRole", "ChatTimeRole", "ChatUnreadRole", "ChatAvatarSeedRole",
+                 "ChatPinnedRole", "ChatMutedRole", "ChatMentionRole", "ChatReactionRole", "ChatPollRole"):
         require(role in main_cpp, f"{role} must be defined and populated")
     require("setItemDelegate(new ChatListDelegate" in main_cpp, "chat list must use ChatListDelegate")
     require("drawEllipse(avatar)" in main_cpp, "delegate must paint circular avatars")
     require("drawRoundedRect(badgeRect" in main_cpp, "delegate must paint unread badges")
+    require("drawLine(QPoint(statusX" in main_cpp and "QStringLiteral(\"P\")" in main_cpp,
+            "delegate must paint tdesktop-style list status markers")
     print("[ok ] avatar/title/snippet/time/unread delegate is wired")
 
     print("[scenario] reference sidebar shell")
     require('setObjectName("hamburgerButton")' in main_cpp, "hamburger menu button missing")
     require('setObjectName("sidebarSearchInput")' in main_cpp, "rounded sidebar search input missing")
+    require('setObjectName("sidebarFoldersTabs")' in main_cpp, "sidebar folders/filter tabs missing")
+    require('"sidebarFolderTabActive"' in main_cpp, "active folder tab styling missing")
     require('setObjectName("birthdayBanner")' in main_cpp, "birthday banner missing")
     require('setPlaceholderText("Search")' in main_cpp, "search placeholder should match reference")
     print("[ok ] hamburger, search pill, and birthday banner are present")
@@ -54,6 +59,14 @@ def main() -> int:
     require('message_search_results_->setVisible(false)' in main_cpp, "server search panel should be hidden by default")
     require('message_action_wrap->setVisible(false)' in main_cpp, "advanced message action strip should be hidden by default")
     require('transfer_wrap->setVisible(false)' in main_cpp, "transfer debug strip should be hidden by default")
+    require('setObjectName("composerReplyBar")' in main_cpp and 'setObjectName("sendOptionsMenu")' in main_cpp,
+            "composer must expose Telegram-style reply strip and send options")
+    require('setObjectName("sendAsButton")' in main_cpp and 'setObjectName("sendAsMenu")' in main_cpp,
+            "composer must expose send-as button and menu")
+    require('voice_->setIcon(line_icon("voice"' in main_cpp,
+            "composer must expose voice button state")
+    require('setObjectName("attachmentDropOverlay")' in main_cpp,
+            "composer must expose drag-to-send attachment overlay")
     require("qlineargradient(x1:0,y1:0,x2:1,y2:1" in main_cpp, "chat surface gradient missing")
     require('"#d9e7bd"' in tokens, "light chat_area token should use Telegram-like green wash")
     print("[ok ] chat area and composer match the screenshot direction")
@@ -91,7 +104,8 @@ def main() -> int:
                   "kDialogsRowHeight = 62", "kDialogsPhotoSize = 46"):
         require(token in main_cpp, f"tdesktop source layout token missing: {token}")
     for label in ("My Profile", "Wallet", "New Group", "New Channel", "Contacts",
-                  "Calls", "Saved Messages", "Settings", "Night Mode"):
+                  "Calls", "Saved Messages", "Archived Chats", "Cloud Storage",
+                  "Reset Scale", "Settings", "Night Mode"):
         require(label in main_cpp, f"drawer row missing: {label}")
     require("QIcon line_icon" in main_cpp, "single-color drawn line icon helper missing")
     require('add_row("profile", "My Profile")' in main_cpp,
@@ -103,6 +117,9 @@ def main() -> int:
     require("[this] { show_account_drawer(); }" in main_cpp, "hamburger must open the account drawer")
     require("closeRequested" in main_cpp and "mousePressEvent(QMouseEvent* event) override" in main_cpp,
             "drawer layer must close from outside clicks")
+    require('setObjectName("drawerAccountSwitcher")' in main_cpp
+            and 'setObjectName("drawerNightAnimatedToggle")' in main_cpp,
+            "drawer must expose account switcher and animated night toggle")
     print("[ok ] hamburger opens a Telegram-like left account drawer")
 
     print("[scenario] screenshot #5 centered settings modal")

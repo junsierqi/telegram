@@ -12,6 +12,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
 
 namespace telegram_like::client::app_desktop {
 
@@ -59,6 +60,50 @@ QFont base_font(int px = 11, bool bold = false, bool italic = false) {
     f.setBold(bold);
     f.setItalic(italic);
     return f;
+}
+
+QString bottom_info_text(const QString& timeText,
+                         const QString& tick,
+                         bool edited) {
+    QString out = timeText;
+    if (edited) out = QStringLiteral("edited ") + out;
+    if (!tick.isEmpty()) out += QStringLiteral(" ") + tick;
+    return out;
+}
+
+int parsed_meta_count(const QString& text, const QString& key) {
+    const QString marker = QStringLiteral("[meta ");
+    const int start = text.indexOf(marker);
+    if (start < 0) return 0;
+    const int end = text.indexOf(QLatin1Char(']'), start);
+    if (end < 0) return 0;
+    const QStringList parts = text.mid(start + marker.size(), end - start - marker.size())
+        .split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    for (const QString& part : parts) {
+        const int eq = part.indexOf(QLatin1Char('='));
+        if (eq <= 0 || part.left(eq) != key) continue;
+        bool ok = false;
+        const int value = part.mid(eq + 1).toInt(&ok);
+        return ok ? value : 0;
+    }
+    return 0;
+}
+
+QString strip_message_markers(QString text) {
+    if (text.startsWith(QStringLiteral("[system]"))) {
+        return text.mid(QStringLiteral("[system]").size()).trimmed();
+    }
+    if (text.startsWith(QStringLiteral("[date]"))) {
+        return text.mid(QStringLiteral("[date]").size()).trimmed();
+    }
+    const int metaStart = text.indexOf(QStringLiteral("[meta "));
+    if (metaStart >= 0) {
+        const int metaEnd = text.indexOf(QLatin1Char(']'), metaStart);
+        if (metaEnd >= metaStart) {
+            text.remove(metaStart, metaEnd - metaStart + 1);
+        }
+    }
+    return text.trimmed();
 }
 
 }  // namespace
@@ -171,6 +216,13 @@ QVariant BubbleMessageModel::data(const QModelIndex& index, int role) const {
         case AttachmentMimeRole: return QString::fromStdString(m.mime_type);
         case FilenameRole: return QString::fromStdString(m.filename);
         case SizeBytesRole: return QVariant::fromValue<qlonglong>(m.size_bytes);
+        case BottomViewsRole: return parsed_meta_count(QString::fromStdString(m.text), QStringLiteral("views"));
+        case BottomRepliesRole: {
+            const QString text = QString::fromStdString(m.text);
+            const int comments = parsed_meta_count(text, QStringLiteral("comments"));
+            return comments > 0 ? comments : parsed_meta_count(text, QStringLiteral("replies"));
+        }
+        case BottomForwardsRole: return parsed_meta_count(QString::fromStdString(m.text), QStringLiteral("forwards"));
         case ThumbnailRole: {
             if (m.attachment_id.empty()) return QVariant::fromValue(QPixmap());
             const QString key = QString::fromStdString(m.attachment_id);
@@ -206,6 +258,9 @@ QHash<int, QByteArray> BubbleMessageModel::roleNames() const {
         {AttachmentMimeRole,"attachmentMime"},
         {FilenameRole,      "filename"},
         {SizeBytesRole,     "sizeBytes"},
+        {BottomViewsRole,   "bottomViews"},
+        {BottomRepliesRole, "bottomReplies"},
+        {BottomForwardsRole,"bottomForwards"},
         {ThumbnailRole,     "thumbnail"},
     };
 }
@@ -293,16 +348,16 @@ BubbleDelegate::LayoutMetrics BubbleDelegate::measure(const QModelIndex& index,
     const QString filename = index.data(BubbleMessageModel::FilenameRole).toString();
     const QString mimeType = index.data(BubbleMessageModel::AttachmentMimeRole).toString();
     const bool deleted = index.data(BubbleMessageModel::DeletedRole).toBool();
-    const bool edited = index.data(BubbleMessageModel::EditedRole).toBool();
     const bool pinned = index.data(BubbleMessageModel::PinnedRole).toBool();
     const bool systemMessage = text.startsWith(QStringLiteral("[system]"));
+    const bool dateChipMessage = text.startsWith(QStringLiteral("[date]"));
     const bool pollMessage = text.startsWith(QStringLiteral("[poll]"));
     // Section heights — rough but consistent with paint().
     if (!outgoing && !sender.isEmpty()) m.senderHeight = 14;
     if (!forwarded.isEmpty())           m.forwardedHeight = 14;
     if (!replyTo.isEmpty())             m.replyHeight = 30;
     if (pinned)                         m.pinnedHeight = 12;
-    if (systemMessage)                  m.systemHeight = 30;
+    if (systemMessage || dateChipMessage) m.systemHeight = 30;
 
     // M148: image thumbnail occupies the top of the bubble content area.
     // Cap at 240 wide × 240 tall, scaled with KeepAspectRatio so the
@@ -324,12 +379,12 @@ BubbleDelegate::LayoutMetrics BubbleDelegate::measure(const QModelIndex& index,
         m.pollCardHeight = 76;
     }
 
-    QString shownText = deleted ? QStringLiteral("<deleted>") : text;
-    if (edited) shownText += QStringLiteral(" (edited)");
+    QString shownText = deleted ? QStringLiteral("<deleted>") : strip_message_markers(text);
+    if (systemMessage || dateChipMessage || pollMessage) shownText.clear();
     QFontMetrics fm(base_font(15));
     QRect textRect = fm.boundingRect(QRect(0, 0, contentMax, 1),
                                      Qt::TextWordWrap, shownText);
-    m.textHeight = std::max(textRect.height(), fm.lineSpacing());
+    m.textHeight = shownText.isEmpty() ? 0 : std::max(textRect.height(), fm.lineSpacing());
     int textWidth = std::min(contentMax, std::max(kMinBubbleWidth, textRect.width()));
 
     if (!reactions.isEmpty()) m.reactionsHeight = 22;
@@ -392,16 +447,43 @@ void BubbleDelegate::paint(QPainter* painter,
     const qint64 sizeBytes    = index.data(BubbleMessageModel::SizeBytesRole).toLongLong();
     const bool pinned    = index.data(BubbleMessageModel::PinnedRole).toBool();
     const qint64 createdMs = index.data(BubbleMessageModel::CreatedAtMsRole).toLongLong();
+    const int bottomViews = index.data(BubbleMessageModel::BottomViewsRole).toInt();
+    const int bottomReplies = index.data(BubbleMessageModel::BottomRepliesRole).toInt();
+    const int bottomForwards = index.data(BubbleMessageModel::BottomForwardsRole).toInt();
     const QString avatarSeed = index.data(BubbleMessageModel::AvatarSeedRole).toString();
     const bool focused = index.data(BubbleMessageModel::FocusedRole).toBool();
     const bool match = index.data(BubbleMessageModel::MatchRole).toBool();
     const bool systemMessage = text.startsWith(QStringLiteral("[system]"));
+    const bool dateChipMessage = text.startsWith(QStringLiteral("[date]"));
     const bool pollMessage = text.startsWith(QStringLiteral("[poll]"));
     const bool hovered = index.row() == hovered_row_;
     const bool pressed = index.row() == pressed_row_;
 
     const auto layout = measure(index, option.rect.width());
     const QSize bubbleSize = layout.bubbleSize;
+
+    if (systemMessage || dateChipMessage) {
+        const QString serviceText = strip_message_markers(text);
+        QFont serviceFont = base_font(11, true);
+        painter->setFont(serviceFont);
+        const int chipW = std::min(option.rect.width() - 80,
+                                   painter->fontMetrics().horizontalAdvance(serviceText) + 28);
+        QRect chip(option.rect.left() + (option.rect.width() - chipW) / 2,
+                   option.rect.top() + kRowMargin + 5,
+                   chipW,
+                   24);
+        QColor serviceBg(palette_.text_muted);
+        serviceBg.setAlpha(dateChipMessage ? 96 : 72);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(serviceBg);
+        painter->drawRoundedRect(chip, 12, 12);
+        painter->setPen(Qt::white);
+        painter->drawText(chip.adjusted(12, 0, -12, 0),
+                          Qt::AlignCenter,
+                          painter->fontMetrics().elidedText(serviceText, Qt::ElideRight, chip.width() - 24));
+        painter->restore();
+        return;
+    }
 
     QRect avatarRect;
     QRect bubbleRect;
@@ -554,6 +636,19 @@ void BubbleDelegate::paint(QPainter* painter,
                                                 Qt::KeepAspectRatio,
                                                 Qt::SmoothTransformation);
             painter->drawPixmap(content.left(), y, scaled);
+            const QString overlayTime = bottom_info_text(formatTime(createdMs), QString(), false);
+            const QFont overlayFont = base_font(10);
+            painter->setFont(overlayFont);
+            const int overlayW = painter->fontMetrics().horizontalAdvance(overlayTime) + 16;
+            QRect overlay(content.left() + scaled.width() - overlayW - 8,
+                          y + scaled.height() - 24,
+                          overlayW,
+                          18);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(QColor(0, 0, 0, 116));
+            painter->drawRoundedRect(overlay, 9, 9);
+            painter->setPen(Qt::white);
+            painter->drawText(overlay, Qt::AlignCenter, overlayTime);
             y += layout.thumbnailHeight;
         }
     }
@@ -633,9 +728,8 @@ void BubbleDelegate::paint(QPainter* painter,
 
     // Body text (with edit suffix).
     {
-        QString shownText = deleted ? QStringLiteral("<deleted>") : text;
-        if (systemMessage || pollMessage) shownText.clear();
-        if (edited) shownText += QStringLiteral(" (edited)");
+        QString shownText = deleted ? QStringLiteral("<deleted>") : strip_message_markers(text);
+        if (systemMessage || dateChipMessage || pollMessage) shownText.clear();
         painter->setPen(failed ? QColor("#0f1419") : primaryText);
         painter->setFont(base_font(15));
         QRect r(content.left(), y, content.width(), layout.textHeight);
@@ -666,13 +760,26 @@ void BubbleDelegate::paint(QPainter* painter,
             chipX += chipW + 4;
             if (chipX > content.right()) break;
         }
+        if (hovered && chipX + 22 <= content.right()) {
+            QRect addRect(chipX, y, 20, 18);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(outgoing && !failed
+                                ? QColor(255, 255, 255, 46)
+                                : QColor(palette_.text_muted).lighter(188));
+            painter->drawRoundedRect(addRect, 9, 9);
+            painter->setPen(metaText);
+            painter->setFont(base_font(12, true));
+            painter->drawText(addRect, Qt::AlignCenter, QStringLiteral("+"));
+        }
     }
 
     // Footer: time + tick aligned to the bubble's bottom-right edge.
     {
-        const QString glyph = tickGlyph(tick);
-        const QString footer = formatTime(createdMs)
-            + (glyph.isEmpty() ? QString() : QStringLiteral(" ") + glyph);
+        QString footer;
+        if (bottomViews > 0) footer += QStringLiteral("%1 views  ").arg(bottomViews);
+        if (bottomReplies > 0) footer += QStringLiteral("%1 comments  ").arg(bottomReplies);
+        if (bottomForwards > 0) footer += QStringLiteral("%1 forwards  ").arg(bottomForwards);
+        footer += bottom_info_text(formatTime(createdMs), tickGlyph(tick), edited);
         painter->setPen(metaText);
         painter->setFont(base_font(10));
         QRect r(content.left(),

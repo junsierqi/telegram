@@ -20,8 +20,11 @@ The remote-control direction is first-party. The desktop client is expected to g
 
 - login and registration screens
 - conversation list
-- chat view
+- chat view with a Telegram-style painted bubble delegate, service/date chips,
+  message bottom metadata, media/document surfaces and reaction affordances
 - Telegram Desktop-style right details panel with distinct channel, contact and group info layouts
+- Telegram Desktop-style side menu, folder/filter tabs, send-as / send options
+  composer controls and attachment drop zones
 - settings
 - device management
 - remote-session dialogs
@@ -91,7 +94,7 @@ This layer should coordinate UI and transport without knowing storage details.
 - `client/src/app_desktop/main.cpp`
 - `client/src/app_desktop/desktop_chat_store.*`
 
-The placeholder controller files still preserve the original module boundaries, while the current runnable desktop UI lives in the Qt Widgets `app_desktop` target. `DesktopChatStore` is the GUI-facing cache/state boundary for conversation sync, local search, read markers, message actions, attachments and selected-conversation rendering. The `app_desktop` shell owns the current Telegram Desktop reference surfaces, including the three-pane chat layout, side menu, settings dialogs and the right details panel variants for channel, one-to-one contact and group info states.
+The placeholder controller files still preserve the original module boundaries, while the current runnable desktop UI lives in the Qt Widgets `app_desktop` target. `DesktopChatStore` is the GUI-facing cache/state boundary for conversation sync, local search, read markers, message actions, attachments and selected-conversation rendering. The `app_desktop` shell owns the current Telegram Desktop reference surfaces, including the three-pane chat layout, side menu, settings dialogs, `BubbleListView` message timeline, composer controls and the right details panel variants for channel, one-to-one contact and group info states.
 
 The later remote-control build-out should follow an AnyDesk-like product goal with a RustDesk-like engineering decomposition:
 

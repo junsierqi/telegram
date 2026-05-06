@@ -85,8 +85,8 @@ def main() -> int:
         "split-panel info toggle tooltip missing"
     assert 'chat_info_btn_->setToolTip(QStringLiteral("More"))' in m, \
         "overflow menu tooltip missing"
-    assert 'menu.addAction("Chat info", [this] { show_chat_info_dialog(); });' in m, \
-        "overflow menu must expose the legacy Chat info dialog"
+    assert '"Chat info"' in m and "show_chat_info_dialog();" in m and 'line_icon("profile"' in m, \
+        "overflow menu must expose the legacy Chat info dialog with Telegram-style icon"
     assert "QObject::connect(details_toggle_btn_, &QToolButton::clicked" in m, \
         "details toggle must be clickable"
     print("[ok ] header overflow + split-panel info controls wired")

@@ -76,7 +76,16 @@ def main() -> int:
         require(token in bubble_h or token in bubble_cpp, f"missing bubble role/layout token: {token}")
     for token in (
         'text.startsWith(QStringLiteral("[system]"))',
+        'text.startsWith(QStringLiteral("[date]"))',
         'text.startsWith(QStringLiteral("[poll]"))',
+        'BottomViewsRole',
+        'BottomRepliesRole',
+        'BottomForwardsRole',
+        'parsed_meta_count',
+        'strip_message_markers',
+        'bottom_info_text(formatTime(createdMs)',
+        'overlayTime',
+        'QStringLiteral("+")',
         'drawRoundedRect(card',
         'drawRoundedRect(poll',
         'QStringLiteral("Attachment")',
@@ -84,7 +93,24 @@ def main() -> int:
         require(token in bubble_cpp, f"missing rich bubble rendering token: {token}")
     print("[ok ] bubble delegate renders system, file and poll surfaces")
 
-    print("\nAll 4/4 desktop UI expansion scenarios passed.")
+    print("[scenario] tdesktop-like composer action affordances")
+    for token in (
+        'setObjectName("composerReplyBar")',
+        'show_composer_reply_bar(message_id',
+        'setObjectName("sendOptionsMenu")',
+        'setObjectName("sendAsMenu")',
+        'setObjectName("sendAsButton")',
+        'voice_->setIcon(line_icon("voice"',
+        'setObjectName("attachmentDropOverlay")',
+        '"attachmentDropPhotoZone"',
+        '"attachmentDropFileZone"',
+        'dragEnterEvent(QDragEnterEvent* event) override',
+        'send_attachment(url.toLocalFile())',
+    ):
+        require(token in main_cpp, f"missing composer/drop token: {token}")
+    print("[ok ] composer reply strip, send menu and drag overlay are wired")
+
+    print("\nAll 5/5 desktop UI expansion scenarios passed.")
     return 0
 
 

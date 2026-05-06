@@ -61,6 +61,9 @@ public:
         AttachmentMimeRole,  // mime_type so the delegate can detect images
         FilenameRole,        // file display name for non-image attachments
         SizeBytesRole,       // file size for attachment cards
+        BottomViewsRole,     // parsed [meta views=...] count for channel-style info
+        BottomRepliesRole,   // parsed [meta replies=...] / comments count
+        BottomForwardsRole,  // parsed [meta forwards=...] count
         ThumbnailRole,       // QPixmap from M148 cache (null when missing)
     };
 

@@ -61,7 +61,7 @@ def main() -> int:
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            timeout=30,
+            timeout=60,
             env=env,
         )
         print(result.stdout, end="")

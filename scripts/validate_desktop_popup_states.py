@@ -37,6 +37,19 @@ def main() -> int:
     require('"Hide Info" : "Show Info"' in m, "overflow menu must toggle info panel state")
     print("[ok ] top overflow menu is wired")
 
+    print("[scenario] send options menu")
+    require('menu.setObjectName("sendOptionsMenu")' in m, "send options menu objectName missing")
+    require('"Send without sound"' in m and '"Schedule message"' in m,
+            "send options menu must expose tdesktop-style send choices")
+    require("customContextMenuRequested" in m, "send button must expose its options from right click")
+    print("[ok ] send button exposes Telegram-style send options")
+
+    print("[scenario] send-as identity menu")
+    require('menu.setObjectName("sendAsMenu")' in m, "send-as menu objectName missing")
+    require('"Personal account"' in m and '"Channel identity"' in m and '"Group identity"' in m,
+            "send-as menu must expose identity choices")
+    print("[ok ] send-as menu exposes identity choices")
+
     print("[scenario] attachment menu")
     require("QObject::connect(attach_, &QPushButton::clicked" in m,
             "attachment button click handler missing")
@@ -69,7 +82,7 @@ def main() -> int:
     require('"Quick reaction +1"' in body.group("body"), "message context menu must expose quick reaction action")
     print("[ok ] message context menu covers all message actions")
 
-    print("\nAll 4/4 desktop popup-state scenarios passed.")
+    print("\nAll 6/6 desktop popup-state scenarios passed.")
     return 0
 
 

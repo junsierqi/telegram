@@ -6,7 +6,7 @@ product. Today: chat + voice/video signaling + remote control across Windows /
 Linux / macOS / Android (APK) / browser, with native TLS, AEAD-sealed media
 plane, push-notification surface, chunked uploads, PostgreSQL persistence,
 Redis hot-state cache wired into PresenceService + AuthService, production
-Docker stack with nginx WebSocket reverse proxy + Prometheus, and ~70
+Docker stack with nginx WebSocket reverse proxy + Prometheus, and ~100
 in-process validators that GitHub Actions runs across 7 jobs on every push.
 
 ## Principles
@@ -29,7 +29,7 @@ in-process validators that GitHub Actions runs across 7 jobs on every push.
   `tls/` (stream + HTTP+WS reverse-proxy nginx configs), `windows/` (Inno
   Setup), `linux/` (.desktop + apt deps), `android/` (Qt for Android manifest),
   `macos/` + `ios/` (Info.plist templates + CMake guards)
-- `scripts/` — ~70 in-process validators + helpers (build/package/sweep)
+- `scripts/` — ~100 in-process validators + helpers (build/package/sweep)
 - `docs/architecture/`, `docs/flows/`, `docs/diagrams/` — text-based design docs
 - `.github/workflows/ci.yml` — 7 jobs: validators · Linux C++ · Linux Qt
   desktop · macOS Qt build · bundle verify · **Windows Qt build · Android APK**
@@ -58,7 +58,7 @@ in-process validators that GitHub Actions runs across 7 jobs on every push.
 |---|---|---|
 | Python server (chat + remote-control protocol + UDP media plane + voice/video signaling + WebSocket bridge + observability sidecar) | ✅ | `python -m server.main` |
 | C++ chat CLI | ✅ Win, Linux, macOS, **Android NDK** | `app_chat` |
-| Qt Widgets desktop (full settings + Remote + Call pages, real image preview, byte-level upload progress) | ✅ Win, **Linux**, **macOS** | `app_desktop` |
+| Qt Widgets desktop (Telegram Desktop reference shell, full settings + Remote + Call pages, rich bubble delegate, real image preview, byte-level upload progress) | ✅ Win, **Linux**, **macOS** | `app_desktop` |
 | Qt Quick mobile UI (full settings hub: Profile / Contacts / Devices / Search / Attachments / Remote / Call) | ✅ Win preview + **Android arm64 APK** | `app_mobile` |
 | Browser client (3-pane WebSocket bridge + chat list + attachment up/download + call dialog + PWA service worker) | ✅ any modern browser | `python -m server.main --web-port 8080` |
 | Native TLS (Schannel direct + nginx stream proxy + nginx HTTP+WS reverse proxy) | ✅ Live PostgreSQL + SQLite | M67/M68/M82/M115 |
@@ -118,6 +118,10 @@ wsl bash -lc "docker compose -f deploy/docker/docker-compose.yml --env-file depl
 ### Chat / messaging
 
 - text + reply + forward + edit + delete + reactions + pin
+- Qt Widgets desktop timeline uses a custom Telegram-style `BubbleListView`
+  delegate with date/service chips, image/document surfaces, reaction affordances,
+  bottom info metadata, per-bubble action menus and attachment drop/send-as
+  composer controls.
 - conversations: create / add / remove participants; per-message read markers
 - **incremental sync** with cursors + version vectors + bounded older-history pagination
 - **conversation_updated** push so being added to a group lands without manual sync
@@ -271,8 +275,8 @@ wsl bash -lc "docker compose -f deploy/docker/docker-compose.yml --env-file depl
 
 ## Verification
 
-`scripts/_sweep_validators.py` runs every `validate_*.py` (~70 in-process
-validators, ~280 scenarios) with three skip categories:
+`scripts/_sweep_validators.py` runs every `validate_*.py` (~100 in-process
+validators, 300+ scenarios) with three skip categories:
 - `SKIP_EXTERNAL` — needs Docker / live PostgreSQL / live TLS proxy (4 today)
 - `SKIP_NO_BINARY` — backing C++ binary not built on this host
 - `SKIP_PLATFORM` (M119) — Windows-only validators on POSIX runners
