@@ -753,6 +753,8 @@ class ServerApplication:
             for conv in conversations:
                 conv.pinned = conv.conversation_id in pinned_set
                 conv.archived = conv.conversation_id in archived_set
+                conv.muted_until_ms = self.block_mute_service.get_mute(
+                    session.user_id, conv.conversation_id)
             return make_response(
                 MessageType.CONVERSATION_SYNC,
                 correlation_id=correlation_id,
@@ -794,20 +796,24 @@ class ServerApplication:
                     sender_user_id=session.user_id,
                     text=payload.text,
                     reply_to_message_id=payload.reply_to_message_id,
+                    silent=payload.silent,
+                    scheduled_at_ms=payload.scheduled_at_ms,
                 )
-                self._fanout_to_conversation(
-                    conversation_id=payload.conversation_id,
-                    origin_session_id=session_id,
-                    actor_user_id=session.user_id,
-                    message_type=MessageType.MESSAGE_DELIVER,
-                    payload=message_result,
-                    correlation_id=f"push_{message_result.message_id}",
-                )
-                self._enqueue_mock_pushes_for_offline_recipients(
-                    conversation_id=payload.conversation_id,
-                    sender_user_id=session.user_id,
-                    body_summary=message_result.text[:80],
-                )
+                if not message_result.scheduled:
+                    self._fanout_to_conversation(
+                        conversation_id=payload.conversation_id,
+                        origin_session_id=session_id,
+                        actor_user_id=session.user_id,
+                        message_type=MessageType.MESSAGE_DELIVER,
+                        payload=message_result,
+                        correlation_id=f"push_{message_result.message_id}",
+                    )
+                    if not message_result.silent:
+                        self._enqueue_mock_pushes_for_offline_recipients(
+                            conversation_id=payload.conversation_id,
+                            sender_user_id=session.user_id,
+                            body_summary=message_result.text[:80],
+                        )
                 # M99: a successful send clears any draft this user had for
                 # the conversation — Telegram parity. Silent no-op if no
                 # draft exists.

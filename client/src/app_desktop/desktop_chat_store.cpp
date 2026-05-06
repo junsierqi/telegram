@@ -285,6 +285,9 @@ DesktopMessage message_from_synced(const std::string& conversation_id,
     message.forwarded_from_sender_user_id = source.forwarded_from_sender_user_id;
     message.reaction_summary = source.reaction_summary;
     message.pinned = source.pinned;
+    message.silent = source.silent;
+    message.scheduled_at_ms = source.scheduled_at_ms;
+    message.scheduled = source.scheduled;
     return message;
 }
 
@@ -308,6 +311,9 @@ DesktopMessage message_from_result(const std::string& conversation_id,
     message.forwarded_from_sender_user_id = source.forwarded_from_sender_user_id;
     message.reaction_summary = source.reaction_summary;
     message.pinned = source.pinned;
+    message.silent = source.silent;
+    message.scheduled_at_ms = source.scheduled_at_ms;
+    message.scheduled = source.scheduled;
     return message;
 }
 
@@ -341,6 +347,9 @@ void DesktopChatStore::apply_sync(const transport::SyncResult& sync) {
         conversation.sync_version = source.version;
         conversation.history_next_before_message_id = source.next_before_message_id;
         conversation.history_has_more = source.has_more;
+        conversation.pinned = source.pinned;
+        conversation.archived = source.archived;
+        conversation.muted_until_ms = source.muted_until_ms;
         for (const auto& message : source.messages) {
             conversation.messages.push_back(message_from_synced(source.conversation_id, message));
         }
@@ -372,6 +381,9 @@ void DesktopChatStore::apply_incremental_sync(const transport::SyncResult& sync)
             conversation.history_next_before_message_id = source.next_before_message_id;
             conversation.history_has_more = source.has_more;
         }
+        conversation.pinned = source.pinned;
+        conversation.archived = source.archived;
+        conversation.muted_until_ms = source.muted_until_ms;
         for (const auto& message : source.messages) {
             upsert_message(message_from_synced(source.conversation_id, message), false);
         }
@@ -419,6 +431,9 @@ void DesktopChatStore::apply_history_page(const transport::SyncResult& sync) {
         }
         conversation.history_next_before_message_id = source.next_before_message_id;
         conversation.history_has_more = source.has_more;
+        conversation.pinned = source.pinned;
+        conversation.archived = source.archived;
+        conversation.muted_until_ms = source.muted_until_ms;
         for (auto it = source.messages.rbegin(); it != source.messages.rend(); ++it) {
             const auto exists = std::find_if(
                 conversation.messages.begin(),
@@ -951,6 +966,9 @@ bool DesktopChatStore::save_to_file(const std::string& path, std::string* error)
         out << ",\"history_next_before_message_id\":";
         write_string(out, conversation.history_next_before_message_id);
         out << ",\"history_has_more\":" << (conversation.history_has_more ? "true" : "false");
+        out << ",\"pinned\":" << (conversation.pinned ? "true" : "false");
+        out << ",\"archived\":" << (conversation.archived ? "true" : "false");
+        out << ",\"muted_until_ms\":" << conversation.muted_until_ms;
         out << ",\"read_markers\":{";
         for (std::size_t ri = 0; ri < conversation.read_markers.size(); ++ri) {
             if (ri > 0) out << ",";
@@ -1004,6 +1022,9 @@ bool DesktopChatStore::save_to_file(const std::string& path, std::string* error)
             out << ",\"reaction_summary\":";
             write_string(out, message.reaction_summary);
             out << ",\"pinned\":" << (message.pinned ? "true" : "false");
+            out << ",\"silent\":" << (message.silent ? "true" : "false");
+            out << ",\"scheduled_at_ms\":" << message.scheduled_at_ms;
+            out << ",\"scheduled\":" << (message.scheduled ? "true" : "false");
             out << "}";
         }
         out << "]}";
@@ -1049,6 +1070,9 @@ bool DesktopChatStore::load_from_file(const std::string& path, std::string* erro
             conversation.sync_version = static_cast<int>(extract_size(conv_object, "sync_version"));
             conversation.history_next_before_message_id = string_or_empty(conv_object, "history_next_before_message_id");
             conversation.history_has_more = extract_bool(conv_object, "history_has_more");
+            conversation.pinned = extract_bool(conv_object, "pinned");
+            conversation.archived = extract_bool(conv_object, "archived");
+            conversation.muted_until_ms = extract_number(conv_object, "muted_until_ms");
             const auto* markers = find_member(conv_object, "read_markers");
             if (markers && markers->is_object()) {
                 for (const auto& [user_id, marker_value] : *markers->as_object()) {
@@ -1096,6 +1120,9 @@ bool DesktopChatStore::load_from_file(const std::string& path, std::string* erro
                     message.forwarded_from_sender_user_id = string_or_empty(msg_object, "forwarded_from_sender_user_id");
                     message.reaction_summary = string_or_empty(msg_object, "reaction_summary");
                     message.pinned = extract_bool(msg_object, "pinned");
+                    message.silent = extract_bool(msg_object, "silent");
+                    message.scheduled_at_ms = extract_number(msg_object, "scheduled_at_ms");
+                    message.scheduled = extract_bool(msg_object, "scheduled");
                     conversation.messages.push_back(std::move(message));
                 }
             }
@@ -1157,6 +1184,16 @@ void DesktopChatStore::apply_message_deleted(const std::string& conversation_id,
         it->deleted = true;
         it->text.clear();
     }
+}
+
+void DesktopChatStore::apply_conversation_flags(const std::string& conversation_id,
+                                                bool pinned,
+                                                bool archived,
+                                                long long muted_until_ms) {
+    auto& conversation = ensure_conversation(conversation_id);
+    conversation.pinned = pinned;
+    conversation.archived = archived;
+    conversation.muted_until_ms = muted_until_ms;
 }
 
 void DesktopChatStore::apply_message_edited(const std::string& conversation_id,

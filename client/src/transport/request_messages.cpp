@@ -73,7 +73,9 @@ std::string serialize_request(const MessageSendRequestMessage& message) {
     write_envelope(stream, message.envelope);
     stream << ",\"payload\":{"
            << "\"conversation_id\":\"" << json_escape(message.conversation_id) << "\","
-           << "\"text\":\"" << json_escape(message.text) << "\""
+           << "\"text\":\"" << json_escape(message.text) << "\","
+           << "\"silent\":" << (message.silent ? "true" : "false") << ","
+           << "\"scheduled_at_ms\":" << message.scheduled_at_ms
            << "}}";
     return stream.str();
 }

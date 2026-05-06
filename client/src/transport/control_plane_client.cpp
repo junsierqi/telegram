@@ -188,6 +188,9 @@ void fill_message_result(MessageResult& result, const JsonObject& payload) {
     result.forwarded_from_sender_user_id = extract_string(payload, "forwarded_from_sender_user_id");
     result.reaction_summary = extract_string(payload, "reaction_summary");
     result.pinned = extract_bool(payload, "pinned");
+    result.silent = extract_bool(payload, "silent");
+    result.scheduled_at_ms = extract_number(payload, "scheduled_at_ms");
+    result.scheduled = extract_bool(payload, "scheduled");
 }
 
 std::string extract_type(const std::string& line);
@@ -242,6 +245,9 @@ SyncedConversation parse_conversation_descriptor(const JsonObject& object) {
     c.version = static_cast<int>(extract_number(object, "version"));
     c.next_before_message_id = extract_string(object, "next_before_message_id");
     c.has_more = extract_bool(object, "has_more");
+    c.pinned = extract_bool(object, "pinned");
+    c.archived = extract_bool(object, "archived");
+    c.muted_until_ms = extract_number(object, "muted_until_ms");
     const auto* participants = find_member(object, "participant_user_ids");
     if (participants && participants->is_array()) {
         for (const auto& p : *participants->as_array()) {
@@ -270,6 +276,9 @@ SyncedConversation parse_conversation_descriptor(const JsonObject& object) {
             m.forwarded_from_sender_user_id = extract_string(*m_obj, "forwarded_from_sender_user_id");
             m.reaction_summary = extract_string(*m_obj, "reaction_summary");
             m.pinned = extract_bool(*m_obj, "pinned");
+            m.silent = extract_bool(*m_obj, "silent");
+            m.scheduled_at_ms = extract_number(*m_obj, "scheduled_at_ms");
+            m.scheduled = extract_bool(*m_obj, "scheduled");
             c.messages.push_back(std::move(m));
         }
     }
@@ -302,6 +311,9 @@ SyncedConversation parse_conversation_descriptor(const JsonObject& object) {
             change.forwarded_from_sender_user_id = extract_string(*change_obj, "forwarded_from_sender_user_id");
             change.reaction_summary = extract_string(*change_obj, "reaction_summary");
             change.pinned = extract_bool(*change_obj, "pinned");
+            change.silent = extract_bool(*change_obj, "silent");
+            change.scheduled_at_ms = extract_number(*change_obj, "scheduled_at_ms");
+            change.scheduled = extract_bool(*change_obj, "scheduled");
             c.changes.push_back(std::move(change));
         }
     }
@@ -567,18 +579,28 @@ SyncResult ControlPlaneClient::conversation_history_page(const std::string& conv
 }
 
 MessageResult ControlPlaneClient::send_message(const std::string& conversation_id,
-                                               const std::string& text) {
-    return reply_message(conversation_id, "", text);
+                                               const std::string& text,
+                                               bool silent,
+                                               long long scheduled_at_ms) {
+    return reply_message(conversation_id, "", text, silent, scheduled_at_ms);
 }
 
 MessageResult ControlPlaneClient::reply_message(const std::string& conversation_id,
                                                 const std::string& reply_to_message_id,
-                                                const std::string& text) {
+                                                const std::string& text,
+                                                bool silent,
+                                                long long scheduled_at_ms) {
     MessageResult result;
     std::string payload = "{\"conversation_id\":" + quote(conversation_id)
                         + ",\"text\":" + quote(text);
     if (!reply_to_message_id.empty()) {
         payload += ",\"reply_to_message_id\":" + quote(reply_to_message_id);
+    }
+    if (silent) {
+        payload += ",\"silent\":true";
+    }
+    if (scheduled_at_ms > 0) {
+        payload += ",\"scheduled_at_ms\":" + std::to_string(scheduled_at_ms);
     }
     payload += "}";
     auto response = send_and_wait("message_send", payload);

@@ -26,6 +26,15 @@ int int_or_zero(const JsonObject& object, std::string_view key) {
     return number_value != nullptr ? static_cast<int>(*number_value) : 0;
 }
 
+long long int64_or_zero(const JsonObject& object, std::string_view key) {
+    const auto* value = find_member(object, key);
+    if (value == nullptr) {
+        return 0;
+    }
+    const auto* number_value = std::get_if<double>(&value->storage);
+    return number_value != nullptr ? static_cast<long long>(*number_value) : 0;
+}
+
 std::vector<std::string> string_array_or_empty(const JsonObject& object, std::string_view key) {
     std::vector<std::string> values;
     const auto* value = find_member(object, key);
@@ -66,6 +75,9 @@ std::vector<MessageDescriptor> parse_messages(const JsonObject& conversation) {
             .message_id = string_or_empty(*message_object, "message_id"),
             .sender_user_id = string_or_empty(*message_object, "sender_user_id"),
             .text = string_or_empty(*message_object, "text"),
+            .silent = bool_or_false(*message_object, "silent"),
+            .scheduled_at_ms = int64_or_zero(*message_object, "scheduled_at_ms"),
+            .scheduled = bool_or_false(*message_object, "scheduled"),
         });
     }
     return messages;
@@ -129,6 +141,9 @@ ResponsePayload parse_payload(const std::string& type, const JsonObject* payload
                     .participant_user_ids =
                         string_array_or_empty(*conversation, "participant_user_ids"),
                     .messages = parse_messages(*conversation),
+                    .pinned = bool_or_false(*conversation, "pinned"),
+                    .archived = bool_or_false(*conversation, "archived"),
+                    .muted_until_ms = int64_or_zero(*conversation, "muted_until_ms"),
                 });
             }
         }
@@ -140,6 +155,9 @@ ResponsePayload parse_payload(const std::string& type, const JsonObject* payload
             .message_id = string_or_empty(*payload_object, "message_id"),
             .sender_user_id = string_or_empty(*payload_object, "sender_user_id"),
             .text = string_or_empty(*payload_object, "text"),
+            .silent = bool_or_false(*payload_object, "silent"),
+            .scheduled_at_ms = int64_or_zero(*payload_object, "scheduled_at_ms"),
+            .scheduled = bool_or_false(*payload_object, "scheduled"),
         };
     }
     if (type == "remote_session_state") {

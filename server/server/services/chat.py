@@ -74,6 +74,7 @@ class ChatService:
         return "chat service ready for conversation membership, message persistence and fan-out"
 
     def sync_for_user(self, user_id: str) -> list[ConversationDescriptor]:
+        self.release_due_scheduled()
         return [
             self._descriptor(conversation)
             for conversation in self._state.conversations.values()
@@ -91,6 +92,7 @@ class ChatService:
         versions = versions or {}
         history_limits = history_limits or {}
         before_message_ids = before_message_ids or {}
+        self.release_due_scheduled()
         conversations: list[ConversationDescriptor] = []
         for conversation in self._state.conversations.values():
             if user_id not in conversation.participant_user_ids:
@@ -127,7 +129,14 @@ class ChatService:
         return conversations
 
     def send_message(
-        self, *, conversation_id: str, sender_user_id: str, text: str, reply_to_message_id: str = ""
+        self,
+        *,
+        conversation_id: str,
+        sender_user_id: str,
+        text: str,
+        reply_to_message_id: str = "",
+        silent: bool = False,
+        scheduled_at_ms: int = 0,
     ) -> MessageDeliverPayload:
         conversation = self._state.conversations.get(conversation_id)
         if conversation is None:
@@ -140,11 +149,17 @@ class ChatService:
             reply_to = self._find_message(conversation, reply_to_message_id)
             if reply_to.get("deleted"):
                 raise ServiceError(ErrorCode.MESSAGE_ALREADY_DELETED)
+        now_ms = self._now_ms()
+        scheduled_at_ms = max(0, int(scheduled_at_ms or 0))
+        is_scheduled = scheduled_at_ms > now_ms
         message = {
             "message_id": f"msg_{self._message_counter}",
             "sender_user_id": sender_user_id,
             "text": text,
-            "created_at_ms": self._now_ms(),
+            "created_at_ms": scheduled_at_ms if is_scheduled else now_ms,
+            "silent": bool(silent),
+            "scheduled_at_ms": scheduled_at_ms if is_scheduled else 0,
+            "scheduled": is_scheduled,
         }
         if reply_to_message_id:
             message["reply_to_message_id"] = reply_to_message_id
@@ -158,7 +173,47 @@ class ChatService:
             text=text,
             created_at_ms=int(message["created_at_ms"]),
             reply_to_message_id=reply_to_message_id,
+            silent=bool(message.get("silent", False)),
+            scheduled_at_ms=int(message.get("scheduled_at_ms", 0) or 0),
+            scheduled=bool(message.get("scheduled", False)),
         )
+
+    def release_due_scheduled(self, *, now_ms: int | None = None) -> list[MessageDeliverPayload]:
+        now = self._now_ms() if now_ms is None else int(now_ms)
+        released: list[MessageDeliverPayload] = []
+        for conversation in self._state.conversations.values():
+            for message in conversation.messages:
+                if not bool(message.get("scheduled", False)):
+                    continue
+                due_at = int(message.get("scheduled_at_ms", 0) or 0)
+                if due_at > now:
+                    continue
+                message["scheduled"] = False
+                message["scheduled_at_ms"] = 0
+                message["created_at_ms"] = due_at if due_at > 0 else now
+                self._record_change(
+                    conversation,
+                    kind="message_deliver",
+                    message_id=str(message.get("message_id", "")),
+                    sender_user_id=str(message.get("sender_user_id", "")),
+                    text=str(message.get("text", "")),
+                    reply_to_message_id=str(message.get("reply_to_message_id", "")),
+                    silent=bool(message.get("silent", False)),
+                )
+                released.append(
+                    MessageDeliverPayload(
+                        conversation_id=conversation.conversation_id,
+                        message_id=str(message.get("message_id", "")),
+                        sender_user_id=str(message.get("sender_user_id", "")),
+                        text=str(message.get("text", "")),
+                        created_at_ms=int(message.get("created_at_ms", 0)),
+                        reply_to_message_id=str(message.get("reply_to_message_id", "")),
+                        silent=bool(message.get("silent", False)),
+                    )
+                )
+        if released:
+            self._state.save_runtime_state()
+        return released
 
     # ---- chunked upload (M88) ----
 
@@ -776,6 +831,10 @@ class ChatService:
         has_more: bool = False,
     ) -> ConversationDescriptor:
         source_messages = conversation.messages if messages is None else messages
+        visible_messages = [
+            message for message in source_messages
+            if not bool(message.get("scheduled", False))
+        ]
         return ConversationDescriptor(
             conversation_id=conversation.conversation_id,
             participant_user_ids=list(conversation.participant_user_ids),
@@ -798,8 +857,11 @@ class ChatService:
                     reaction_summary=self._reaction_summary(message),
                     pinned=bool(message.get("pinned", False)),
                     poll=self._poll_descriptor(message),
+                    silent=bool(message.get("silent", False)),
+                    scheduled_at_ms=int(message.get("scheduled_at_ms", 0) or 0),
+                    scheduled=bool(message.get("scheduled", False)),
                 )
-                for message in source_messages
+                for message in visible_messages
             ],
             title=conversation.title,
             read_markers=dict(conversation.read_markers),
@@ -819,6 +881,9 @@ class ChatService:
                     forwarded_from_sender_user_id=str(change.get("forwarded_from_sender_user_id", "")),
                     reaction_summary=str(change.get("reaction_summary", "")),
                     pinned=bool(change.get("pinned", False)),
+                    silent=bool(change.get("silent", False)),
+                    scheduled_at_ms=int(change.get("scheduled_at_ms", 0) or 0),
+                    scheduled=bool(change.get("scheduled", False)),
                 )
                 for change in ([] if changes is None else changes)
             ],
@@ -836,16 +901,20 @@ class ChatService:
         before_message_id: str = "",
     ) -> tuple[list[dict], str, bool]:
         limit = max(1, min(limit, 100))
-        end = len(conversation.messages)
+        visible_messages = [
+            message for message in conversation.messages
+            if not bool(message.get("scheduled", False))
+        ]
+        end = len(visible_messages)
         if before_message_id:
-            for index, message in enumerate(conversation.messages):
+            for index, message in enumerate(visible_messages):
                 if message.get("message_id") == before_message_id:
                     end = index
                     break
             else:
                 end = 0
         start = max(0, end - limit)
-        page = conversation.messages[start:end]
+        page = visible_messages[start:end]
         has_more = start > 0
         next_before_message_id = str(page[0].get("message_id", "")) if has_more and page else ""
         return page, next_before_message_id, has_more
@@ -893,9 +962,13 @@ class ChatService:
     def _messages_after(
         self, conversation: ConversationRecord, cursor_message_id: str
     ) -> list[dict] | None:
-        for index, message in enumerate(conversation.messages):
+        visible_messages = [
+            message for message in conversation.messages
+            if not bool(message.get("scheduled", False))
+        ]
+        for index, message in enumerate(visible_messages):
             if message.get("message_id") == cursor_message_id:
-                return conversation.messages[index + 1 :]
+                return visible_messages[index + 1 :]
         return None
 
     def _changes_after(
@@ -926,6 +999,9 @@ class ChatService:
         forwarded_from_sender_user_id: str = "",
         reaction_summary: str = "",
         pinned: bool = False,
+        silent: bool = False,
+        scheduled_at_ms: int = 0,
+        scheduled: bool = False,
     ) -> None:
         conversation.change_seq += 1
         conversation.changes.append(
@@ -943,6 +1019,9 @@ class ChatService:
                 "forwarded_from_sender_user_id": forwarded_from_sender_user_id,
                 "reaction_summary": reaction_summary,
                 "pinned": pinned,
+                "silent": silent,
+                "scheduled_at_ms": scheduled_at_ms,
+                "scheduled": scheduled,
             }
         )
         if len(conversation.changes) > MAX_CONVERSATION_CHANGES:

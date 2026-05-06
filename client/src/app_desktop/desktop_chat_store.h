@@ -29,6 +29,9 @@ struct DesktopMessage {
     std::string forwarded_from_sender_user_id;
     std::string reaction_summary;
     bool pinned {false};
+    bool silent {false};
+    long long scheduled_at_ms {0};
+    bool scheduled {false};
 };
 
 struct DesktopConversation {
@@ -42,6 +45,9 @@ struct DesktopConversation {
     int sync_version {0};
     std::string history_next_before_message_id;
     bool history_has_more {false};
+    bool pinned {false};
+    bool archived {false};
+    long long muted_until_ms {0};
 };
 
 struct DesktopMessageSearchResult {
@@ -109,6 +115,10 @@ public:
                               const std::string& text);
     void apply_message_deleted(const std::string& conversation_id,
                                const std::string& message_id);
+    void apply_conversation_flags(const std::string& conversation_id,
+                                  bool pinned,
+                                  bool archived,
+                                  long long muted_until_ms);
 
     [[nodiscard]] const std::string& selected_conversation_id() const noexcept;
     [[nodiscard]] const DesktopConversation* selected_conversation() const;

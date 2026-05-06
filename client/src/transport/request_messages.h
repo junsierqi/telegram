@@ -22,6 +22,8 @@ struct MessageSendRequestMessage {
     shared::protocol::ControlEnvelope envelope;
     std::string conversation_id;
     std::string text;
+    bool silent {false};
+    long long scheduled_at_ms {0};
 };
 
 struct RemoteInviteRequestMessage {

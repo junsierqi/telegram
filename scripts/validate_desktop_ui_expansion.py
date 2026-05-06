@@ -105,7 +105,11 @@ def main() -> int:
         '"attachmentDropPhotoZone"',
         '"attachmentDropFileZone"',
         'dragEnterEvent(QDragEnterEvent* event) override',
-        'send_attachment(url.toLocalFile())',
+        'drop_kind_for_mime(mime_type)',
+        'Queued %1 dropped file%2',
+        'send_voice_attachment()',
+        'client->send_message(conversation, text, silent, scheduled_at_ms)',
+        'QInputDialog::getInt(',
     ):
         require(token in main_cpp, f"missing composer/drop token: {token}")
     print("[ok ] composer reply strip, send menu and drag overlay are wired")

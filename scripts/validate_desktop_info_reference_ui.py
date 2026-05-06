@@ -45,12 +45,11 @@ def main() -> int:
         '"info-channel"',
         '"info-channel.png"',
         "t.me/M_Team",
-        "8 gifts",
-        "set_detail_media_rows(is_channel, is_group, 12, 56, 0)",
+        "set_detail_media_rows(*conv, is_channel, is_group)",
         'setObjectName("detailMediaTabBar")',
-        "1 poll",
+        "poll_count",
         "Leave channel",
-        "%1 similar channels",
+        "detail_links_list_",
     ):
         require(token in main_cpp or token in gui_smoke, f"missing channel info token: {token}")
     print("[ok ] Channel info panel state is wired through DesktopChatStore")
@@ -64,10 +63,10 @@ def main() -> int:
         '"info-user.png"',
         "+44 74 8035 6438",
         "@heyblake",
-        "set_detail_media_rows(is_channel, is_group, 1, 8, 0)",
-        "%1 files",
-        "%1 voice messages",
-        'QString::number(1) + QStringLiteral(" group in common")',
+        "set_detail_media_rows(*conv, is_channel, is_group)",
+        "detail_files_list_",
+        "detail_voice_list_",
+        "text_has_link(message.text)",
         "Share this contact",
         "Delete contact",
         'setObjectName("detailAvatar")',
@@ -82,10 +81,11 @@ def main() -> int:
         "ref_group_three",
         '"info-group"',
         '"info-group.png"',
-        "3 MEMBERS",
+        "%1 MEMBERS",
         "online  owner",
         "last seen a long time ago",
         "detail_member_search_",
+        "populate_detail_members(*conv)",
     ):
         require(token in main_cpp or token in gui_smoke, f"missing group info token: {token}")
     print("[ok ] Group info panel state is wired through DesktopChatStore")

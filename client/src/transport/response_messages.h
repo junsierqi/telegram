@@ -37,12 +37,18 @@ struct MessageDescriptor {
     std::string message_id;
     std::string sender_user_id;
     std::string text;
+    bool silent {false};
+    long long scheduled_at_ms {0};
+    bool scheduled {false};
 };
 
 struct ConversationDescriptor {
     std::string conversation_id;
     std::vector<std::string> participant_user_ids;
     std::vector<MessageDescriptor> messages;
+    bool pinned {false};
+    bool archived {false};
+    long long muted_until_ms {0};
 };
 
 struct ConversationSyncResponsePayload {
@@ -54,6 +60,9 @@ struct MessageDeliverPayload {
     std::string message_id;
     std::string sender_user_id;
     std::string text;
+    bool silent {false};
+    long long scheduled_at_ms {0};
+    bool scheduled {false};
 };
 
 struct RemoteSessionStatePayload {

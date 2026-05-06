@@ -460,6 +460,8 @@ class MessageSendRequestPayload:
     conversation_id: str
     text: str
     reply_to_message_id: str = ""
+    silent: bool = False
+    scheduled_at_ms: int = 0
 
 
 @dataclass(slots=True)
@@ -600,6 +602,9 @@ class MessageDescriptor:
     forwarded_from_sender_user_id: str = ""
     reaction_summary: str = ""
     pinned: bool = False
+    silent: bool = False
+    scheduled_at_ms: int = 0
+    scheduled: bool = False
     # M102: poll state. `poll` is None for normal messages; for polls the
     # poll question lives in `text` and `poll` carries the option list,
     # current tallies, vote rule, and closed flag. Embedded directly so
@@ -622,6 +627,9 @@ class ConversationChangeDescriptor:
     forwarded_from_sender_user_id: str = ""
     reaction_summary: str = ""
     pinned: bool = False
+    silent: bool = False
+    scheduled_at_ms: int = 0
+    scheduled: bool = False
 
 
 @dataclass(slots=True)
@@ -640,6 +648,7 @@ class ConversationDescriptor:
     # from the per-(user, conversation) maps in InMemoryState.
     pinned: bool = False
     archived: bool = False
+    muted_until_ms: int = 0
     # M101: group/conversation avatar pointer. Empty = default.
     avatar_attachment_id: str = ""
     # M103: per-(conversation, user) role map. Same canonical strings as
@@ -808,6 +817,9 @@ class MessageDeliverPayload:
     forwarded_from_conversation_id: str = ""
     forwarded_from_message_id: str = ""
     forwarded_from_sender_user_id: str = ""
+    silent: bool = False
+    scheduled_at_ms: int = 0
+    scheduled: bool = False
 
 
 @dataclass(slots=True)
@@ -1490,6 +1502,8 @@ def parse_request_payload(message_type: MessageType, payload: dict[str, Any]) ->
             conversation_id=payload["conversation_id"],
             text=payload["text"],
             reply_to_message_id=payload.get("reply_to_message_id", ""),
+            silent=bool(payload.get("silent", False)),
+            scheduled_at_ms=int(payload.get("scheduled_at_ms", 0) or 0),
         )
     if message_type == MessageType.REMOTE_INVITE:
         return RemoteInviteRequestPayload(

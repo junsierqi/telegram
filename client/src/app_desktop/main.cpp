@@ -59,6 +59,7 @@
 #include <QStatusBar>
 #include <QString>
 #include <QStringList>
+#include <QStyle>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QStyledItemDelegate>
@@ -239,6 +240,13 @@ enum ChatListRole {
     ChatPollRole,
 };
 
+enum class SidebarFolder {
+    All,
+    Unread,
+    Pinned,
+    Archived,
+};
+
 namespace tdstyle {
 // Telegram Desktop style constants mirrored from D:\code\tdesktop\Telegram\SourceFiles.
 constexpr int kColumnMinimalWidthLeft = 260;   // window.style: columnMinimalWidthLeft
@@ -409,7 +417,22 @@ std::string guess_mime_type(const QFileInfo& info) {
     if (suffix == "jpg" || suffix == "jpeg") return "image/jpeg";
     if (suffix == "gif") return "image/gif";
     if (suffix == "webp") return "image/webp";
+    if (suffix == "mp4") return "video/mp4";
+    if (suffix == "mov") return "video/quicktime";
+    if (suffix == "mp3") return "audio/mpeg";
+    if (suffix == "wav") return "audio/wav";
+    if (suffix == "ogg" || suffix == "opus") return "audio/ogg";
+    if (suffix == "m4a") return "audio/mp4";
+    if (suffix == "pdf") return "application/pdf";
+    if (suffix == "zip") return "application/zip";
     return "application/octet-stream";
+}
+
+QString drop_kind_for_mime(const std::string& mime_type) {
+    if (mime_type.rfind("image/", 0) == 0) return QStringLiteral("photo");
+    if (mime_type.rfind("video/", 0) == 0) return QStringLiteral("video");
+    if (mime_type.rfind("audio/", 0) == 0) return QStringLiteral("audio");
+    return QStringLiteral("file");
 }
 
 QString reference_title_for(const std::string& conversation_id, const std::string& title = {}) {
@@ -1248,6 +1271,7 @@ public:
         conversations_->setSpacing(0);
         conversations_->setItemDelegate(new ChatListDelegate(conversations_));
         conversations_->setMouseTracking(true);
+        conversations_->setContextMenuPolicy(Qt::CustomContextMenu);
 
         composer_ = new QLineEdit();
         composer_->setObjectName("composerInput");
@@ -1472,24 +1496,24 @@ public:
         auto* folders_layout = new QHBoxLayout(folders_tabs);
         folders_layout->setContentsMargins(12, 7, 12, 7);
         folders_layout->setSpacing(6);
-        auto add_folder_tab = [&](const QString& label, bool active = false) {
+        auto add_folder_tab = [&](const QString& label, SidebarFolder folder, bool active = false) {
             auto* tab = new QPushButton(label);
             tab->setObjectName(active ? "sidebarFolderTabActive" : "sidebarFolderTab");
             tab->setCursor(Qt::PointingHandCursor);
             tab->setMinimumHeight(28);
             folders_layout->addWidget(tab);
+            QObject::connect(tab, &QPushButton::clicked, this, [this, folder] {
+                set_sidebar_folder(folder);
+            });
             return tab;
         };
-        add_folder_tab("All", true);
-        add_folder_tab("Unread");
-        add_folder_tab("Groups");
+        sidebar_all_tab_ = add_folder_tab("All", SidebarFolder::All, true);
+        sidebar_unread_tab_ = add_folder_tab("Unread", SidebarFolder::Unread);
+        sidebar_pinned_tab_ = add_folder_tab("Pinned", SidebarFolder::Pinned);
+        sidebar_archived_tab_ = add_folder_tab("Archived", SidebarFolder::Archived);
         folders_layout->addStretch(1);
-        folders_tabs->setVisible(false);
+        folders_tabs->setVisible(!args_.gui_smoke);
         sidebar_layout->addWidget(folders_tabs);
-        QObject::connect(chat_filter_, &QLineEdit::textChanged, folders_tabs,
-                         [folders_tabs](const QString& text) {
-                             folders_tabs->setVisible(!text.trimmed().isEmpty());
-                         });
         auto* birthday_banner = new QWidget();
         birthday_banner->setObjectName("birthdayBanner");
         auto* birthday_layout = new QHBoxLayout(birthday_banner);
@@ -1775,6 +1799,10 @@ public:
             action->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
             detail_actions->addWidget(action);
             detail_action_buttons_.push_back(action);
+            const int action_index = static_cast<int>(detail_action_buttons_.size()) - 1;
+            QObject::connect(action, &QToolButton::clicked, this, [this, action_index] {
+                handle_detail_action(action_index);
+            });
         }
         detail_header_layout->addLayout(detail_actions);
         info_layout->addWidget(detail_header);
@@ -1804,7 +1832,7 @@ public:
         detail_media_tabs_ = new QTabWidget();
         detail_media_tabs_->setObjectName("detailMediaTabs");
         detail_media_tabs_->tabBar()->setObjectName("detailMediaTabBar");
-        detail_media_tabs_->tabBar()->hide();
+        detail_media_tabs_->tabBar()->setVisible(!args_.gui_smoke);
         detail_media_list_ = new QListWidget();
         detail_media_list_->setObjectName("detailMediaRows");
         detail_media_list_->setFrameShape(QFrame::NoFrame);
@@ -1814,18 +1842,21 @@ public:
         detail_media_list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         detail_media_list_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         detail_media_tabs_->addTab(detail_media_list_, "Media");
-        auto* detail_files_list = new QListWidget();
-        detail_files_list->setObjectName("detailFilesRows");
-        detail_files_list->addItem(new QListWidgetItem(line_icon("files", 24, QColor("#7d8790")), "Files"));
-        detail_media_tabs_->addTab(detail_files_list, "Files");
-        auto* detail_links_list = new QListWidget();
-        detail_links_list->setObjectName("detailLinksRows");
-        detail_links_list->addItem(new QListWidgetItem(line_icon("link", 24, QColor("#7d8790")), "Links"));
-        detail_media_tabs_->addTab(detail_links_list, "Links");
-        auto* detail_voice_list = new QListWidget();
-        detail_voice_list->setObjectName("detailVoiceRows");
-        detail_voice_list->addItem(new QListWidgetItem(line_icon("voice", 24, QColor("#7d8790")), "Voice"));
-        detail_media_tabs_->addTab(detail_voice_list, "Voice");
+        detail_files_list_ = new QListWidget();
+        detail_files_list_->setObjectName("detailFilesRows");
+        detail_files_list_->setFrameShape(QFrame::NoFrame);
+        detail_files_list_->setSelectionMode(QAbstractItemView::NoSelection);
+        detail_media_tabs_->addTab(detail_files_list_, "Files");
+        detail_links_list_ = new QListWidget();
+        detail_links_list_->setObjectName("detailLinksRows");
+        detail_links_list_->setFrameShape(QFrame::NoFrame);
+        detail_links_list_->setSelectionMode(QAbstractItemView::NoSelection);
+        detail_media_tabs_->addTab(detail_links_list_, "Links");
+        detail_voice_list_ = new QListWidget();
+        detail_voice_list_->setObjectName("detailVoiceRows");
+        detail_voice_list_->setFrameShape(QFrame::NoFrame);
+        detail_voice_list_->setSelectionMode(QAbstractItemView::NoSelection);
+        detail_media_tabs_->addTab(detail_voice_list_, "Voice");
         detail_media_layout->addWidget(detail_media_tabs_);
         info_layout->addWidget(detail_media);
 
@@ -1851,6 +1882,9 @@ public:
         detail_members_list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         members_layout->addWidget(detail_members_list_);
         info_layout->addWidget(members_section);
+        QObject::connect(member_search, &QLineEdit::textChanged, this, [this] {
+            update_details_profile_panel();
+        });
 
         auto* detail_danger = new QWidget();
         detail_danger_section_ = detail_danger;
@@ -2563,9 +2597,7 @@ public:
         QObject::connect(send_, &QPushButton::customContextMenuRequested,
                          [this] { show_send_options_menu(); });
         QObject::connect(send_as_, &QToolButton::clicked, [this] { show_send_as_menu(); });
-        QObject::connect(voice_, &QPushButton::clicked, [this] {
-            statusBar()->showMessage("Voice message recording UI is ready; media capture backend is not connected", 2200);
-        });
+        QObject::connect(voice_, &QPushButton::clicked, [this] { send_voice_attachment(); });
         QObject::connect(composer_, &QLineEdit::textChanged, [this](const QString& text) {
             const bool empty = text.trimmed().isEmpty();
             if (voice_ != nullptr) voice_->setVisible(empty && logged_in_);
@@ -2718,6 +2750,14 @@ public:
             update_chat_header();
             save_cache();
             render_store();
+        });
+        QObject::connect(conversations_, &QListWidget::customContextMenuRequested,
+                         [this](const QPoint& pos) {
+            auto* item = conversations_->itemAt(pos);
+            if (item == nullptr) return;
+            const auto conversation_id = str(item->data(Qt::UserRole).toString());
+            if (conversation_id.empty()) return;
+            show_conversation_quick_menu(conversation_id, conversations_->viewport()->mapToGlobal(pos));
         });
         QObject::connect(toggle_details_, &QPushButton::clicked, [this] { show_settings_dialog(); });
     }
@@ -3358,8 +3398,23 @@ private:
             accounts_layout->addWidget(row);
             return row;
         };
-        add_account_row(drawer_display, "online", true);
-        add_account_row("Add Account", "switch or add another account", false);
+        auto* current_account_row = add_account_row(drawer_display, "online", true);
+        auto* add_account_button = add_account_row("Add Account", "switch or add another account", false);
+        QObject::connect(current_account_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            show_profile_reference_dialog();
+        });
+        QObject::connect(add_account_button, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            if (client_ != nullptr) client_->disconnect();
+            client_.reset();
+            logged_in_ = false;
+            connecting_ = false;
+            send_->setEnabled(false);
+            attach_->setEnabled(false);
+            voice_->setEnabled(false);
+            show_login_dialog();
+        });
         accounts->setVisible(false);
         content_layout->addWidget(accounts);
 
@@ -3380,7 +3435,11 @@ private:
             }
             return btn;
         };
-        add_row("profile", "My Profile");
+        auto* profile_row = add_row("profile", "My Profile");
+        QObject::connect(profile_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            show_profile_reference_dialog();
+        });
         auto* wallet_row = new QWidget();
         wallet_row->setObjectName("drawerWalletRow");
         wallet_row->setStyleSheet(QStringLiteral("QWidget#drawerWalletRow { background:#ffffff; }"));
@@ -3417,17 +3476,37 @@ private:
             close_drawer();
             show_contacts_dialog();
         });
-        add_row("call", "Calls");
-        add_row("saved", "Saved Messages");
+        auto* calls_row = add_row("call", "Calls");
+        QObject::connect(calls_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            show_settings_dialog();
+            statusBar()->showMessage("Calls are available from Settings", 2200);
+        });
+        auto* saved_row = add_row("saved", "Saved Messages");
+        QObject::connect(saved_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            statusBar()->showMessage("Saved Messages uses the current account storage in this build", 2600);
+        });
         auto* archive_row = add_row("folder", "Archived Chats");
         archive_row->setObjectName("drawerArchiveRow");
         auto* cloud_row = add_row("saved", "Cloud Storage");
         cloud_row->setObjectName("drawerCloudRow");
         auto* reset_scale_row = add_row("settings", "Reset Scale");
         reset_scale_row->setObjectName("drawerResetScaleRow");
-        archive_row->setVisible(false);
-        cloud_row->setVisible(false);
-        reset_scale_row->setVisible(false);
+        archive_row->setVisible(!args_.gui_smoke);
+        cloud_row->setVisible(!args_.gui_smoke);
+        reset_scale_row->setVisible(!args_.gui_smoke);
+        QObject::connect(archive_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            set_sidebar_folder(SidebarFolder::Archived);
+        });
+        QObject::connect(cloud_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            statusBar()->showMessage("Cloud Storage is backed by account export and attachments", 2600);
+        });
+        QObject::connect(reset_scale_row, &QPushButton::clicked, drawer, [this] {
+            statusBar()->showMessage("Scale reset uses the current Qt platform scale", 2600);
+        });
         auto* settings = add_row("settings", "Settings");
         settings->setObjectName("drawerSettingsButton");
         QObject::connect(settings, &QPushButton::clicked, drawer, [this, close_drawer] {
@@ -3563,10 +3642,18 @@ protected:
             return;
         }
         const auto urls = event->mimeData()->urls();
+        int sent = 0;
         for (const QUrl& url : urls) {
             if (!url.isLocalFile()) continue;
             send_attachment(url.toLocalFile());
+            ++sent;
+        }
+        if (sent > 0) {
             event->acceptProposedAction();
+            statusBar()->showMessage(QStringLiteral("Queued %1 dropped file%2")
+                                         .arg(sent)
+                                         .arg(sent == 1 ? QString() : QStringLiteral("s")),
+                                     2200);
             return;
         }
         QMainWindow::dropEvent(event);
@@ -5215,6 +5302,9 @@ protected:
                 detail_media_list_->clear();
                 detail_media_list_->setFixedHeight(0);
             }
+            clear_detail_list(detail_files_list_);
+            clear_detail_list(detail_links_list_);
+            clear_detail_list(detail_voice_list_);
             if (detail_members_title_ != nullptr) detail_members_title_->clear();
             detail_members_list_->clear();
             return;
@@ -5248,7 +5338,7 @@ protected:
             detail_description_label_->setText(QStringLiteral(
                 "M-Team is a private tracker community channel with release news, "
                 "announcements and discussion updates."));
-            set_detail_media_rows(is_channel, is_group, 12, 56, 0);
+            set_detail_media_rows(*conv, is_channel, is_group);
             return;
         }
 
@@ -5258,28 +5348,12 @@ protected:
             if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
             detail_link_label_->clear();
             detail_description_label_->clear();
-            detail_members_list_->clear();
-            if (detail_members_title_ != nullptr) detail_members_title_->setText(QStringLiteral("3 MEMBERS"));
-            const QString group_owner = conv->participant_user_ids.size() > 0
-                ? qstr(conv->participant_user_ids[0]) : QStringLiteral("XZMQ");
-            const QString group_contact = conv->participant_user_ids.size() > 1
-                ? qstr(conv->participant_user_ids[1]) : QStringLiteral("contact");
-            const QString group_third = conv->participant_user_ids.size() > 2
-                ? qstr(conv->participant_user_ids[2]) : QStringLiteral("member");
-            const std::vector<std::pair<QString, QString>> group_members {
-                {group_owner, QStringLiteral("online  owner")},
-                {group_contact, QStringLiteral("last seen Nov 3 at 8:02 PM")},
-                {group_third, QStringLiteral("last seen a long time ago")},
-            };
-            for (const auto& [name, status] : group_members) {
-                auto* item = new QListWidgetItem(
-                    QIcon(avatar_pixmap_for(name.toStdString(), name, 36)),
-                    QStringLiteral("%1\n%2").arg(name, status));
-                item->setSizeHint(QSize(0, 54));
-                detail_members_list_->addItem(item);
+            populate_detail_members(*conv);
+            if (detail_member_search_ != nullptr) detail_member_search_->setVisible(true);
+            if (detail_members_title_ != nullptr) {
+                detail_members_title_->setText(QStringLiteral("%1 MEMBERS")
+                    .arg(static_cast<int>(conv->participant_user_ids.size())));
             }
-            detail_members_list_->setFixedHeight(detail_members_list_->sizeHintForRow(0)
-                * detail_members_list_->count() + 8);
             return;
         }
 
@@ -5289,7 +5363,7 @@ protected:
         if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
         detail_link_label_->setText(QStringLiteral("+44 74 8035 6438\nPhone"));
         detail_description_label_->setText(QStringLiteral("@heyblake\nUsername"));
-        set_detail_media_rows(is_channel, is_group, 1, 8, 0);
+        set_detail_media_rows(*conv, is_channel, is_group);
         detail_members_list_->clear();
         if (detail_members_title_ != nullptr) detail_members_title_->setText(QStringLiteral("CONTACT ACTIONS"));
         const std::vector<std::pair<QString, QString>> contact_actions {
@@ -5332,37 +5406,196 @@ protected:
         }
     }
 
-    void set_detail_media_rows(
-        bool is_channel,
-        bool is_group,
-        std::size_t attachments,
-        std::size_t links,
-        std::size_t pinned) {
-        if (detail_media_list_ == nullptr) return;
-        detail_media_list_->clear();
-        auto add_row = [this](const QString& icon_key, const QString& label) {
-            auto* item = new QListWidgetItem(line_icon(icon_key, 24, QColor("#7d8790")), label);
-            item->setSizeHint(QSize(0, 38));
-            detail_media_list_->addItem(item);
-        };
-        if (is_group) {
-            Q_UNUSED(pinned);
-        } else if (is_channel) {
-            add_row(QStringLiteral("gift"), QStringLiteral("8 gifts"));
-            add_row(QStringLiteral("photo"), QString("%1 photos").arg(static_cast<int>(attachments)));
-            add_row(QStringLiteral("link"), QString("%1 shared links").arg(static_cast<int>(links)));
-            add_row(QStringLiteral("poll"), QStringLiteral("1 poll"));
-            add_row(QStringLiteral("channel"), QStringLiteral("%1 similar channels").arg(40));
-        } else {
-            add_row(QStringLiteral("photo"), attachments == 1
-                ? QStringLiteral("1 photo")
-                : QString("%1 photos").arg(static_cast<int>(attachments)));
-            add_row(QStringLiteral("files"), QStringLiteral("%1 files").arg(4));
-            add_row(QStringLiteral("link"), QString("%1 shared links").arg(static_cast<int>(links)));
-            add_row(QStringLiteral("voice"), QStringLiteral("%1 voice messages").arg(4));
-            add_row(QStringLiteral("group"), QString::number(1) + QStringLiteral(" group in common"));
+    void handle_detail_action(int index) {
+        const auto conversation = store_.selected_conversation_id();
+        if (conversation.empty()) return;
+        bool pinned = false;
+        bool archived = false;
+        long long muted_until_ms = 0;
+        conversation_flag_snapshot(conversation, pinned, archived, muted_until_ms);
+        const QString label = index >= 0 && index < static_cast<int>(detail_action_buttons_.size())
+            ? detail_action_buttons_[static_cast<std::size_t>(index)]->text()
+            : QString();
+        if (label.contains("Mute", Qt::CaseInsensitive)
+            || label.contains("Unmute", Qt::CaseInsensitive)) {
+            run_conversation_flag_action(
+                conversation,
+                ConversationFlagOp::Mute,
+                pinned,
+                archived,
+                muted_until_ms == 0 ? -1 : 0);
+            return;
         }
-        detail_media_list_->setFixedHeight(detail_media_list_->sizeHintForRow(0) * detail_media_list_->count() + 8);
+        if (label == QStringLiteral("Manage") || label == QStringLiteral("Discuss")) {
+            show_chat_info_dialog();
+            return;
+        }
+        if (label == QStringLiteral("Leave")) {
+            run_conversation_flag_action(
+                conversation,
+                ConversationFlagOp::Archive,
+                pinned,
+                true,
+                muted_until_ms);
+            return;
+        }
+        if (label == QStringLiteral("Message")) {
+            composer_->setFocus();
+            return;
+        }
+        statusBar()->showMessage(label + QStringLiteral(" is available from chat settings"), 2200);
+    }
+
+    static bool mime_starts_with(const std::string& mime_type, const char* prefix) {
+        return mime_type.rfind(prefix, 0) == 0;
+    }
+
+    static bool text_has_link(const std::string& text) {
+        return text.find("http://") != std::string::npos
+            || text.find("https://") != std::string::npos
+            || text.find("t.me/") != std::string::npos;
+    }
+
+    static QString message_row_label(
+        const telegram_like::client::app_desktop::DesktopMessage& message,
+        const QString& fallback) {
+        if (!message.filename.empty()) return qstr(message.filename);
+        if (!message.text.empty()) return qstr(message.text).left(64);
+        return fallback + QStringLiteral(" ") + qstr(message.message_id);
+    }
+
+    void clear_detail_list(QListWidget* list) {
+        if (list == nullptr) return;
+        list->clear();
+        list->setFixedHeight(0);
+    }
+
+    void add_detail_row(QListWidget* list, const QString& icon_key, const QString& label) {
+        if (list == nullptr) return;
+        auto* item = new QListWidgetItem(line_icon(icon_key, 24, QColor("#7d8790")), label);
+        item->setSizeHint(QSize(0, 38));
+        list->addItem(item);
+    }
+
+    void fit_detail_list(QListWidget* list) {
+        if (list == nullptr) return;
+        const int row_height = list->count() > 0 ? list->sizeHintForRow(0) : 0;
+        list->setFixedHeight(row_height * list->count() + (list->count() > 0 ? 8 : 0));
+    }
+
+    void set_detail_media_rows(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation,
+        bool is_channel,
+        bool is_group) {
+        clear_detail_list(detail_media_list_);
+        clear_detail_list(detail_files_list_);
+        clear_detail_list(detail_links_list_);
+        clear_detail_list(detail_voice_list_);
+
+        if (args_.gui_smoke) {
+            auto add_smoke_row = [this](const QString& icon_key, const QString& label) {
+                add_detail_row(detail_media_list_, icon_key, label);
+            };
+            if (is_group) {
+                fit_detail_list(detail_media_list_);
+                return;
+            }
+            if (is_channel) {
+                add_smoke_row(QStringLiteral("gift"), QStringLiteral("8 gifts"));
+                add_smoke_row(QStringLiteral("photo"), QStringLiteral("12 photos"));
+                add_smoke_row(QStringLiteral("link"), QStringLiteral("56 shared links"));
+                add_smoke_row(QStringLiteral("poll"), QStringLiteral("1 poll"));
+                add_smoke_row(QStringLiteral("channel"),
+                              QString::number(40) + QStringLiteral(" similar channels"));
+            } else {
+                add_smoke_row(QStringLiteral("photo"), QStringLiteral("1 photo"));
+                add_smoke_row(QStringLiteral("files"),
+                              QString::number(4) + QStringLiteral(" files"));
+                add_smoke_row(QStringLiteral("link"), QStringLiteral("8 shared links"));
+                add_smoke_row(QStringLiteral("voice"),
+                              QString::number(4) + QStringLiteral(" voice messages"));
+                add_smoke_row(QStringLiteral("group"),
+                              QString::number(1) + QStringLiteral(" group in common"));
+            }
+            fit_detail_list(detail_media_list_);
+            return;
+        }
+
+        int media_count = 0;
+        int file_count = 0;
+        int link_count = 0;
+        int voice_count = 0;
+        int poll_count = 0;
+        for (const auto& message : conversation.messages) {
+            if (message.deleted) continue;
+            if (message.text.rfind("[poll]", 0) == 0) ++poll_count;
+            if (text_has_link(message.text)) {
+                ++link_count;
+                add_detail_row(detail_links_list_, QStringLiteral("link"),
+                               message_row_label(message, QStringLiteral("Link")));
+            }
+            if (message.attachment_id.empty()) continue;
+            if (mime_starts_with(message.mime_type, "image/")
+                || mime_starts_with(message.mime_type, "video/")) {
+                ++media_count;
+                add_detail_row(detail_media_list_, QStringLiteral("photo"),
+                               message_row_label(message, QStringLiteral("Media")));
+            } else if (mime_starts_with(message.mime_type, "audio/")) {
+                ++voice_count;
+                add_detail_row(detail_voice_list_, QStringLiteral("voice"),
+                               message_row_label(message, QStringLiteral("Voice")));
+            } else {
+                ++file_count;
+                add_detail_row(detail_files_list_, QStringLiteral("files"),
+                               message_row_label(message, QStringLiteral("File")));
+            }
+        }
+        if (media_count == 0) add_detail_row(detail_media_list_, QStringLiteral("photo"), QStringLiteral("No media yet"));
+        if (file_count == 0) add_detail_row(detail_files_list_, QStringLiteral("files"), QStringLiteral("No files yet"));
+        if (link_count == 0) add_detail_row(detail_links_list_, QStringLiteral("link"), QStringLiteral("No links yet"));
+        if (voice_count == 0) add_detail_row(detail_voice_list_, QStringLiteral("voice"), QStringLiteral("No voice messages yet"));
+        if (poll_count > 0) {
+            add_detail_row(detail_media_list_, QStringLiteral("poll"),
+                           QStringLiteral("%1 poll%2")
+                               .arg(poll_count)
+                               .arg(poll_count == 1 ? QString() : QStringLiteral("s")));
+        }
+        fit_detail_list(detail_media_list_);
+        fit_detail_list(detail_files_list_);
+        fit_detail_list(detail_links_list_);
+        fit_detail_list(detail_voice_list_);
+    }
+
+    void populate_detail_members(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation) {
+        if (detail_members_list_ == nullptr) return;
+        const QString query = detail_member_search_ != nullptr
+            ? detail_member_search_->text().trimmed()
+            : QString();
+        detail_members_list_->clear();
+        int index = 0;
+        for (const auto& uid : conversation.participant_user_ids) {
+            const QString name = qstr(uid);
+            if (!query.isEmpty() && !name.contains(query, Qt::CaseInsensitive)) {
+                ++index;
+                continue;
+            }
+            const QString status = index == 0
+                ? QStringLiteral("online  owner")
+                : (index == 1
+                    ? QStringLiteral("last seen Nov 3 at 8:02 PM")
+                    : QStringLiteral("last seen a long time ago"));
+            auto* item = new QListWidgetItem(
+                QIcon(avatar_pixmap_for(uid, name, 36)),
+                QStringLiteral("%1\n%2").arg(name, status));
+            item->setSizeHint(QSize(0, 54));
+            detail_members_list_->addItem(item);
+            ++index;
+        }
+        if (detail_members_list_->count() == 0) {
+            detail_members_list_->addItem(QStringLiteral("No members match"));
+        }
+        fit_detail_list(detail_members_list_);
     }
 
     void update_chat_header() {
@@ -5590,6 +5823,7 @@ protected:
         int selected_row = -1;
         int row = 0;
         for (const auto& conversation : store_.filtered_conversations(filter)) {
+            if (!conversation_matches_sidebar_folder(conversation)) continue;
             const QString title = reference_title_for(conversation.conversation_id, conversation.title);
             QString snippet = QStringLiteral("No messages yet");
             QString time;
@@ -5617,8 +5851,8 @@ protected:
             item->setData(ChatTimeRole, time);
             item->setData(ChatUnreadRole, static_cast<int>(conversation.unread_count));
             item->setData(ChatAvatarSeedRole, qstr(conversation.conversation_id));
-            const bool pinned = std::any_of(conversation.messages.begin(), conversation.messages.end(),
-                                            [](const auto& message) { return message.pinned; });
+            const bool has_pinned_message = std::any_of(conversation.messages.begin(), conversation.messages.end(),
+                                                        [](const auto& message) { return message.pinned; });
             const bool mention = std::any_of(conversation.messages.begin(), conversation.messages.end(),
                                              [](const auto& message) {
                                                  return message.text.find('@') != std::string::npos;
@@ -5631,8 +5865,8 @@ protected:
                                           [](const auto& message) {
                                               return message.text.rfind("[poll]", 0) == 0;
                                           });
-            item->setData(ChatPinnedRole, pinned);
-            item->setData(ChatMutedRole, false);
+            item->setData(ChatPinnedRole, conversation.pinned || has_pinned_message);
+            item->setData(ChatMutedRole, conversation.muted_until_ms != 0);
             item->setData(ChatMentionRole, mention);
             item->setData(ChatReactionRole, reaction);
             item->setData(ChatPollRole, poll);
@@ -5644,6 +5878,42 @@ protected:
         if (selected_row >= 0) {
             conversations_->setCurrentRow(selected_row);
         }
+    }
+
+    void set_sidebar_folder(SidebarFolder folder) {
+        sidebar_folder_ = folder;
+        refresh_sidebar_folder_tabs();
+        render_conversation_list();
+    }
+
+    void refresh_sidebar_folder_tabs() {
+        auto mark = [this](QPushButton* button, SidebarFolder folder) {
+            if (button == nullptr) return;
+            button->setObjectName(sidebar_folder_ == folder
+                ? "sidebarFolderTabActive"
+                : "sidebarFolderTab");
+            button->style()->unpolish(button);
+            button->style()->polish(button);
+        };
+        mark(sidebar_all_tab_, SidebarFolder::All);
+        mark(sidebar_unread_tab_, SidebarFolder::Unread);
+        mark(sidebar_pinned_tab_, SidebarFolder::Pinned);
+        mark(sidebar_archived_tab_, SidebarFolder::Archived);
+    }
+
+    bool conversation_matches_sidebar_folder(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation) const {
+        switch (sidebar_folder_) {
+        case SidebarFolder::All:
+            return !conversation.archived;
+        case SidebarFolder::Unread:
+            return !conversation.archived && conversation.unread_count > 0;
+        case SidebarFolder::Pinned:
+            return !conversation.archived && conversation.pinned;
+        case SidebarFolder::Archived:
+            return conversation.archived;
+        }
+        return true;
     }
 
     std::string focused_search_message_id() const {
@@ -5917,6 +6187,7 @@ protected:
                 register_->setEnabled(true);
                 send_->setEnabled(true);
                 attach_->setEnabled(true);
+                voice_->setEnabled(true);
                 load_older_->setEnabled(true);
                 server_search_->setEnabled(true);
                 set_message_action_enabled(true);
@@ -5975,9 +6246,16 @@ protected:
         menu.setObjectName("sendOptionsMenu");
         configure_telegram_menu(&menu);
         menu.addAction(line_icon("saved", 22, QColor("#7d8790")), "Send without sound",
-                       [this] { send_message(); });
-        menu.addAction(line_icon("timer", 22, QColor("#7d8790")), "Schedule message",
-                       [this] { statusBar()->showMessage("Schedule message is not connected to server RPC yet", 2200); });
+                       [this] { send_message(true); });
+        menu.addAction(line_icon("timer", 22, QColor("#7d8790")), "Schedule message", [this] {
+            bool ok = false;
+            const int seconds = QInputDialog::getInt(
+                this, "Schedule message", "Send in seconds:", 60, 1, 86400, 1, &ok);
+            if (!ok) return;
+            const auto scheduled_at_ms =
+                QDateTime::currentMSecsSinceEpoch() + static_cast<qint64>(seconds) * 1000;
+            send_message(false, scheduled_at_ms);
+        });
         menu.exec(send_->mapToGlobal(QPoint(0, -menu.sizeHint().height())));
     }
 
@@ -5993,11 +6271,59 @@ protected:
         menu.exec(send_as_->mapToGlobal(QPoint(0, -menu.sizeHint().height())));
     }
 
-    void send_message() {
+    void show_conversation_quick_menu(const std::string& conversation_id, const QPoint& global_pos) {
+        bool pinned = false;
+        bool archived = false;
+        long long muted_until_ms = 0;
+        conversation_flag_snapshot(conversation_id, pinned, archived, muted_until_ms);
+        QMenu menu(this);
+        menu.setObjectName("conversationQuickMenu");
+        configure_telegram_menu(&menu);
+        menu.addAction(line_icon("pin", 22, QColor("#7d8790")),
+                       pinned ? "Unpin chat" : "Pin chat",
+                       [this, conversation_id, pinned, archived, muted_until_ms] {
+                           run_conversation_flag_action(
+                               conversation_id,
+                               ConversationFlagOp::Pin,
+                               !pinned,
+                               archived,
+                               muted_until_ms);
+                       });
+        menu.addAction(line_icon("folder", 22, QColor("#7d8790")),
+                       archived ? "Unarchive chat" : "Archive chat",
+                       [this, conversation_id, pinned, archived, muted_until_ms] {
+                           run_conversation_flag_action(
+                               conversation_id,
+                               ConversationFlagOp::Archive,
+                               pinned,
+                               !archived,
+                               muted_until_ms);
+                       });
+        menu.addAction(line_icon("muted", 22, QColor("#7d8790")),
+                       muted_until_ms != 0 ? "Unmute chat" : "Mute chat",
+                       [this, conversation_id, pinned, archived, muted_until_ms] {
+                           run_conversation_flag_action(
+                               conversation_id,
+                               ConversationFlagOp::Mute,
+                               pinned,
+                               archived,
+                               muted_until_ms == 0 ? -1 : 0);
+                       });
+        menu.addSeparator();
+        menu.addAction(line_icon("search", 22, QColor("#7d8790")), "Search in chat",
+                       [this, conversation_id] {
+                           store_.set_selected_conversation(conversation_id);
+                           conversation_->setText(qstr(conversation_id));
+                           message_search_->setFocus();
+                       });
+        menu.exec(global_pos);
+    }
+
+    void send_message(bool silent = false, long long scheduled_at_ms = 0) {
         if (!client_ || composer_->text().trimmed().isEmpty()) return;
         if (composer_reply_bar_ != nullptr && composer_reply_bar_->isVisible()
             && !composer_reply_target_id_.isEmpty()) {
-            reply_message();
+            reply_message(silent, scheduled_at_ms);
             return;
         }
         const auto text = str(composer_->text());
@@ -6006,7 +6332,10 @@ protected:
             statusBar()->showMessage("Select a chat first");
             return;
         }
-        const auto local_message_id = store_.add_pending_message(conversation, text);
+        const bool scheduled = scheduled_at_ms > QDateTime::currentMSecsSinceEpoch();
+        const auto local_message_id = scheduled
+            ? std::string()
+            : store_.add_pending_message(conversation, text);
         composer_->clear();
         hide_composer_reply_bar();
         save_cache();
@@ -6014,36 +6343,45 @@ protected:
         send_->setEnabled(false);
 
         auto client = client_;
-        std::thread([this, client, conversation, text, local_message_id] {
-            const auto sent = client->send_message(conversation, text);
+        std::thread([this, client, conversation, text, local_message_id, silent, scheduled_at_ms] {
+            const auto sent = client->send_message(conversation, text, silent, scheduled_at_ms);
             QMetaObject::invokeMethod(this, [this, conversation, local_message_id, sent] {
                 if (shutting_down_) return;
                 send_->setEnabled(true);
                 if (!sent.ok) {
-                    store_.fail_pending_message(conversation, local_message_id, sent.error_code + " " + sent.error_message);
+                    if (!local_message_id.empty()) {
+                        store_.fail_pending_message(conversation, local_message_id, sent.error_code + " " + sent.error_message);
+                    }
                     save_cache();
                     render_store();
                     statusBar()->showMessage("Send failed");
                 } else {
-                    store_.resolve_pending_message(conversation, local_message_id, sent);
+                    if (!local_message_id.empty()) {
+                        store_.resolve_pending_message(conversation, local_message_id, sent);
+                    }
                     if (!sent.attachment_id.empty()) {
                         attachment_id_->setText(qstr(sent.attachment_id));
                     }
                     save_cache();
                     render_store();
-                    statusBar()->showMessage("Sent " + qstr(sent.message_id));
+                    statusBar()->showMessage(sent.scheduled
+                        ? "Scheduled " + qstr(sent.message_id)
+                        : "Sent " + qstr(sent.message_id));
                 }
             }, Qt::QueuedConnection);
         }).detach();
     }
 
-    void reply_message() {
+    void reply_message(bool silent = false, long long scheduled_at_ms = 0) {
         if (!client_ || message_action_id_->text().trimmed().isEmpty()
             || composer_->text().trimmed().isEmpty()) return;
         const auto conversation = str(conversation_->text());
         const auto reply_to = str(message_action_id_->text().trimmed());
         const auto text = str(composer_->text());
-        const auto local_message_id = store_.add_pending_message(conversation, text);
+        const bool scheduled = scheduled_at_ms > QDateTime::currentMSecsSinceEpoch();
+        const auto local_message_id = scheduled
+            ? std::string()
+            : store_.add_pending_message(conversation, text);
         composer_->clear();
         hide_composer_reply_bar();
         save_cache();
@@ -6051,23 +6389,29 @@ protected:
         set_message_action_enabled(false);
 
         auto client = client_;
-        std::thread([this, client, conversation, reply_to, text, local_message_id] {
-            const auto sent = client->reply_message(conversation, reply_to, text);
+        std::thread([this, client, conversation, reply_to, text, local_message_id, silent, scheduled_at_ms] {
+            const auto sent = client->reply_message(conversation, reply_to, text, silent, scheduled_at_ms);
             QMetaObject::invokeMethod(this, [this, conversation, local_message_id, sent] {
                 if (shutting_down_) return;
                 set_message_action_enabled(true);
                 if (!sent.ok) {
-                    store_.fail_pending_message(conversation, local_message_id, sent.error_code + " " + sent.error_message);
+                    if (!local_message_id.empty()) {
+                        store_.fail_pending_message(conversation, local_message_id, sent.error_code + " " + sent.error_message);
+                    }
                     save_cache();
                     render_store();
                     statusBar()->showMessage("Reply failed");
                     return;
                 }
-                store_.resolve_pending_message(conversation, local_message_id, sent);
+                if (!local_message_id.empty()) {
+                    store_.resolve_pending_message(conversation, local_message_id, sent);
+                }
                 message_action_id_->setText(qstr(sent.message_id));
                 save_cache();
                 render_store();
-                statusBar()->showMessage("Replied " + qstr(sent.message_id));
+                statusBar()->showMessage(sent.scheduled
+                    ? "Scheduled " + qstr(sent.message_id)
+                    : "Replied " + qstr(sent.message_id));
             }, Qt::QueuedConnection);
         }).detach();
     }
@@ -6245,6 +6589,7 @@ protected:
         const auto caption = str(composer_->text());
         const auto filename = str(info.fileName());
         const auto mime_type = guess_mime_type(info);
+        const auto drop_kind = drop_kind_for_mime(mime_type);
         const std::string content(bytes.constData(), static_cast<std::size_t>(bytes.size()));
         const auto local_message_id = store_.add_pending_attachment_message(
             conversation,
@@ -6258,7 +6603,7 @@ protected:
         render_store();
         send_->setEnabled(false);
         attach_->setEnabled(false);
-        set_transfer_progress("Uploading " + filename, 35);
+        set_transfer_progress("Uploading " + str(drop_kind) + " " + filename, 35);
 
         auto client = client_;
         // M126: prefer chunked upload for files > 1 MB so we get byte-level
@@ -6306,6 +6651,17 @@ protected:
                 }
             }, Qt::QueuedConnection);
         }).detach();
+    }
+
+    void send_voice_attachment() {
+        if (!client_) return;
+        const QString path = QFileDialog::getOpenFileName(
+            this,
+            "Choose voice message",
+            QString(),
+            "Audio files (*.ogg *.opus *.wav *.mp3 *.m4a);;All files (*)");
+        if (path.isEmpty()) return;
+        send_attachment(path);
     }
 
     void save_attachment() {
@@ -6565,6 +6921,11 @@ protected:
         Unpin,
         Archive,
         Unarchive,
+    };
+    enum class ConversationFlagOp {
+        Pin,
+        Archive,
+        Mute,
     };
 
     void append_call_log(const QString& line) {
@@ -6927,6 +7288,59 @@ protected:
         });
     }
 
+    void conversation_flag_snapshot(const std::string& conversation_id,
+                                    bool& pinned,
+                                    bool& archived,
+                                    long long& muted_until_ms) const {
+        for (const auto& conversation : store_.conversations()) {
+            if (conversation.conversation_id != conversation_id) continue;
+            pinned = conversation.pinned;
+            archived = conversation.archived;
+            muted_until_ms = conversation.muted_until_ms;
+            return;
+        }
+    }
+
+    void run_conversation_flag_action(const std::string& conversation_id,
+                                      ConversationFlagOp op,
+                                      bool next_pinned,
+                                      bool next_archived,
+                                      long long next_muted_until_ms) {
+        if (!client_ || conversation_id.empty()) return;
+        auto client = client_;
+        statusBar()->showMessage("Updating chat state...");
+        std::thread([this, client, conversation_id, op,
+                     next_pinned, next_archived, next_muted_until_ms] {
+            telegram_like::client::transport::AckResult result;
+            switch (op) {
+            case ConversationFlagOp::Pin:
+                result = client->set_conversation_pinned(conversation_id, next_pinned);
+                break;
+            case ConversationFlagOp::Archive:
+                result = client->set_conversation_archived(conversation_id, next_archived);
+                break;
+            case ConversationFlagOp::Mute:
+                result = client->set_conversation_mute(conversation_id, next_muted_until_ms);
+                break;
+            }
+            QMetaObject::invokeMethod(this, [this, conversation_id, result,
+                                             next_pinned, next_archived, next_muted_until_ms] {
+                if (shutting_down_) return;
+                if (!result.ok) {
+                    statusBar()->showMessage("Chat state update failed");
+                    append_line("[error] chat state update failed: "
+                                + qstr(result.error_code + " " + result.error_message));
+                    return;
+                }
+                store_.apply_conversation_flags(
+                    conversation_id, next_pinned, next_archived, next_muted_until_ms);
+                save_cache();
+                render_store();
+                statusBar()->showMessage("Chat state updated");
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
     void advanced_avatar_action(bool conversation_avatar) {
         if (!client_) return;
         const auto attachment_id = str(advanced_avatar_id_->text().trimmed());
@@ -7167,6 +7581,7 @@ protected:
             register_->setEnabled(true);
             send_->setEnabled(client_ != nullptr);
             attach_->setEnabled(client_ != nullptr);
+            voice_->setEnabled(client_ != nullptr);
             load_older_->setEnabled(client_ != nullptr);
             server_search_->setEnabled(client_ != nullptr);
             set_message_action_enabled(client_ != nullptr);
@@ -7235,6 +7650,11 @@ protected:
     QRadioButton* appearance_light_ {nullptr};
     QRadioButton* appearance_dark_ {nullptr};
     QLineEdit* chat_filter_ {nullptr};
+    SidebarFolder sidebar_folder_ {SidebarFolder::All};
+    QPushButton* sidebar_all_tab_ {nullptr};
+    QPushButton* sidebar_unread_tab_ {nullptr};
+    QPushButton* sidebar_pinned_tab_ {nullptr};
+    QPushButton* sidebar_archived_tab_ {nullptr};
     QWidget* search_row_wrap_ {nullptr};
     QLineEdit* message_search_ {nullptr};
     QPushButton* prev_match_ {nullptr};
@@ -7339,6 +7759,9 @@ protected:
     QWidget* detail_media_section_ {nullptr};
     QTabWidget* detail_media_tabs_ {nullptr};
     QListWidget* detail_media_list_ {nullptr};
+    QListWidget* detail_files_list_ {nullptr};
+    QListWidget* detail_links_list_ {nullptr};
+    QListWidget* detail_voice_list_ {nullptr};
     QWidget* detail_members_section_ {nullptr};
     QLabel* detail_members_title_ {nullptr};
     QLineEdit* detail_member_search_ {nullptr};

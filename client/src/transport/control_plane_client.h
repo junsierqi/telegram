@@ -98,6 +98,9 @@ struct MessageResult {
     std::string forwarded_from_sender_user_id;
     std::string reaction_summary;
     bool pinned {false};
+    bool silent {false};
+    long long scheduled_at_ms {0};
+    bool scheduled {false};
     std::string error_code;
     std::string error_message;
 };
@@ -168,6 +171,9 @@ struct SyncedMessage {
     std::string forwarded_from_sender_user_id;
     std::string reaction_summary;
     bool pinned {false};
+    bool silent {false};
+    long long scheduled_at_ms {0};
+    bool scheduled {false};
 };
 
 struct ReadMarker {
@@ -189,6 +195,9 @@ struct SyncedChange {
     std::string forwarded_from_sender_user_id;
     std::string reaction_summary;
     bool pinned {false};
+    bool silent {false};
+    long long scheduled_at_ms {0};
+    bool scheduled {false};
 };
 
 struct SyncedConversation {
@@ -201,6 +210,9 @@ struct SyncedConversation {
     std::vector<SyncedChange> changes;
     std::string next_before_message_id;
     bool has_more {false};
+    bool pinned {false};
+    bool archived {false};
+    long long muted_until_ms {0};
 };
 
 struct SyncResult {
@@ -403,10 +415,14 @@ public:
                                                        const std::string& before_message_id = {},
                                                        int limit = 50);
     [[nodiscard]] MessageResult send_message(const std::string& conversation_id,
-                                             const std::string& text);
+                                             const std::string& text,
+                                             bool silent = false,
+                                             long long scheduled_at_ms = 0);
     [[nodiscard]] MessageResult reply_message(const std::string& conversation_id,
                                               const std::string& reply_to_message_id,
-                                              const std::string& text);
+                                              const std::string& text,
+                                              bool silent = false,
+                                              long long scheduled_at_ms = 0);
     [[nodiscard]] MessageResult forward_message(const std::string& source_conversation_id,
                                                 const std::string& source_message_id,
                                                 const std::string& target_conversation_id);
