@@ -101,12 +101,13 @@ def main() -> int:
     print("[scenario] screenshot #5 centered settings modal")
     require("void show_settings_dialog()" in main_cpp, "settings modal function missing")
     require('setObjectName("settingsModal")' in main_cpp, "settings modal object name missing")
-    for label in ("My Account", "Notifications and Sounds", "Privacy and Security", "Chat Settings",
-                  "Folders", "Advanced", "Speakers and Camera", "Battery and Animations",
-                  "Language", "Default interface scale", "Telegram Premium", "My Stars"):
+    for label in ("Language", "Connection type", "Default (TCP used)", "Show tray icon",
+                  "Use monochrome icon", "Show taskbar icon", "Use system window frame",
+                  "Default interface scale", "Classic", "Day", "Tinted", "Night",
+                  "Telegram FAQ"):
         require(label in main_cpp, f"settings modal row missing: {label}")
-    require('add_settings_row("bell", "Notifications and Sounds")' in main_cpp,
-            "settings modal rows must use drawn line icons instead of emoji text prefixes")
+    require("settingsCheckBox" in main_cpp and "settingsToggleOn" in main_cpp,
+            "settings modal must use Telegram-style checkbox/toggle surfaces")
     require("QSlider(Qt::Horizontal)" in main_cpp, "settings modal must include interface scale slider")
     require("show_settings_dialog();" in main_cpp, "settings drawer row must open centered settings dialog")
     print("[ok ] settings opens as a Telegram-style centered modal")

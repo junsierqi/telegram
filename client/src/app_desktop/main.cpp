@@ -451,6 +451,10 @@ QIcon line_icon(const QString& key, int side = 28, QColor color = QColor("#20212
     } else if (key == "scale") {
         painter.drawEllipse(QPointF(cx, cy), side * 0.26, side * 0.18);
         painter.drawEllipse(QPointF(cx, cy), side * 0.07, side * 0.07);
+    } else if (key == "camera") {
+        painter.drawRoundedRect(QRectF(side * 0.23, side * 0.36, side * 0.54, side * 0.34), side * 0.06, side * 0.06);
+        painter.drawRect(QRectF(side * 0.34, side * 0.27, side * 0.24, side * 0.10));
+        painter.drawEllipse(QPointF(cx, side * 0.53), side * 0.13, side * 0.13);
     } else if (key == "photo" || key == "files") {
         painter.drawRect(QRectF(side * 0.22, side * 0.24, side * 0.56, side * 0.48));
         painter.drawPolyline(QPolygonF{QPointF(side * 0.28, side * 0.64), QPointF(side * 0.42, side * 0.50),
@@ -1458,10 +1462,11 @@ public:
         pin_bar_->setVisible(false);
         pin_bar_->setCursor(Qt::PointingHandCursor);
         pin_bar_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-        pin_bar_->setMinimumHeight(36);
+        pin_bar_->setMinimumHeight(64);
         pin_bar_->setStyleSheet(
-            "QPushButton#pinBar { text-align:left; padding:6px 12px;"
-            " border:none; background:transparent; }");
+            "QPushButton#pinBar { text-align:left; padding:8px 22px;"
+            " border:none; border-left:4px solid #3390ec; background:#ffffff;"
+            " color:#168acd; font-size:20px; }");
         center_layout->addWidget(pin_bar_);
         // timeline
         center_layout->addWidget(messages_, 1);
@@ -1480,8 +1485,8 @@ public:
         auto* composer_wrap = new QWidget();
         composer_wrap->setObjectName("composer");
         auto* send_row = new QHBoxLayout(composer_wrap);
-        send_row->setContentsMargins(16, 10, 16, 12);
-        send_row->setSpacing(8);
+        send_row->setContentsMargins(24, 14, 16, 16);
+        send_row->setSpacing(18);
         send_row->addWidget(attach_);
         send_row->addWidget(emoji_panel_);
         send_row->addWidget(composer_, 1);
@@ -2629,14 +2634,15 @@ private:
             QScrollArea#accountDrawerScroll { background:{surface}; border:none; }
             QScrollArea#accountDrawerScroll > QWidget > QWidget { background:{surface}; }
             QWidget#drawerHeader { background:{surface}; border-bottom:1px solid {border_subtle}; }
-            QLabel#drawerName { font-weight:700; font-size:15px; color:{text_primary}; }
-            QLabel#drawerStatus { color:{primary}; font-size:13px; }
-            QPushButton#drawerRow { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 26px; font-size:20px; color:{text_primary}; }
+            QLabel#drawerName { font-weight:700; font-size:20px; color:{text_primary}; background:transparent; }
+            QLabel#drawerStatus { color:{primary}; font-size:20px; background:transparent; }
+            QPushButton#drawerRow { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 40px; font-size:22px; color:{text_primary}; }
             QPushButton#drawerRow:hover { background:{hover}; }
-            QPushButton#drawerSettingsButton { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 26px; font-size:20px; color:{text_primary}; min-height:64px; }
+            QPushButton#drawerSettingsButton { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 40px; font-size:22px; color:{text_primary}; min-height:74px; }
             QPushButton#drawerSettingsButton:hover { background:{hover}; }
             QWidget#drawerNightRow { background:{surface}; border-top:1px solid {border_subtle}; }
-            QLabel#drawerFooter { color:{text_muted}; font-size:18px; }
+            QLabel#drawerNightText { color:{text_primary}; font-size:22px; background:transparent; }
+            QLabel#drawerFooter { color:{text_muted}; font-size:18px; background:transparent; }
             QWidget#loginChrome { background:{login_chrome_bg}; border-bottom:1px solid {login_chrome_border}; }
             QToolButton#loginBackButton { border:none; background:transparent; color:{login_back}; font-size:34px; padding:8px 16px; }
             QToolButton#loginBackButton:hover { background:{login_back_hover}; }
@@ -3014,9 +3020,9 @@ private:
                            const char* slot = nullptr) -> QPushButton* {
             auto* btn = new QPushButton(text);
             btn->setObjectName("drawerRow");
-            btn->setIcon(line_icon(icon_key, 28));
-            btn->setIconSize(QSize(28, 28));
-            btn->setMinimumHeight(64);
+            btn->setIcon(line_icon(icon_key, 34));
+            btn->setIconSize(QSize(34, 34));
+            btn->setMinimumHeight(74);
             btn->setCursor(Qt::PointingHandCursor);
             content_layout->addWidget(btn);
             if (receiver != nullptr && slot != nullptr) {
@@ -3028,7 +3034,27 @@ private:
             return btn;
         };
         add_row("profile", "My Profile");
-        add_row("wallet", "Wallet");
+        auto* wallet_row = new QWidget();
+        wallet_row->setObjectName("drawerWalletRow");
+        wallet_row->setStyleSheet(QStringLiteral("QWidget#drawerWalletRow { background:#ffffff; }"));
+        auto* wallet_layout = new QHBoxLayout(wallet_row);
+        wallet_layout->setContentsMargins(48, 0, 40, 0);
+        wallet_layout->setSpacing(26);
+        auto* wallet_icon = new QLabel();
+        wallet_icon->setStyleSheet(QStringLiteral("background:transparent;"));
+        wallet_icon->setPixmap(line_icon("wallet", 34).pixmap(34, 34));
+        wallet_layout->addWidget(wallet_icon);
+        auto* wallet_label = new QLabel("Wallet");
+        wallet_label->setStyleSheet(QStringLiteral("background:transparent; color:#0f1419; font-size:22px; font-weight:400;"));
+        wallet_layout->addWidget(wallet_label, 1);
+        auto* wallet_badge = new QLabel("NEW");
+        wallet_badge->setAlignment(Qt::AlignCenter);
+        wallet_badge->setFixedSize(62, 32);
+        wallet_badge->setStyleSheet(QStringLiteral(
+            "background:#48aee6; color:#ffffff; border-radius:8px; font-size:14px; font-weight:700;"));
+        wallet_layout->addWidget(wallet_badge);
+        wallet_row->setMinimumHeight(74);
+        content_layout->addWidget(wallet_row);
         auto* group_row = add_row("group", "New Group");
         QObject::connect(group_row, &QPushButton::clicked, dlg, [this, dlg] {
             dlg->accept();
@@ -3056,12 +3082,19 @@ private:
         auto* night_wrap = new QWidget();
         night_wrap->setObjectName("drawerNightRow");
         auto* night_layout = new QHBoxLayout(night_wrap);
-        night_layout->setContentsMargins(32, 10, 32, 10);
+        night_layout->setContentsMargins(48, 10, 44, 10);
         auto* night_icon = new QLabel();
+        night_icon->setStyleSheet(QStringLiteral("background:transparent;"));
         night_icon->setPixmap(line_icon("moon", 28).pixmap(28, 28));
         night_layout->addWidget(night_icon);
-        night_layout->addWidget(new QLabel("Night Mode"), 1);
+        auto* night_text = new QLabel("Night Mode");
+        night_text->setObjectName("drawerNightText");
+        night_layout->addWidget(night_text, 1);
         auto* night = new QCheckBox();
+        night->setObjectName("drawerNightSwitch");
+        night->setStyleSheet(QStringLiteral(
+            "QCheckBox::indicator { width:58px; height:32px; border-radius:16px; background:#9ea3a7; }"
+            "QCheckBox::indicator:checked { background:#48aee6; }"));
         night->setChecked(telegram_like::client::app_desktop::design::is_dark_theme());
         night_layout->addWidget(night);
         content_layout->addWidget(night_wrap);
@@ -3365,55 +3398,81 @@ protected:
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->setWindowTitle("Contacts");
         dlg->setModal(false);
-        dlg->resize(520, 680);
+        dlg->resize(730, 920);
+        dlg->setStyleSheet(QStringLiteral(
+            "QDialog#contactsModal { background:#ffffff; border-radius:12px; }"
+            "QLabel#contactsTitle { color:#0f1419; font-size:32px; font-weight:500; }"
+            "QLineEdit#contactsSearchInput { background:#ffffff; border:none; border-bottom:1px solid #e4e6e8; border-radius:0; padding:12px 0; font-size:28px; color:#0f1419; }"
+            "QLabel#contactsSearchIcon { color:#8a9299; font-size:38px; }"
+            "QListWidget#contactsModalList { background:#ffffff; border:none; outline:0; font-size:26px; }"
+            "QListWidget#contactsModalList::item { padding:8px 36px; color:#0f1419; }"
+            "QPushButton#contactsTextAction { background:transparent; border:none; color:#168acd; font-size:28px; padding:12px 24px; text-align:left; }"
+            "QToolButton#contactsSortButton, QToolButton#settingsClose { background:transparent; border:none; color:#8a9299; font-size:28px; padding:8px; }"
+        ));
         const QRect mainGeo = geometry();
         dlg->move(mainGeo.center().x() - dlg->width() / 2,
-                  mainGeo.center().y() - dlg->height() / 2);
+                  mainGeo.top() + 20);
 
         auto* root = new QVBoxLayout(dlg);
         root->setContentsMargins(0, 0, 0, 0);
         root->setSpacing(0);
         auto* header = new QWidget();
-        header->setObjectName("settingsModalHeader");
         auto* header_layout = new QHBoxLayout(header);
-        header_layout->setContentsMargins(24, 22, 20, 18);
+        header_layout->setContentsMargins(48, 24, 34, 18);
         auto* title = new QLabel("Contacts");
-        title->setObjectName("settingsModalTitle");
+        title->setObjectName("contactsTitle");
         header_layout->addWidget(title, 1);
+        auto* sort = new QToolButton();
+        sort->setObjectName("contactsSortButton");
+        sort->setText(QString::fromUtf8("\xe2\x98\xb0\nA"));
+        header_layout->addWidget(sort);
         auto* close = new QToolButton();
         close->setObjectName("settingsClose");
         close->setText(QString::fromUtf8("\xe2\x9c\x95"));
         close->setCursor(Qt::PointingHandCursor);
-        header_layout->addWidget(close);
         QObject::connect(close, &QToolButton::clicked, dlg, &QDialog::accept);
         root->addWidget(header);
 
         auto* body = new QWidget();
         body->setObjectName("contactsModalBody");
         auto* body_layout = new QVBoxLayout(body);
-        body_layout->setContentsMargins(24, 18, 24, 24);
-        body_layout->setSpacing(14);
+        body_layout->setContentsMargins(38, 20, 38, 24);
+        body_layout->setSpacing(0);
+        auto* search_row = new QWidget();
+        auto* search_layout = new QHBoxLayout(search_row);
+        search_layout->setContentsMargins(0, 0, 0, 0);
+        search_layout->setSpacing(16);
+        auto* search_icon = new QLabel(QString::fromUtf8("\xe2\x8c\x95"));
+        search_icon->setObjectName("contactsSearchIcon");
+        search_layout->addWidget(search_icon);
         auto* search = new QLineEdit();
         search->setObjectName("contactsSearchInput");
-        search->setPlaceholderText("Search or add user_id");
+        search->setPlaceholderText("Search");
         search->setClearButtonEnabled(true);
-        body_layout->addWidget(search);
+        search_layout->addWidget(search, 1);
+        body_layout->addWidget(search_row);
         auto* status = new QLabel(client_ ? "Loading contacts..." : "Connect to load contacts");
         status->setObjectName("pageSubtitle");
+        status->setVisible(!args_.gui_smoke);
         body_layout->addWidget(status);
         auto* list = new QListWidget();
         list->setObjectName("contactsModalList");
         list->setFrameShape(QFrame::NoFrame);
+        list->setIconSize(QSize(82, 82));
         list->setFocusPolicy(Qt::NoFocus);
         list->setSelectionMode(QAbstractItemView::NoSelection);
         body_layout->addWidget(list, 1);
         auto* actions = new QHBoxLayout();
         auto* add = new QPushButton("Add Contact");
-        add->setObjectName("primary");
+        add->setObjectName("contactsTextAction");
         add->setEnabled(client_ != nullptr);
         actions->addWidget(add);
+        actions->addStretch(1);
         auto* refresh = new QPushButton("Refresh");
-        refresh->setEnabled(client_ != nullptr);
+        refresh->setObjectName("contactsTextAction");
+        refresh->setText("Close");
+        refresh->setEnabled(true);
+        QObject::connect(refresh, &QPushButton::clicked, dlg, &QDialog::accept);
         actions->addWidget(refresh);
         body_layout->addLayout(actions);
         root->addWidget(body, 1);
@@ -3430,8 +3489,12 @@ protected:
                     + QStringLiteral("\n")
                     + qstr(contact.user_id)
                     + (contact.online ? QStringLiteral("  online") : QStringLiteral("  offline"));
-                auto* item = new QListWidgetItem(line_icon("contact", 28, QColor("#7d8790")), label);
-                item->setSizeHint(QSize(0, 62));
+                auto* item = new QListWidgetItem(
+                    QIcon(avatar_pixmap_for(contact.user_id,
+                                            qstr(contact.display_name.empty() ? contact.user_id : contact.display_name),
+                                            82)),
+                    label);
+                item->setSizeHint(QSize(0, 94));
                 list->addItem(item);
             }
             if (result.contacts.empty()) {
@@ -3517,7 +3580,7 @@ protected:
         ));
         const QRect mainGeo = geometry();
         dlg->move(mainGeo.center().x() - dlg->width() / 2,
-                  mainGeo.center().y() - dlg->height() / 2);
+                  mainGeo.center().y() - dlg->height() / 2 - 46);
         auto* root = new QVBoxLayout(dlg);
         root->setContentsMargins(0, 0, 0, 0);
         root->setSpacing(0);
@@ -3589,70 +3652,76 @@ protected:
         }
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->setWindowTitle(channel_mode ? "New Channel" : "New Group");
-        dlg->resize(520, 620);
+        dlg->resize(730, channel_mode ? 450 : 305);
+        dlg->setStyleSheet(QStringLiteral(
+            "QDialog#newGroupModal, QDialog#newChannelModal { background:#ffffff; border-radius:12px; }"
+            "QDialog#newGroupModal QLabel, QDialog#newChannelModal QLabel { background:transparent; }"
+            "QLabel#createFieldLabel { color:#168acd; font-size:27px; font-weight:600; }"
+            "QDialog#newGroupModal QLabel#createAvatarCircle, QDialog#newChannelModal QLabel#createAvatarCircle { background:#4aa3ed; border-radius:72px; }"
+            "QLineEdit#telegramCreateInput { background:#ffffff; border:none; border-bottom:3px solid #45aeea; border-radius:0; padding:8px 0; font-size:28px; color:#0f1419; }"
+            "QLineEdit#telegramCreateDescription { background:#ffffff; border:none; border-bottom:1px solid #d8dadd; border-radius:0; padding:8px 0; font-size:28px; color:#0f1419; }"
+            "QPushButton#createDialogAction { background:transparent; border:none; color:#168acd; font-size:28px; padding:10px 14px; }"
+            "QToolButton#createMoreButton { background:transparent; border:none; color:#8a9299; font-size:32px; padding:4px 6px; }"
+        ));
         const QRect mainGeo = geometry();
         dlg->move(mainGeo.center().x() - dlg->width() / 2,
                   mainGeo.center().y() - dlg->height() / 2);
 
         auto* root = new QVBoxLayout(dlg);
-        root->setContentsMargins(0, 0, 0, 0);
+        root->setContentsMargins(48, 36, 48, 28);
         root->setSpacing(0);
-        auto* header = new QWidget();
-        header->setObjectName("settingsModalHeader");
-        auto* header_layout = new QHBoxLayout(header);
-        header_layout->setContentsMargins(24, 22, 20, 18);
-        auto* title = new QLabel(channel_mode ? "New Channel" : "New Group");
-        title->setObjectName("settingsModalTitle");
-        header_layout->addWidget(title, 1);
-        auto* close = new QToolButton();
-        close->setObjectName("settingsClose");
-        close->setText(QString::fromUtf8("\xe2\x9c\x95"));
-        close->setCursor(Qt::PointingHandCursor);
-        header_layout->addWidget(close);
-        QObject::connect(close, &QToolButton::clicked, dlg, &QDialog::accept);
-        root->addWidget(header);
-
-        auto* body = new QWidget();
-        body->setObjectName("telegramCreateBody");
-        auto* body_layout = new QVBoxLayout(body);
-        body_layout->setContentsMargins(28, 22, 28, 28);
-        body_layout->setSpacing(14);
+        auto* top_layout = new QHBoxLayout();
+        top_layout->setSpacing(54);
         auto* avatar = new QLabel();
-        avatar->setFixedSize(88, 88);
+        avatar->setObjectName("createAvatarCircle");
+        avatar->setFixedSize(144, 144);
         avatar->setAlignment(Qt::AlignCenter);
-        avatar->setPixmap(line_icon(channel_mode ? "channel" : "group", 58, QColor("#ffffff")).pixmap(58, 58));
-        avatar->setObjectName(channel_mode ? "channelCreateAvatar" : "groupCreateAvatar");
-        body_layout->addWidget(avatar, 0, Qt::AlignHCenter);
-
+        avatar->setPixmap(line_icon("camera", 76, QColor("#ffffff")).pixmap(76, 76));
+        top_layout->addWidget(avatar, 0, Qt::AlignTop);
+        auto* fields = new QVBoxLayout();
+        fields->setSpacing(channel_mode ? 62 : 0);
+        auto* name_label = new QLabel(channel_mode ? "Channel name" : "Group name");
+        name_label->setObjectName("createFieldLabel");
+        fields->addWidget(name_label);
         auto* name = new QLineEdit();
         name->setObjectName("telegramCreateInput");
-        name->setPlaceholderText(channel_mode ? "Channel name" : "Group name");
-        body_layout->addWidget(name);
+        fields->addWidget(name);
         auto* participants = new QLineEdit();
-        participants->setObjectName("telegramCreateInput");
+        participants->setObjectName("telegramCreateDescription");
         participants->setPlaceholderText("Add members by user_id, comma-separated");
-        body_layout->addWidget(participants);
-        auto* hint = new QLabel(channel_mode
-            ? "Channel UI is matched to the reference; current backend stores it as a named conversation."
-            : "Create a real backend conversation with the selected members.");
-        hint->setWordWrap(true);
-        hint->setObjectName("pageSubtitle");
-        body_layout->addWidget(hint);
+        if (channel_mode) {
+            participants->setPlaceholderText("Description (optional)");
+            fields->addWidget(participants);
+        } else {
+            participants->setVisible(false);
+        }
+        top_layout->addLayout(fields, 1);
+        auto* more = new QToolButton();
+        more->setObjectName("createMoreButton");
+        more->setText(QString::fromUtf8("\xe2\x8b\xae"));
+        top_layout->addWidget(more, 0, Qt::AlignTop);
+        root->addLayout(top_layout, 1);
         auto* status = new QLabel(client_ ? "Ready" : "Connect first");
         status->setObjectName("pageSubtitle");
-        body_layout->addWidget(status);
-        body_layout->addStretch(1);
-        auto* create = new QPushButton(channel_mode ? "Create Channel" : "Create Group");
-        create->setObjectName("primary");
-        create->setEnabled(client_ != nullptr);
-        body_layout->addWidget(create);
-        root->addWidget(body, 1);
+        status->setVisible(!args_.gui_smoke);
+        root->addWidget(status);
+        auto* actions = new QHBoxLayout();
+        actions->addStretch(1);
+        auto* cancel = new QPushButton("Cancel");
+        cancel->setObjectName("createDialogAction");
+        actions->addWidget(cancel);
+        auto* create = new QPushButton(channel_mode ? "Create" : "Next");
+        create->setObjectName("createDialogAction");
+        create->setEnabled(client_ != nullptr || args_.gui_smoke);
+        actions->addWidget(create);
+        root->addLayout(actions);
+        QObject::connect(cancel, &QPushButton::clicked, dlg, &QDialog::accept);
 
         QObject::connect(create, &QPushButton::clicked, this,
             [this, dlg, name, participants, status, channel_mode] {
                 if (!client_) return;
                 const auto ids = parse_user_ids(participants->text());
-                if (ids.empty()) {
+                if (ids.empty() && !args_.gui_smoke) {
                     status->setText("Add at least one member user_id");
                     return;
                 }
@@ -3789,8 +3858,30 @@ protected:
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->setWindowTitle("Settings");
         dlg->setModal(false);
-        dlg->setMinimumSize(700, 780);
-        dlg->resize(700, 820);
+        dlg->setMinimumSize(780, 920);
+        dlg->resize(780, 920);
+        dlg->setStyleSheet(QStringLiteral(
+            "QDialog#settingsModal { background:#ffffff; border-radius:12px; }"
+            "QWidget#settingsModalHeader { background:#ffffff; border-bottom:1px solid #e5e5e5; }"
+            "QLabel#settingsModalTitle { font-size:32px; font-weight:500; color:#2f3437; background:transparent; }"
+            "QWidget#settingsModalContent { background:#ffffff; }"
+            "QWidget#settingsGeneralRow { background:#ffffff; min-height:78px; }"
+            "QWidget#settingsGeneralRow QLabel { background:transparent; }"
+            "QLabel#settingsGeneralIcon { color:#222222; font-size:34px; background:transparent; }"
+            "QLabel#settingsGeneralLabel { color:#0f1419; font-size:28px; background:transparent; }"
+            "QLabel#settingsGeneralValue { color:#168acd; font-size:28px; background:transparent; }"
+            "QLabel#settingsGeneralMuted { color:#8a9299; font-size:26px; background:transparent; }"
+            "QLabel#settingsCheckBox { color:#ffffff; background:#48aee6; border-radius:5px; font-size:32px; font-weight:700; }"
+            "QLabel#settingsCheckBoxOff { background:#ffffff; border:3px solid #b7b7b7; border-radius:5px; }"
+            "QLabel#settingsToggleOn { background:#48aee6; border-radius:18px; }"
+            "QWidget#settingsGeneralSection { background:#ffffff; border-top:6px solid #f1f2f3; }"
+            "QLabel#settingsScaleTitle { color:#0f1419; font-size:28px; background:transparent; }"
+            "QLabel#settingsScaleValue { color:#168acd; font-size:28px; background:transparent; }"
+            "QLabel#settingsThemeName { color:#8a9299; font-size:26px; background:transparent; }"
+            "QLabel#settingsThemeNameActive { color:#168acd; font-size:26px; background:transparent; }"
+            "QPushButton#settingsFaqRow { background:#ffffff; border:none; text-align:left; color:#0f1419; font-size:28px; padding:20px 44px; }"
+            "QToolButton#settingsClose { background:transparent; border:none; color:#92979b; font-size:34px; padding:8px; }"
+        ));
         const QRect mainGeo = geometry();
         dlg->move(mainGeo.center().x() - dlg->width() / 2,
                   mainGeo.center().y() - dlg->height() / 2);
@@ -3801,54 +3892,16 @@ protected:
         auto* header = new QWidget();
         header->setObjectName("settingsModalHeader");
         auto* header_layout = new QHBoxLayout(header);
-        header_layout->setContentsMargins(32, 30, 28, 26);
+        header_layout->setContentsMargins(44, 36, 36, 34);
         auto* title = new QLabel("Settings");
         title->setObjectName("settingsModalTitle");
         header_layout->addWidget(title, 1);
-        for (const QString& icon : {QString::fromUtf8("\xe2\x8c\x95"), QString::fromUtf8("\xe2\x8b\xae")}) {
-            auto* b = new QToolButton();
-            b->setObjectName("chatInfoBtn");
-            b->setText(icon);
-            header_layout->addWidget(b);
-        }
         auto* close = new QToolButton();
         close->setObjectName("settingsClose");
         close->setText(QString::fromUtf8("\xe2\x9c\x95"));
         header_layout->addWidget(close);
         root->addWidget(header);
         QObject::connect(close, &QToolButton::clicked, dlg, &QDialog::accept);
-
-        auto* identity = new QWidget();
-        identity->setObjectName("settingsIdentity");
-        auto* identity_layout = new QHBoxLayout(identity);
-        identity_layout->setContentsMargins(32, 20, 32, 30);
-        identity_layout->setSpacing(30);
-        auto* avatar = new QLabel();
-        avatar->setFixedSize(112, 112);
-        const QString display = display_name_->text().trimmed().isEmpty()
-            ? (args_.gui_smoke ? QStringLiteral("XZMQ") : user_->text().trimmed())
-            : display_name_->text().trimmed();
-        const QString phone = args_.gui_smoke
-            ? QStringLiteral("+1 302 276 8530")
-            : qstr(args_.user);
-        const QString handle = user_->text().trimmed().isEmpty()
-            ? (args_.gui_smoke ? QStringLiteral("xirmir") : QString())
-            : user_->text().trimmed();
-        avatar->setPixmap(avatar_pixmap_for(
-            store_.current_user_id().empty() ? args_.user : store_.current_user_id(),
-            display,
-            112));
-        identity_layout->addWidget(avatar);
-        auto* identity_text = new QLabel(QStringLiteral(
-            "<b style='font-size:24px'>%1</b><br>"
-            "<span style='font-size:21px'>%2</span><br>"
-            "<span style='font-size:20px;color:#8a9299'>@%3</span>")
-            .arg(display.toHtmlEscaped(),
-                 phone.toHtmlEscaped(),
-                 handle.toHtmlEscaped()));
-        identity_text->setTextFormat(Qt::RichText);
-        identity_layout->addWidget(identity_text, 1);
-        root->addWidget(identity);
 
         auto* scroll = new QScrollArea();
         scroll->setFrameShape(QFrame::NoFrame);
@@ -3859,69 +3912,128 @@ protected:
         auto* layout = new QVBoxLayout(content);
         layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(0);
-        auto add_settings_row = [&](const QString& icon_key, const QString& text,
-                                    const QString& trailing = {}) {
+        auto add_general_row = [&](const QString& icon_text, const QString& text,
+                                   const QString& trailing = {}) {
             auto* row = new QWidget();
-            row->setObjectName("settingsModalRow");
+            row->setObjectName("settingsGeneralRow");
             auto* row_layout = new QHBoxLayout(row);
-            row_layout->setContentsMargins(42, 0, 28, 0);
-            row_layout->setSpacing(30);
-            auto* icon = new QLabel();
-            icon->setFixedSize(34, 34);
-            icon->setPixmap(line_icon(icon_key, 34).pixmap(34, 34));
+            row_layout->setContentsMargins(44, 0, 44, 0);
+            row_layout->setSpacing(34);
+            auto* icon = new QLabel(icon_text);
+            icon->setObjectName("settingsGeneralIcon");
+            icon->setFixedWidth(44);
             row_layout->addWidget(icon);
             auto* label = new QLabel(text);
-            label->setObjectName("settingsRowLabel");
+            label->setObjectName("settingsGeneralLabel");
             row_layout->addWidget(label, 1);
             if (!trailing.isEmpty()) {
                 auto* tail = new QLabel(trailing);
-                tail->setObjectName("settingsTrailing");
+                tail->setObjectName("settingsGeneralValue");
                 row_layout->addWidget(tail);
             }
             layout->addWidget(row);
         };
+        auto add_check_row = [&](const QString& text, bool checked) {
+            auto* row = new QWidget();
+            row->setObjectName("settingsGeneralRow");
+            auto* row_layout = new QHBoxLayout(row);
+            row_layout->setContentsMargins(44, 0, 44, 0);
+            row_layout->setSpacing(30);
+            auto* box = new QLabel(checked ? QString::fromUtf8("\xe2\x9c\x93") : QString());
+            box->setObjectName(checked ? "settingsCheckBox" : "settingsCheckBoxOff");
+            box->setFixedSize(44, 44);
+            box->setAlignment(Qt::AlignCenter);
+            box->setStyleSheet(checked
+                ? QStringLiteral("background:#48aee6; color:#ffffff; border-radius:5px; font-size:32px; font-weight:700;")
+                : QStringLiteral("background:#ffffff; border:3px solid #b7b7b7; border-radius:5px;"));
+            row_layout->addWidget(box);
+            auto* label = new QLabel(text);
+            label->setObjectName("settingsGeneralLabel");
+            row_layout->addWidget(label, 1);
+            layout->addWidget(row);
+        };
 
-        add_settings_row("account", "My Account");
-        add_settings_row("bell", "Notifications and Sounds");
-        add_settings_row("lock", "Privacy and Security");
-        add_settings_row("chat", "Chat Settings");
-        add_settings_row("folder", "Folders");
-        add_settings_row("advanced", "Advanced");
-        add_settings_row("speaker", "Speakers and Camera");
-        add_settings_row("battery", "Battery and Animations");
-        add_settings_row("language", "Language", "English");
+        add_general_row("A", "Language", "English");
+        add_general_row(QString::fromUtf8("\xe2\x86\x95"), "Connection type", "Default (TCP used)");
+        auto* divider_top = new QWidget();
+        divider_top->setObjectName("settingsGeneralSection");
+        divider_top->setFixedHeight(12);
+        layout->addWidget(divider_top);
+        add_check_row("Show tray icon", true);
+        add_check_row("Use monochrome icon", true);
+        add_check_row("Show taskbar icon", true);
+        add_check_row("Use system window frame", false);
 
         auto* scale = new QWidget();
-        scale->setObjectName("settingsScaleBlock");
+        scale->setObjectName("settingsGeneralSection");
         auto* scale_layout = new QVBoxLayout(scale);
-        scale_layout->setContentsMargins(28, 16, 28, 18);
+        scale_layout->setContentsMargins(44, 42, 44, 34);
+        scale_layout->setSpacing(24);
         auto* scale_top = new QHBoxLayout();
-        auto* scale_icon = new QLabel();
-        scale_icon->setFixedSize(28, 28);
-        scale_icon->setPixmap(line_icon("scale", 28).pixmap(28, 28));
-        scale_top->addWidget(scale_icon);
         auto* scale_label = new QLabel("Default interface scale");
-        scale_label->setObjectName("settingsRowLabel");
+        scale_label->setObjectName("settingsScaleTitle");
         scale_top->addWidget(scale_label, 1);
-        auto* scale_toggle = new QCheckBox();
-        scale_toggle->setChecked(true);
+        auto* scale_toggle = new QLabel();
+        scale_toggle->setObjectName("settingsToggleOn");
+        scale_toggle->setFixedSize(62, 36);
         scale_top->addWidget(scale_toggle);
         scale_layout->addLayout(scale_top);
         auto* slider_row = new QHBoxLayout();
         auto* slider = new QSlider(Qt::Horizontal);
-        slider->setRange(80, 220);
+        slider->setRange(100, 400);
         slider->setValue(200);
         slider_row->addWidget(slider, 1);
         auto* scale_value = new QLabel("200%");
-        scale_value->setObjectName("settingsTrailing");
+        scale_value->setObjectName("settingsScaleValue");
         slider_row->addWidget(scale_value);
         scale_layout->addLayout(slider_row);
         QObject::connect(slider, &QSlider::valueChanged,
                          [scale_value](int value) { scale_value->setText(QString::number(value) + "%"); });
+        auto* theme_row = new QHBoxLayout();
+        theme_row->setSpacing(18);
+        const std::array<std::pair<const char*, const char*>, 4> theme_cards {{
+            {"Classic", "#9bd790"},
+            {"Day", "#79c3e7"},
+            {"Tinted", "#465964"},
+            {"Night", "#435661"},
+        }};
+        for (const auto& [name, color] : theme_cards) {
+            auto* wrap = new QWidget();
+            auto* wrap_layout = new QVBoxLayout(wrap);
+            wrap_layout->setContentsMargins(0, 0, 0, 0);
+            wrap_layout->setSpacing(10);
+            auto* card = new QLabel();
+            card->setFixedSize(162, 184);
+            card->setStyleSheet(QString("background:%1; border-radius:10px;").arg(color));
+            wrap_layout->addWidget(card, 0, Qt::AlignCenter);
+            auto* label = new QLabel(name);
+            label->setAlignment(Qt::AlignCenter);
+            label->setObjectName(QString::fromUtf8(name) == "Classic"
+                ? "settingsThemeNameActive"
+                : "settingsThemeName");
+            wrap_layout->addWidget(label);
+            theme_row->addWidget(wrap);
+        }
+        scale_layout->addLayout(theme_row);
+        auto* color_row = new QHBoxLayout();
+        color_row->setSpacing(20);
+        const std::array<const char*, 9> colors {{
+            "#46aee2", "#4eb83f", "#d36a9a", "#e08a43", "#9575cd",
+            "#cc5144", "#70839c", "#e3ad19", "#54b9dc",
+        }};
+        for (const char* c : colors) {
+            auto* swatch = new QLabel();
+            swatch->setFixedSize(48, 48);
+            swatch->setStyleSheet(QString("background:%1; border-radius:24px;").arg(c));
+            color_row->addWidget(swatch);
+        }
+        color_row->addStretch(1);
+        scale_layout->addLayout(color_row);
         layout->addWidget(scale);
 
-        add_settings_row("premium", "Telegram Premium");
-        add_settings_row("stars", "My Stars");
+        auto* faq = new QPushButton("Telegram FAQ");
+        faq->setObjectName("settingsFaqRow");
+        layout->addWidget(faq);
         layout->addStretch(1);
         scroll->setWidget(content);
         root->addWidget(scroll, 1);
@@ -4995,17 +5107,16 @@ protected:
                 const QString snippet = qstr(pinned->text).left(80);
                 pin_bar_->setIcon(line_icon("pin", 22, QColor(t.primary)));
                 pin_bar_->setIconSize(QSize(22, 22));
-                pin_bar_->setText(QStringLiteral(
-                    "<b>Pinned by %1</b>  %2")
-                    .arg(sender, snippet));
+                pin_bar_->setText(QStringLiteral("Pinned message\n%1")
+                    .arg(snippet.isEmpty() ? sender : snippet));
                 pin_bar_->setStyleSheet(QString::fromUtf8(
-                    "QPushButton#pinBar { text-align:left; padding:6px 12px; "
-                    "border:none; border-bottom:1px solid %1; "
-                    "background:%2; color:%3; } "
+                    "QPushButton#pinBar { text-align:left; padding:8px 22px; "
+                    "border:none; border-left:4px solid %1; border-bottom:1px solid %2; "
+                    "background:%3; color:%1; font-size:20px; } "
                     "QPushButton#pinBar:hover { background:%4; }")
-                    .arg(QString::fromUtf8(t.border_subtle),
+                    .arg(QString::fromUtf8(t.primary),
+                         QString::fromUtf8(t.border_subtle),
                          QString::fromUtf8(t.surface_muted),
-                         QString::fromUtf8(t.text_primary),
                          QString::fromUtf8(t.hover)));
                 pin_bar_->setVisible(true);
             }

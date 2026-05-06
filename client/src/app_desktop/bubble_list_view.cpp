@@ -17,15 +17,15 @@ namespace telegram_like::client::app_desktop {
 
 namespace {
 
-constexpr int kRowMargin       = 8;     // vertical padding above + below the bubble row
-constexpr int kSideMargin      = 12;    // left/right edge of the row
-constexpr int kAvatarSize      = 32;
-constexpr int kAvatarBubbleGap = 8;
-constexpr int kBubblePaddingX  = 12;
-constexpr int kBubblePaddingY  = 8;
-constexpr int kBubbleRadius    = 12;
-constexpr int kMinBubbleWidth  = 96;
-constexpr double kMaxBubbleRatio = 0.72;
+constexpr int kRowMargin       = 12;    // vertical padding above + below the bubble row
+constexpr int kSideMargin      = 22;    // left/right edge of the row
+constexpr int kAvatarSize      = 38;
+constexpr int kAvatarBubbleGap = 10;
+constexpr int kBubblePaddingX  = 18;
+constexpr int kBubblePaddingY  = 14;
+constexpr int kBubbleRadius    = 16;
+constexpr int kMinBubbleWidth  = 150;
+constexpr double kMaxBubbleRatio = 0.82;
 
 // Stable 8-color avatar palette (matches the existing design::kAvatarPalette).
 QColor avatar_color_for(const QString& seed) {
@@ -291,7 +291,7 @@ BubbleDelegate::LayoutMetrics BubbleDelegate::measure(const QModelIndex& index,
 
     QString shownText = deleted ? QStringLiteral("<deleted>") : text;
     if (edited) shownText += QStringLiteral(" (edited)");
-    QFontMetrics fm(base_font(13));
+    QFontMetrics fm(base_font(18));
     QRect textRect = fm.boundingRect(QRect(0, 0, contentMax, 1),
                                      Qt::TextWordWrap, shownText);
     m.textHeight = std::max(textRect.height(), fm.lineSpacing());
@@ -387,7 +387,7 @@ void BubbleDelegate::paint(QPainter* painter,
         painter->setBrush(avatar_color_for(avatarSeed));
         painter->drawEllipse(avatarRect);
         painter->setPen(Qt::white);
-        painter->setFont(base_font(13, true));
+        painter->setFont(base_font(15, true));
         painter->drawText(avatarRect, Qt::AlignCenter, initials_for(avatarSeed));
     }
 
@@ -445,7 +445,7 @@ void BubbleDelegate::paint(QPainter* painter,
     // Sender name (peer side, useful in groups; harmless in 1:1).
     if (layout.senderHeight > 0) {
         painter->setPen(accentText);
-        painter->setFont(base_font(11, true));
+        painter->setFont(base_font(14, true));
         QRect r(content.left(), y, content.width(), layout.senderHeight);
         painter->drawText(r, Qt::AlignLeft | Qt::AlignTop, sender);
         y += layout.senderHeight;
@@ -569,7 +569,7 @@ void BubbleDelegate::paint(QPainter* painter,
         if (systemMessage || pollMessage) shownText.clear();
         if (edited) shownText += QStringLiteral(" (edited)");
         painter->setPen(failed ? QColor("#0f1419") : primaryText);
-        painter->setFont(base_font(13));
+        painter->setFont(base_font(18));
         QRect r(content.left(), y, content.width(), layout.textHeight);
         painter->drawText(r, Qt::TextWordWrap, shownText);
         y += layout.textHeight;
