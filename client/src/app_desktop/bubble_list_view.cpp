@@ -226,6 +226,11 @@ void BubbleDelegate::setPalette(const DesktopBubblePalette& palette) {
     palette_ = palette;
 }
 
+void BubbleDelegate::setInteractionRows(int hovered_row, int pressed_row) {
+    hovered_row_ = hovered_row;
+    pressed_row_ = pressed_row;
+}
+
 int BubbleDelegate::maxBubbleContentWidth(int viewportWidth) const {
     int w = static_cast<int>(viewportWidth * kMaxBubbleRatio) - 2 * kSideMargin
             - kAvatarSize - kAvatarBubbleGap;
@@ -264,7 +269,6 @@ BubbleDelegate::LayoutMetrics BubbleDelegate::measure(const QModelIndex& index,
     const bool pinned = index.data(BubbleMessageModel::PinnedRole).toBool();
     const bool systemMessage = text.startsWith(QStringLiteral("[system]"));
     const bool pollMessage = text.startsWith(QStringLiteral("[poll]"));
-
     // Section heights — rough but consistent with paint().
     if (!outgoing && !sender.isEmpty()) m.senderHeight = 14;
     if (!forwarded.isEmpty())           m.forwardedHeight = 14;
@@ -365,6 +369,8 @@ void BubbleDelegate::paint(QPainter* painter,
     const bool match = index.data(BubbleMessageModel::MatchRole).toBool();
     const bool systemMessage = text.startsWith(QStringLiteral("[system]"));
     const bool pollMessage = text.startsWith(QStringLiteral("[poll]"));
+    const bool hovered = index.row() == hovered_row_;
+    const bool pressed = index.row() == pressed_row_;
 
     const auto layout = measure(index, option.rect.width());
     const QSize bubbleSize = layout.bubbleSize;
@@ -392,6 +398,20 @@ void BubbleDelegate::paint(QPainter* painter,
         painter->setPen(Qt::white);
         painter->setFont(base_font(13, true));
         painter->drawText(avatarRect, Qt::AlignCenter, initials_for(avatarSeed));
+    }
+
+    // ---- hover affordance ----
+    // tdesktop keeps active/pressed row state in the history widget and
+    // repaints just the affected items. The delegate paints the subtle
+    // affordance while BubbleListView owns the state transitions.
+    if (hovered || pressed) {
+        QColor halo(outgoing ? palette_.own_bubble : palette_.peer_bubble_text);
+        halo.setAlpha(pressed ? 34 : 18);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(halo);
+        painter->drawRoundedRect(bubbleRect.adjusted(-3, -3, 3, 3),
+                                 kBubbleRadius + 3,
+                                 kBubbleRadius + 3);
     }
 
     // ---- bubble background ----
@@ -431,6 +451,28 @@ void BubbleDelegate::paint(QPainter* painter,
         painter->setPen(QPen(QColor("#f6c344"), 2));
         painter->setBrush(Qt::NoBrush);
         painter->drawRoundedRect(bubbleRect, kBubbleRadius, kBubbleRadius);
+    }
+
+    if (hovered) {
+        const int actionSize = 28;
+        const int actionGap = 8;
+        const int actionX = outgoing
+            ? bubbleRect.left() - actionGap - actionSize
+            : bubbleRect.right() + actionGap;
+        QRect actionRect(actionX, bubbleRect.top() + 4, actionSize, actionSize);
+        if (option.rect.intersects(actionRect)) {
+            QColor actionBg(palette_.peer_bubble);
+            actionBg.setAlpha(210);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(actionBg);
+            painter->drawEllipse(actionRect);
+            QColor dots(palette_.text_muted);
+            painter->setBrush(dots);
+            const int cy = actionRect.center().y();
+            for (int i = 0; i < 3; ++i) {
+                painter->drawEllipse(QRect(actionRect.left() + 8 + i * 5, cy - 2, 4, 4));
+            }
+        }
     }
 
     // ---- inner content ----
@@ -666,6 +708,9 @@ void BubbleListView::setEmptyStateText(const QString& text) {
 void BubbleListView::refresh() {
     // Re-pull from the same store — model::setData re-snapshots.
     // Caller resets the model + scrolls to bottom.
+    if (model_->rowCount() == 0) {
+        setInteractionRows(-1, -1);
+    }
     if (model_->rowCount() > 0) {
         scrollToBottom();
     }
@@ -785,6 +830,49 @@ void BubbleListView::mouseDoubleClickEvent(QMouseEvent* event) {
         if (!id.isEmpty()) emit messageActivated(id);
     }
     QListView::mouseDoubleClickEvent(event);
+}
+
+void BubbleListView::mouseMoveEvent(QMouseEvent* event) {
+    const auto idx = indexAt(event->pos());
+    setInteractionRows(idx.isValid() ? idx.row() : -1, pressed_row_);
+    QListView::mouseMoveEvent(event);
+}
+
+void BubbleListView::mousePressEvent(QMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        const auto idx = indexAt(event->pos());
+        setInteractionRows(idx.isValid() ? idx.row() : -1,
+                           idx.isValid() ? idx.row() : -1);
+    }
+    QListView::mousePressEvent(event);
+}
+
+void BubbleListView::mouseReleaseEvent(QMouseEvent* event) {
+    const auto idx = indexAt(event->pos());
+    setInteractionRows(idx.isValid() ? idx.row() : -1, -1);
+    QListView::mouseReleaseEvent(event);
+}
+
+void BubbleListView::leaveEvent(QEvent* event) {
+    setInteractionRows(-1, -1);
+    QListView::leaveEvent(event);
+}
+
+void BubbleListView::setInteractionRows(int hovered_row, int pressed_row) {
+    if (hovered_row_ == hovered_row && pressed_row_ == pressed_row) return;
+    const int old_hovered = hovered_row_;
+    const int old_pressed = pressed_row_;
+    hovered_row_ = hovered_row;
+    pressed_row_ = pressed_row;
+    delegate_->setInteractionRows(hovered_row_, pressed_row_);
+    const auto update_row = [this](int row) {
+        if (row < 0 || row >= model_->rowCount()) return;
+        viewport()->update(visualRect(model_->index(row)));
+    };
+    update_row(old_hovered);
+    update_row(old_pressed);
+    update_row(hovered_row_);
+    update_row(pressed_row_);
 }
 
 }  // namespace telegram_like::client::app_desktop

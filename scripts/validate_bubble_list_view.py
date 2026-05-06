@@ -83,6 +83,13 @@ def main() -> int:
         "delegate must paint reaction chips + footer text alignments"
     print("[ok ] paint() uses rounded rect + gradient + ellipse + tick glyphs + chip layout")
 
+    print("[scenario] message hover/pressed rows are tracked by the view")
+    for token in ("hovered_row_", "pressed_row_", "setInteractionRows",
+                  "mouseMoveEvent(QMouseEvent* event)", "leaveEvent(QEvent* event)",
+                  "viewport()->update(visualRect(model_->index(row)))"):
+        assert token in h or token in cpp, f"missing hover interaction token: {token}"
+    print("[ok ] BubbleListView owns Telegram-like row hover/pressed repaint state")
+
     print("[scenario] main.cpp swaps QTextBrowser for BubbleListView")
     assert "#include \"app_desktop/bubble_list_view.h\"" in main_cpp, \
         "main.cpp must include the new header"

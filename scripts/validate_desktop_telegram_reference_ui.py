@@ -96,9 +96,13 @@ def main() -> int:
     require("QIcon line_icon" in main_cpp, "single-color drawn line icon helper missing")
     require('add_row("profile", "My Profile")' in main_cpp,
             "drawer rows must use drawn line icons instead of emoji text prefixes")
-    require("QPropertyAnimation(dlg, \"geometry\", dlg)" in main_cpp, "drawer must slide with geometry animation")
+    require("AccountDrawerLayer" in main_cpp and "accountDrawerLayer" in main_cpp,
+            "drawer must be an in-window layer, matching tdesktop MainMenu behavior")
+    require("QPropertyAnimation(drawer, \"geometry\", drawer)" in main_cpp,
+            "drawer must slide with geometry animation")
     require("[this] { show_account_drawer(); }" in main_cpp, "hamburger must open the account drawer")
-    require("focusChanged" in main_cpp and "close_drawer" in main_cpp, "drawer must close from outside focus/row interactions")
+    require("closeRequested" in main_cpp and "mousePressEvent(QMouseEvent* event) override" in main_cpp,
+            "drawer layer must close from outside clicks")
     print("[ok ] hamburger opens a Telegram-like left account drawer")
 
     print("[scenario] screenshot #5 centered settings modal")

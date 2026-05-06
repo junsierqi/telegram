@@ -28,7 +28,7 @@ def main() -> int:
         "set_selected_conversation({})",
         "sidebar_panel_",
         "sidebar_panel_->width()",
-        "mapToGlobal(QPoint(0, 0))",
+        "accountDrawerLayer",
         "account_drawer_geometry",
         "sync_account_drawer_geometry",
         "QScrollArea#accountDrawerScroll",
@@ -44,6 +44,8 @@ def main() -> int:
             "account drawer must follow the sidebar width, not a hard-coded 360px width")
     require("mainGeo.top() + 32" not in drawer_body,
             "account drawer must not offset itself below the main window client area")
+    require("Qt::Tool | Qt::FramelessWindowHint" not in drawer_body,
+            "account drawer must be a child layer, not a floating tool window")
     print("[ok ] reference-14/15 side-menu empty states are first-class GUI evidence")
 
     print("[scenario] Telegram service notification reference states")

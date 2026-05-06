@@ -29,6 +29,7 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QInputDialog>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -63,6 +64,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QMoveEvent>
+#include <QMouseEvent>
 
 #include <atomic>
 #include <algorithm>
@@ -101,6 +103,38 @@ struct Args {
     bool smoke_register = false;
     bool smoke_two_client_flow = false;
     bool gui_smoke = false;
+};
+
+class AccountDrawerLayer final : public QWidget {
+public:
+    explicit AccountDrawerLayer(QWidget* parent = nullptr) : QWidget(parent) {
+        setObjectName(QStringLiteral("accountDrawerLayer"));
+        setAttribute(Qt::WA_DeleteOnClose);
+        setFocusPolicy(Qt::StrongFocus);
+        setStyleSheet(QStringLiteral("QWidget#accountDrawerLayer { background: transparent; }"));
+    }
+
+    QPointer<QWidget> drawer;
+    std::function<void()> closeRequested;
+
+protected:
+    void mousePressEvent(QMouseEvent* event) override {
+        if (drawer == nullptr || !drawer->geometry().contains(event->pos())) {
+            if (closeRequested) closeRequested();
+            event->accept();
+            return;
+        }
+        QWidget::mousePressEvent(event);
+    }
+
+    void keyPressEvent(QKeyEvent* event) override {
+        if (event->key() == Qt::Key_Escape) {
+            if (closeRequested) closeRequested();
+            event->accept();
+            return;
+        }
+        QWidget::keyPressEvent(event);
+    }
 };
 
 bool parse_args(int argc, char** argv, Args& out) {
@@ -2651,7 +2685,7 @@ private:
             QPushButton#dangerActionButton:hover { background:{danger_hover}; }
             QToolButton#hamburgerButton, QToolButton#chatInfoBtn { border:none; background:transparent; color:{text_muted}; padding:7px 9px; border-radius:17px; font-size:24px; }
             QToolButton#hamburgerButton:hover, QToolButton#chatInfoBtn:hover { background:{hover}; color:{text_primary}; }
-            QDialog#accountDrawer, QDialog#settingsModal, QDialog#loginModal { background:{surface}; }
+            QWidget#accountDrawer, QDialog#settingsModal, QDialog#loginModal { background:{surface}; }
             QScrollArea#accountDrawerScroll { background:{surface}; border:none; }
             QScrollArea#accountDrawerScroll > QWidget > QWidget { background:{surface}; }
             QWidget#drawerHeader { background:{surface}; border-bottom:1px solid {border_subtle}; }
@@ -2971,35 +3005,51 @@ private:
     }
 
     void show_account_drawer() {
-        auto* dlg = new QDialog(this);
-        dlg->setObjectName("accountDrawer");
-        dlg->setAttribute(Qt::WA_DeleteOnClose);
-        dlg->setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
+        if (account_drawer_layer_ != nullptr && account_drawer_layer_->isVisible()) {
+            account_drawer_layer_->raise();
+            account_drawer_layer_->setFocus();
+            return;
+        }
+
+        auto* layer = new AccountDrawerLayer(this);
+        layer->setGeometry(rect());
+        layer->raise();
+        auto* drawer = new QWidget(layer);
+        drawer->setObjectName("accountDrawer");
+        drawer->setAttribute(Qt::WA_StyledBackground, true);
         const QRect dockedGeo = account_drawer_geometry(false);
         const QRect offGeo = account_drawer_geometry(true);
         const int panelW = dockedGeo.width();
         const int panelH = dockedGeo.height();
-        dlg->setFixedSize(panelW, panelH);
-        dlg->setGeometry(offGeo);
-        auto close_drawer = [this, dlg] {
-            if (dlg == nullptr || !dlg->isVisible()) return;
+        drawer->setFixedSize(panelW, panelH);
+        drawer->setGeometry(offGeo);
+        layer->drawer = drawer;
+        QPointer<AccountDrawerLayer> layer_ptr(layer);
+        QPointer<QWidget> drawer_ptr(drawer);
+        auto close_drawer = [this, layer_ptr, drawer_ptr] {
+            if (layer_ptr == nullptr || drawer_ptr == nullptr || !layer_ptr->isVisible()) return;
             const QRect docked = account_drawer_geometry(false);
             const QRect offscreen = account_drawer_geometry(true);
-            auto* outAnim = new QPropertyAnimation(dlg, "geometry", dlg);
+            auto* outAnim = new QPropertyAnimation(drawer_ptr, "geometry", drawer_ptr);
             outAnim->setDuration(160);
             outAnim->setEasingCurve(QEasingCurve::InCubic);
             outAnim->setStartValue(docked);
             outAnim->setEndValue(offscreen);
-            QObject::connect(outAnim, &QPropertyAnimation::finished, dlg, &QDialog::accept);
+            QObject::connect(outAnim, &QPropertyAnimation::finished, layer_ptr, [layer_ptr] {
+                if (layer_ptr != nullptr) layer_ptr->close();
+            });
             outAnim->start(QAbstractAnimation::DeleteWhenStopped);
         };
+        layer->closeRequested = close_drawer;
 
-        account_drawer_ = dlg;
-        QObject::connect(dlg, &QDialog::finished, this, [this, dlg] {
-            if (account_drawer_ == dlg) account_drawer_ = nullptr;
+        account_drawer_layer_ = layer;
+        account_drawer_ = drawer;
+        QObject::connect(layer, &QWidget::destroyed, this, [this, layer, drawer] {
+            if (account_drawer_layer_ == layer) account_drawer_layer_ = nullptr;
+            if (account_drawer_ == drawer) account_drawer_ = nullptr;
         });
 
-        auto* root = new QVBoxLayout(dlg);
+        auto* root = new QVBoxLayout(drawer);
         root->setContentsMargins(0, 0, 0, 0);
         root->setSpacing(0);
         auto* scroll = new QScrollArea();
@@ -3053,7 +3103,7 @@ private:
                 QObject::connect(btn, SIGNAL(clicked()), receiver, slot);
             } else if (text != "Settings" && text != "New Group"
                        && text != "New Channel" && text != "Contacts") {
-                QObject::connect(btn, &QPushButton::clicked, dlg, close_drawer);
+                QObject::connect(btn, &QPushButton::clicked, drawer, close_drawer);
             }
             return btn;
         };
@@ -3080,26 +3130,26 @@ private:
         wallet_row->setMinimumHeight(48);
         content_layout->addWidget(wallet_row);
         auto* group_row = add_row("group", "New Group");
-        QObject::connect(group_row, &QPushButton::clicked, dlg, [this, dlg] {
-            dlg->accept();
+        QObject::connect(group_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
             show_conversation_create_dialog(false);
         });
         auto* channel_row = add_row("channel", "New Channel");
-        QObject::connect(channel_row, &QPushButton::clicked, dlg, [this, dlg] {
-            dlg->accept();
+        QObject::connect(channel_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
             show_conversation_create_dialog(true);
         });
         auto* contacts_row = add_row("contact", "Contacts");
-        QObject::connect(contacts_row, &QPushButton::clicked, dlg, [this, dlg] {
-            dlg->accept();
+        QObject::connect(contacts_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
             show_contacts_dialog();
         });
         add_row("call", "Calls");
         add_row("saved", "Saved Messages");
         auto* settings = add_row("settings", "Settings");
         settings->setObjectName("drawerSettingsButton");
-        QObject::connect(settings, &QPushButton::clicked, dlg, [this, dlg] {
-            dlg->accept();
+        QObject::connect(settings, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
             show_settings_dialog();
         });
 
@@ -3139,36 +3189,35 @@ private:
         footer->setTextFormat(Qt::RichText);
         footer->setContentsMargins(32, 14, 32, 30);
         content_layout->addWidget(footer);
-        QObject::connect(qApp, &QApplication::focusChanged, dlg,
-                         [dlg, close_drawer](QWidget*, QWidget* now) {
-                             if (dlg == nullptr || !dlg->isVisible() || now == nullptr) return;
-                             if (now != dlg && !dlg->isAncestorOf(now)) close_drawer();
-                         });
-
-        dlg->show();
-        auto* inAnim = new QPropertyAnimation(dlg, "geometry", dlg);
+        layer->show();
+        drawer->show();
+        layer->raise();
+        layer->setFocus();
+        auto* inAnim = new QPropertyAnimation(drawer, "geometry", drawer);
         inAnim->setDuration(190);
         inAnim->setEasingCurve(QEasingCurve::OutCubic);
         inAnim->setStartValue(offGeo);
         inAnim->setEndValue(dockedGeo);
-        QObject::connect(inAnim, &QPropertyAnimation::finished, dlg, [this, dlg] {
-            if (dlg != nullptr && dlg->isVisible()) dlg->setGeometry(account_drawer_geometry(false));
+        QObject::connect(inAnim, &QPropertyAnimation::finished, drawer, [this, drawer] {
+            if (drawer != nullptr && drawer->isVisible()) drawer->setGeometry(account_drawer_geometry(false));
         });
         inAnim->start(QAbstractAnimation::DeleteWhenStopped);
     }
 
     QRect account_drawer_geometry(bool offscreen) const {
-        const QPoint mainTopLeft = mapToGlobal(QPoint(0, 0));
         const int panelW = sidebar_panel_ != nullptr && sidebar_panel_->width() > 0
             ? sidebar_panel_->width()
             : tdstyle::kMainMenuWidth;
         const int panelH = height();
-        const int x = offscreen ? mainTopLeft.x() - panelW : mainTopLeft.x();
-        return QRect(x, mainTopLeft.y(), panelW, panelH);
+        const int x = offscreen ? -panelW : 0;
+        return QRect(x, 0, panelW, panelH);
     }
 
     void sync_account_drawer_geometry() {
         if (account_drawer_ == nullptr || !account_drawer_->isVisible()) return;
+        if (account_drawer_layer_ != nullptr) {
+            account_drawer_layer_->setGeometry(rect());
+        }
         const QRect docked = account_drawer_geometry(false);
         account_drawer_->setFixedSize(docked.size());
         account_drawer_->setGeometry(docked);
@@ -4206,7 +4255,7 @@ protected:
 
     static int top_level_count(const char* object_name) {
         int count = 0;
-        for (QWidget* widget : QApplication::topLevelWidgets()) {
+        for (QWidget* widget : QApplication::allWidgets()) {
             if (widget != nullptr && widget->isVisible()
                 && widget->objectName() == QString::fromUtf8(object_name)) {
                 ++count;
@@ -4216,16 +4265,21 @@ protected:
     }
 
     static void close_top_levels(const char* object_name) {
-        for (QWidget* widget : QApplication::topLevelWidgets()) {
+        for (QWidget* widget : QApplication::allWidgets()) {
             if (widget != nullptr && widget->isVisible()
                 && widget->objectName() == QString::fromUtf8(object_name)) {
-                widget->close();
+                QWidget* parent = widget->parentWidget();
+                if (parent != nullptr && parent->objectName() == QStringLiteral("accountDrawerLayer")) {
+                    parent->close();
+                } else {
+                    widget->close();
+                }
             }
         }
     }
 
     static QWidget* first_top_level(const char* object_name) {
-        for (QWidget* widget : QApplication::topLevelWidgets()) {
+        for (QWidget* widget : QApplication::allWidgets()) {
             if (widget != nullptr && widget->isVisible()
                 && widget->objectName() == QString::fromUtf8(object_name)) {
                 return widget;
@@ -4269,14 +4323,20 @@ protected:
                       << args_.smoke_save_dir << "\n";
             return false;
         }
-        QPixmap pix = grab();
+        QPixmap pix = drawer->parentWidget() != nullptr
+            && drawer->parentWidget()->objectName() == QStringLiteral("accountDrawerLayer")
+            ? grab()
+            : grab();
         if (pix.isNull()) {
             std::cerr << "desktop gui smoke failed: could not capture drawer overlay base\n";
             return false;
         }
         QPainter painter(&pix);
-        painter.fillRect(pix.rect(), QColor(0, 0, 0, 105));
-        painter.drawPixmap(0, 0, drawer->grab());
+        if (drawer->parentWidget() == nullptr
+            || drawer->parentWidget()->objectName() != QStringLiteral("accountDrawerLayer")) {
+            painter.fillRect(pix.rect(), QColor(0, 0, 0, 105));
+            painter.drawPixmap(0, 0, drawer->grab());
+        }
         painter.end();
         const QString path = dir.filePath(name + QStringLiteral(".png"));
         const QPixmap out = region.isNull() ? pix : pix.copy(region);
@@ -6837,7 +6897,8 @@ protected:
     QLabel* chat_header_subtitle_ {nullptr};
     QToolButton* hamburger_button_ {nullptr};
     QWidget* sidebar_panel_ {nullptr};
-    QPointer<QDialog> account_drawer_;
+    QPointer<QWidget> account_drawer_layer_;
+    QPointer<QWidget> account_drawer_;
     QScrollArea* details_panel_ {nullptr};
     QStackedWidget* details_stack_ {nullptr};
     QLabel* detail_avatar_label_ {nullptr};

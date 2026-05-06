@@ -99,6 +99,7 @@ class BubbleDelegate : public QStyledItemDelegate {
 public:
     explicit BubbleDelegate(QObject* parent = nullptr);
     void setPalette(const DesktopBubblePalette& palette);
+    void setInteractionRows(int hovered_row, int pressed_row);
 
     void paint(QPainter* painter,
                const QStyleOptionViewItem& option,
@@ -128,6 +129,8 @@ private:
     QString formatTime(qint64 ms) const;
 
     DesktopBubblePalette palette_;
+    int hovered_row_ {-1};
+    int pressed_row_ {-1};
 };
 
 
@@ -153,13 +156,20 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
     void mouseDoubleClickEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private:
     void paintTelegramDoodleWallpaper(QPainter& painter, const QRect& rect) const;
+    void setInteractionRows(int hovered_row, int pressed_row);
     BubbleMessageModel* model_ {nullptr};
     BubbleDelegate* delegate_ {nullptr};
     DesktopBubblePalette palette_;
     QString empty_state_text_ {QStringLiteral("Select a chat to start messaging")};
+    int hovered_row_ {-1};
+    int pressed_row_ {-1};
 };
 
 }  // namespace telegram_like::client::app_desktop
