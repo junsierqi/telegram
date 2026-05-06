@@ -87,6 +87,9 @@ def main() -> int:
     print("[scenario] screenshot #4 hamburger account drawer")
     require("void show_account_drawer()" in main_cpp, "account drawer function missing")
     require('setObjectName("accountDrawer")' in main_cpp, "account drawer object name missing")
+    for token in ("kMainMenuWidth = 274", "kMainMenuCoverHeight = 134",
+                  "kDialogsRowHeight = 62", "kDialogsPhotoSize = 46"):
+        require(token in main_cpp, f"tdesktop source layout token missing: {token}")
     for label in ("My Profile", "Wallet", "New Group", "New Channel", "Contacts",
                   "Calls", "Saved Messages", "Settings", "Night Mode"):
         require(label in main_cpp, f"drawer row missing: {label}")

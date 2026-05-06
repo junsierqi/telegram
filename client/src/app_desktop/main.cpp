@@ -195,6 +195,22 @@ enum ChatListRole {
     ChatAvatarSeedRole,
 };
 
+namespace tdstyle {
+// Telegram Desktop style constants mirrored from D:\code\tdesktop\Telegram\SourceFiles.
+constexpr int kColumnMinimalWidthLeft = 260;   // window.style: columnMinimalWidthLeft
+constexpr int kColumnMinimalWidthMain = 380;   // window.style: columnMinimalWidthMain
+constexpr int kColumnMinimalWidthThird = 292;  // window.style: columnMinimalWidthThird
+constexpr int kColumnMaximalWidthThird = 392;  // window.style: columnMaximalWidthThird
+constexpr int kMainMenuWidth = 274;            // window.style: mainMenuWidth
+constexpr int kMainMenuCoverHeight = 134;      // window.style: mainMenuCoverHeight
+constexpr int kMainMenuUserpic = 48;           // window.style: mainMenuUserpic.photoSize
+constexpr int kDialogsRowHeight = 62;          // dialogs.style: dialogsRowHeight
+constexpr int kDialogsPhotoSize = 46;          // dialogs.style: defaultDialogRow.photoSize
+constexpr int kDialogsNameLeft = 68;           // dialogs.style: defaultDialogRow.nameLeft
+constexpr int kInfoTopBarHeight = 54;          // info.style: infoTopBarHeight
+constexpr int kInfoProfilePhotoSize = 80;      // info.style: infoProfileTopBarPhotoSize
+} // namespace tdstyle
+
 QColor chat_avatar_color_for(const QString& seed) {
     static const QColor palette[] = {
         QColor("#e17076"), QColor("#7bc862"), QColor("#65aadd"),
@@ -221,7 +237,7 @@ public:
     explicit ChatListDelegate(QObject* parent = nullptr) : QStyledItemDelegate(parent) {}
 
     QSize sizeHint(const QStyleOptionViewItem&, const QModelIndex&) const override {
-        return QSize(360, 82);
+        return QSize(tdstyle::kColumnMinimalWidthLeft, tdstyle::kDialogsRowHeight);
     }
 
     void paint(QPainter* painter, const QStyleOptionViewItem& option,
@@ -249,26 +265,27 @@ public:
         const int unread = index.data(ChatUnreadRole).toInt();
         const QString seed = index.data(ChatAvatarSeedRole).toString();
 
-        const QRect avatar(row.left() + 12, row.top() + 12, 58, 58);
+        const QRect avatar(row.left() + 10, row.top() + 8,
+                           tdstyle::kDialogsPhotoSize, tdstyle::kDialogsPhotoSize);
         painter->setBrush(chat_avatar_color_for(seed));
         painter->drawEllipse(avatar);
         painter->setPen(Qt::white);
         QFont avatarFont(QStringLiteral("Segoe UI"));
-        avatarFont.setPixelSize(22);
+        avatarFont.setPixelSize(18);
         avatarFont.setBold(true);
         painter->setFont(avatarFont);
         painter->drawText(avatar, Qt::AlignCenter, chat_initials_for(title.isEmpty() ? seed : title));
 
         const QColor titleColor = selected ? QColor("#ffffff") : QColor(t.text_primary);
         const QColor metaColor = selected ? QColor(230, 245, 255) : QColor(t.text_muted);
-        const int textLeft = avatar.right() + 16;
-        const int textRight = row.right() - 14;
+        const int textLeft = row.left() + tdstyle::kDialogsNameLeft;
+        const int textRight = row.right() - 10;
         QFont titleFont(QStringLiteral("Segoe UI"));
         titleFont.setPixelSize(15);
         titleFont.setBold(true);
         painter->setFont(titleFont);
         painter->setPen(titleColor);
-        painter->drawText(QRect(textLeft, row.top() + 13, textRight - textLeft - 70, 22),
+        painter->drawText(QRect(textLeft, row.top() + 8, textRight - textLeft - 66, 22),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(title, Qt::ElideRight, textRight - textLeft - 70));
 
@@ -276,19 +293,19 @@ public:
         metaFont.setPixelSize(14);
         painter->setFont(metaFont);
         painter->setPen(metaColor);
-        painter->drawText(QRect(textRight - 70, row.top() + 14, 70, 20),
+        painter->drawText(QRect(textRight - 66, row.top() + 8, 66, 20),
                           Qt::AlignRight | Qt::AlignVCenter, time);
-        painter->drawText(QRect(textLeft, row.top() + 43, textRight - textLeft - (unread > 0 ? 58 : 0), 24),
+        painter->drawText(QRect(textLeft, row.top() + 34, textRight - textLeft - (unread > 0 ? 52 : 0), 22),
                           Qt::AlignLeft | Qt::AlignVCenter,
                           painter->fontMetrics().elidedText(snippet, Qt::ElideRight,
-                                                            textRight - textLeft - (unread > 0 ? 56 : 0)));
+                                                            textRight - textLeft - (unread > 0 ? 50 : 0)));
         if (unread > 0) {
             const QString badge = unread > 999 ? QStringLiteral("999+") : QString::number(unread);
             const int badgeW = std::max(28, painter->fontMetrics().horizontalAdvance(badge) + 14);
-            QRect badgeRect(textRight - badgeW, row.top() + 42, badgeW, 24);
+            QRect badgeRect(textRight - badgeW, row.top() + 35, badgeW, 20);
             painter->setPen(Qt::NoPen);
             painter->setBrush(selected ? QColor(255, 255, 255, 70) : QColor("#b9bec4"));
-            painter->drawRoundedRect(badgeRect, 11, 11);
+            painter->drawRoundedRect(badgeRect, 10, 10);
             painter->setPen(Qt::white);
             painter->drawText(badgeRect, Qt::AlignCenter, badge);
         }
@@ -1127,7 +1144,7 @@ public:
 
         conversations_ = new QListWidget();
         conversations_->setObjectName("chatList");
-        conversations_->setMinimumWidth(360);
+        conversations_->setMinimumWidth(tdstyle::kColumnMinimalWidthLeft);
         conversations_->setSpacing(0);
         conversations_->setItemDelegate(new ChatListDelegate(conversations_));
         conversations_->setMouseTracking(true);
@@ -1319,6 +1336,7 @@ public:
         auto* sidebar = new QWidget();
         sidebar_panel_ = sidebar;
         sidebar->setObjectName("sidebar");
+        sidebar->setMinimumWidth(tdstyle::kColumnMinimalWidthLeft);
         auto* sidebar_layout = new QVBoxLayout(sidebar);
         sidebar_layout->setContentsMargins(0, 0, 0, 0);
         sidebar_layout->setSpacing(0);
@@ -1378,12 +1396,14 @@ public:
         // ---- center pane ----
         auto* center = new QWidget();
         center->setObjectName("centerPane");
+        center->setMinimumWidth(tdstyle::kColumnMinimalWidthMain);
         auto* center_layout = new QVBoxLayout(center);
         center_layout->setContentsMargins(0, 0, 0, 0);
         center_layout->setSpacing(0);
         // chat header
         auto* chat_header = new QWidget();
         chat_header->setObjectName("chatHeader");
+        chat_header->setMinimumHeight(tdstyle::kInfoTopBarHeight);
         auto* chat_header_layout = new QHBoxLayout(chat_header);
         chat_header_layout->setContentsMargins(16, 10, 16, 10);
         auto* header_titles = new QVBoxLayout();
@@ -1518,6 +1538,8 @@ public:
         details_panel_->setWidgetResizable(true);
         details_panel_->setFrameShape(QFrame::NoFrame);
         details_panel_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        details_panel_->setMinimumWidth(tdstyle::kColumnMinimalWidthThird);
+        details_panel_->setMaximumWidth(tdstyle::kColumnMaximalWidthThird);
         details_stack_ = new QStackedWidget();
         details_stack_->setObjectName("detailsStack");
         details_stack_->setMinimumWidth(0);
@@ -1534,7 +1556,7 @@ public:
         auto* detail_header = new QWidget();
         detail_header->setObjectName("profileDetailsHeader");
         auto* detail_header_layout = new QVBoxLayout(detail_header);
-        detail_header_layout->setContentsMargins(24, 22, 24, 24);
+        detail_header_layout->setContentsMargins(18, 10, 18, 16);
         detail_header_layout->setSpacing(10);
         auto* detail_close_row = new QHBoxLayout();
         detail_close_row->addStretch(1);
@@ -1547,8 +1569,8 @@ public:
 
         detail_avatar_label_ = new QLabel();
         detail_avatar_label_->setObjectName("detailAvatar");
-        detail_avatar_label_->setFixedSize(112, 112);
-        detail_avatar_label_->setMinimumSize(112, 112);
+        detail_avatar_label_->setFixedSize(tdstyle::kInfoProfilePhotoSize, tdstyle::kInfoProfilePhotoSize);
+        detail_avatar_label_->setMinimumSize(tdstyle::kInfoProfilePhotoSize, tdstyle::kInfoProfilePhotoSize);
         detail_avatar_label_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         detail_avatar_label_->setScaledContents(false);
         detail_avatar_label_->setAlignment(Qt::AlignCenter);
@@ -2228,7 +2250,6 @@ public:
         details_stack_->addWidget(details_inner);
         details_stack_->setCurrentIndex(0);
         details_panel_->setWidget(details_stack_);
-        details_panel_->setMinimumWidth(430);
         details_panel_->setVisible(false);
 
         // ---- compose splitter ----
@@ -2240,7 +2261,7 @@ public:
         splitter->setStretchFactor(0, 0);
         splitter->setStretchFactor(1, 1);
         splitter->setStretchFactor(2, 0);
-        splitter->setSizes({390, 550, 430});
+        splitter->setSizes({tdstyle::kMainMenuWidth, 826, tdstyle::kColumnMaximalWidthThird});
         splitter->setChildrenCollapsible(false);
 
         setCentralWidget(splitter);
@@ -2634,15 +2655,17 @@ private:
             QScrollArea#accountDrawerScroll { background:{surface}; border:none; }
             QScrollArea#accountDrawerScroll > QWidget > QWidget { background:{surface}; }
             QWidget#drawerHeader { background:{surface}; border-bottom:1px solid {border_subtle}; }
-            QLabel#drawerName { font-weight:700; font-size:20px; color:{text_primary}; background:transparent; }
-            QLabel#drawerStatus { color:{primary}; font-size:20px; background:transparent; }
-            QPushButton#drawerRow { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 40px; font-size:22px; color:{text_primary}; }
+            QLabel#drawerName { font-weight:700; font-size:14px; color:{text_primary}; background:transparent; }
+            QLabel#drawerStatus { color:{primary}; font-size:13px; background:transparent; }
+            QPushButton#drawerRow { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 20px; font-size:14px; font-weight:600; color:{text_primary}; }
             QPushButton#drawerRow:hover { background:{hover}; }
-            QPushButton#drawerSettingsButton { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 40px; font-size:22px; color:{text_primary}; min-height:74px; }
+            QPushButton#drawerSettingsButton { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 20px; font-size:14px; font-weight:600; color:{text_primary}; min-height:48px; }
             QPushButton#drawerSettingsButton:hover { background:{hover}; }
             QWidget#drawerNightRow { background:{surface}; border-top:1px solid {border_subtle}; }
-            QLabel#drawerNightText { color:{text_primary}; font-size:22px; background:transparent; }
-            QLabel#drawerFooter { color:{text_muted}; font-size:18px; background:transparent; }
+            QLabel#drawerNightText { color:{text_primary}; font-size:14px; font-weight:600; background:transparent; }
+            QLabel#drawerFooter { color:{text_muted}; font-size:12px; background:transparent; }
+        )");
+        css += QString::fromUtf8(R"(
             QWidget#loginChrome { background:{login_chrome_bg}; border-bottom:1px solid {login_chrome_border}; }
             QToolButton#loginBackButton { border:none; background:transparent; color:{login_back}; font-size:34px; padding:8px 16px; }
             QToolButton#loginBackButton:hover { background:{login_back_hover}; }
@@ -2995,9 +3018,10 @@ private:
         content_layout->setSpacing(0);
         auto* header = new QWidget();
         header->setObjectName("drawerHeader");
+        header->setFixedHeight(tdstyle::kMainMenuCoverHeight);
         auto* header_layout = new QVBoxLayout(header);
-        header_layout->setContentsMargins(32, 36, 28, 22);
-        header_layout->setSpacing(10);
+        header_layout->setContentsMargins(24, 20, 24, 16);
+        header_layout->setSpacing(4);
         const QString drawer_display = display_name_->text().trimmed().isEmpty()
             ? (args_.gui_smoke ? QStringLiteral("XZMQ") : user_->text().trimmed())
             : display_name_->text().trimmed();
@@ -3005,8 +3029,8 @@ private:
             ? std::string("xirmir")
             : (store_.current_user_id().empty() ? args_.user : store_.current_user_id());
         auto* avatar = new QLabel();
-        avatar->setFixedSize(96, 96);
-        avatar->setPixmap(avatar_pixmap_for(drawer_seed, drawer_display, 96));
+        avatar->setFixedSize(tdstyle::kMainMenuUserpic, tdstyle::kMainMenuUserpic);
+        avatar->setPixmap(avatar_pixmap_for(drawer_seed, drawer_display, tdstyle::kMainMenuUserpic));
         header_layout->addWidget(avatar);
         auto* name = new QLabel(drawer_display);
         name->setObjectName("drawerName");
@@ -3020,9 +3044,9 @@ private:
                            const char* slot = nullptr) -> QPushButton* {
             auto* btn = new QPushButton(text);
             btn->setObjectName("drawerRow");
-            btn->setIcon(line_icon(icon_key, 34));
-            btn->setIconSize(QSize(34, 34));
-            btn->setMinimumHeight(74);
+            btn->setIcon(line_icon(icon_key, 24));
+            btn->setIconSize(QSize(24, 24));
+            btn->setMinimumHeight(48);
             btn->setCursor(Qt::PointingHandCursor);
             content_layout->addWidget(btn);
             if (receiver != nullptr && slot != nullptr) {
@@ -3038,22 +3062,22 @@ private:
         wallet_row->setObjectName("drawerWalletRow");
         wallet_row->setStyleSheet(QStringLiteral("QWidget#drawerWalletRow { background:#ffffff; }"));
         auto* wallet_layout = new QHBoxLayout(wallet_row);
-        wallet_layout->setContentsMargins(48, 0, 40, 0);
-        wallet_layout->setSpacing(26);
+        wallet_layout->setContentsMargins(21, 0, 18, 0);
+        wallet_layout->setSpacing(16);
         auto* wallet_icon = new QLabel();
         wallet_icon->setStyleSheet(QStringLiteral("background:transparent;"));
-        wallet_icon->setPixmap(line_icon("wallet", 34).pixmap(34, 34));
+        wallet_icon->setPixmap(line_icon("wallet", 24).pixmap(24, 24));
         wallet_layout->addWidget(wallet_icon);
         auto* wallet_label = new QLabel("Wallet");
-        wallet_label->setStyleSheet(QStringLiteral("background:transparent; color:#0f1419; font-size:22px; font-weight:400;"));
+        wallet_label->setStyleSheet(QStringLiteral("background:transparent; color:#0f1419; font-size:14px; font-weight:600;"));
         wallet_layout->addWidget(wallet_label, 1);
         auto* wallet_badge = new QLabel("NEW");
         wallet_badge->setAlignment(Qt::AlignCenter);
-        wallet_badge->setFixedSize(62, 32);
+        wallet_badge->setFixedSize(42, 20);
         wallet_badge->setStyleSheet(QStringLiteral(
-            "background:#48aee6; color:#ffffff; border-radius:8px; font-size:14px; font-weight:700;"));
+            "background:#48aee6; color:#ffffff; border-radius:5px; font-size:10px; font-weight:700;"));
         wallet_layout->addWidget(wallet_badge);
-        wallet_row->setMinimumHeight(74);
+        wallet_row->setMinimumHeight(48);
         content_layout->addWidget(wallet_row);
         auto* group_row = add_row("group", "New Group");
         QObject::connect(group_row, &QPushButton::clicked, dlg, [this, dlg] {
@@ -3082,10 +3106,10 @@ private:
         auto* night_wrap = new QWidget();
         night_wrap->setObjectName("drawerNightRow");
         auto* night_layout = new QHBoxLayout(night_wrap);
-        night_layout->setContentsMargins(48, 10, 44, 10);
+        night_layout->setContentsMargins(21, 6, 18, 6);
         auto* night_icon = new QLabel();
         night_icon->setStyleSheet(QStringLiteral("background:transparent;"));
-        night_icon->setPixmap(line_icon("moon", 28).pixmap(28, 28));
+        night_icon->setPixmap(line_icon("moon", 24).pixmap(24, 24));
         night_layout->addWidget(night_icon);
         auto* night_text = new QLabel("Night Mode");
         night_text->setObjectName("drawerNightText");
@@ -3137,7 +3161,7 @@ private:
         const QPoint mainTopLeft = mapToGlobal(QPoint(0, 0));
         const int panelW = sidebar_panel_ != nullptr && sidebar_panel_->width() > 0
             ? sidebar_panel_->width()
-            : 390;
+            : tdstyle::kMainMenuWidth;
         const int panelH = height();
         const int x = offscreen ? mainTopLeft.x() - panelW : mainTopLeft.x();
         return QRect(x, mainTopLeft.y(), panelW, panelH);
@@ -4786,7 +4810,8 @@ protected:
             if (detail_media_section_ != nullptr) detail_media_section_->setVisible(false);
             if (detail_members_section_ != nullptr) detail_members_section_->setVisible(false);
             if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
-            detail_avatar_label_->setPixmap(avatar_pixmap_for("empty", "?", 112));
+            detail_avatar_label_->setPixmap(avatar_pixmap_for(
+                "empty", "?", tdstyle::kInfoProfilePhotoSize));
             detail_title_label_->setText("No chat selected");
             detail_subtitle_label_->setText("Pick a chat from the list");
             detail_link_label_->clear();
@@ -4812,7 +4837,8 @@ protected:
         const bool is_channel = !is_group && (title.contains("channel", Qt::CaseInsensitive)
             || title.contains("team", Qt::CaseInsensitive)
             || title.contains("proxy", Qt::CaseInsensitive));
-        detail_avatar_label_->setPixmap(avatar_pixmap_for(conv->conversation_id, title, 112));
+        detail_avatar_label_->setPixmap(avatar_pixmap_for(
+            conv->conversation_id, title, tdstyle::kInfoProfilePhotoSize));
         detail_title_label_->setText(title);
         detail_subtitle_label_->setText(reference_subtitle_for(*conv));
         set_detail_action_texts(is_channel, is_group);
@@ -5112,11 +5138,12 @@ protected:
                 pin_bar_->setStyleSheet(QString::fromUtf8(
                     "QPushButton#pinBar { text-align:left; padding:8px 22px; "
                     "border:none; border-left:4px solid %1; border-bottom:1px solid %2; "
-                    "background:%3; color:%1; font-size:20px; } "
-                    "QPushButton#pinBar:hover { background:%4; }")
+                    "background:%3; color:%4; font-size:20px; } "
+                    "QPushButton#pinBar:hover { background:%5; }")
                     .arg(QString::fromUtf8(t.primary),
                          QString::fromUtf8(t.border_subtle),
                          QString::fromUtf8(t.surface_muted),
+                         QString::fromUtf8(t.text_primary),
                          QString::fromUtf8(t.hover)));
                 pin_bar_->setVisible(true);
             }
@@ -5137,7 +5164,7 @@ protected:
         conversations_->clear();
         if (connecting_ || (has_remembered_login_ && !logged_in_)) {
             auto* item = new QListWidgetItem();
-            item->setSizeHint(QSize(360, 82));
+            item->setSizeHint(QSize(tdstyle::kColumnMinimalWidthLeft, tdstyle::kDialogsRowHeight));
             item->setData(ChatTitleRole, QStringLiteral("Loading..."));
             item->setData(ChatSnippetRole, QString());
             item->setData(ChatTimeRole, QString());
@@ -5148,7 +5175,7 @@ protected:
         }
         if (!logged_in_) {
             auto* item = new QListWidgetItem();
-            item->setSizeHint(QSize(360, 82));
+            item->setSizeHint(QSize(tdstyle::kColumnMinimalWidthLeft, tdstyle::kDialogsRowHeight));
             item->setData(ChatTitleRole, QStringLiteral("Log in to Telegram-like"));
             item->setData(ChatSnippetRole, QStringLiteral("Use the login prompt to connect"));
             item->setData(ChatTimeRole, QString());
@@ -5183,7 +5210,7 @@ protected:
                 snippet = QStringLiteral("last ") + qstr(conversation.last_message_id);
             }
             auto* item = new QListWidgetItem();
-            item->setSizeHint(QSize(360, 82));
+            item->setSizeHint(QSize(tdstyle::kColumnMinimalWidthLeft, tdstyle::kDialogsRowHeight));
             item->setData(ChatTitleRole, title);
             item->setData(ChatSnippetRole, snippet);
             item->setData(ChatTimeRole, time);

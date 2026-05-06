@@ -17,14 +17,17 @@ namespace telegram_like::client::app_desktop {
 
 namespace {
 
-constexpr int kRowMargin       = 12;    // vertical padding above + below the bubble row
-constexpr int kSideMargin      = 22;    // left/right edge of the row
-constexpr int kAvatarSize      = 38;
-constexpr int kAvatarBubbleGap = 10;
-constexpr int kBubblePaddingX  = 18;
-constexpr int kBubblePaddingY  = 14;
-constexpr int kBubbleRadius    = 16;
-constexpr int kMinBubbleWidth  = 150;
+// Telegram Desktop chat.style anchors:
+// msgMaxWidth 430, msgPhotoSize 33, msgPadding 11/8, msgMinWidth 160.
+constexpr int kRowMargin       = 6;
+constexpr int kSideMargin      = 16;
+constexpr int kAvatarSize      = 33;
+constexpr int kAvatarBubbleGap = 7;
+constexpr int kBubblePaddingX  = 11;
+constexpr int kBubblePaddingY  = 8;
+constexpr int kBubbleRadius    = 8;
+constexpr int kMinBubbleWidth  = 160;
+constexpr int kMaxBubbleWidth  = 430;
 constexpr double kMaxBubbleRatio = 0.82;
 
 // Stable 8-color avatar palette (matches the existing design::kAvatarPalette).
@@ -226,7 +229,7 @@ void BubbleDelegate::setPalette(const DesktopBubblePalette& palette) {
 int BubbleDelegate::maxBubbleContentWidth(int viewportWidth) const {
     int w = static_cast<int>(viewportWidth * kMaxBubbleRatio) - 2 * kSideMargin
             - kAvatarSize - kAvatarBubbleGap;
-    return std::max(kMinBubbleWidth, w);
+    return std::clamp(w, kMinBubbleWidth, kMaxBubbleWidth);
 }
 
 QString BubbleDelegate::tickGlyph(const QString& tick) const {
@@ -291,7 +294,7 @@ BubbleDelegate::LayoutMetrics BubbleDelegate::measure(const QModelIndex& index,
 
     QString shownText = deleted ? QStringLiteral("<deleted>") : text;
     if (edited) shownText += QStringLiteral(" (edited)");
-    QFontMetrics fm(base_font(18));
+    QFontMetrics fm(base_font(15));
     QRect textRect = fm.boundingRect(QRect(0, 0, contentMax, 1),
                                      Qt::TextWordWrap, shownText);
     m.textHeight = std::max(textRect.height(), fm.lineSpacing());
@@ -387,7 +390,7 @@ void BubbleDelegate::paint(QPainter* painter,
         painter->setBrush(avatar_color_for(avatarSeed));
         painter->drawEllipse(avatarRect);
         painter->setPen(Qt::white);
-        painter->setFont(base_font(15, true));
+        painter->setFont(base_font(13, true));
         painter->drawText(avatarRect, Qt::AlignCenter, initials_for(avatarSeed));
     }
 
@@ -445,7 +448,7 @@ void BubbleDelegate::paint(QPainter* painter,
     // Sender name (peer side, useful in groups; harmless in 1:1).
     if (layout.senderHeight > 0) {
         painter->setPen(accentText);
-        painter->setFont(base_font(14, true));
+        painter->setFont(base_font(12, true));
         QRect r(content.left(), y, content.width(), layout.senderHeight);
         painter->drawText(r, Qt::AlignLeft | Qt::AlignTop, sender);
         y += layout.senderHeight;
@@ -569,7 +572,7 @@ void BubbleDelegate::paint(QPainter* painter,
         if (systemMessage || pollMessage) shownText.clear();
         if (edited) shownText += QStringLiteral(" (edited)");
         painter->setPen(failed ? QColor("#0f1419") : primaryText);
-        painter->setFont(base_font(18));
+        painter->setFont(base_font(15));
         QRect r(content.left(), y, content.width(), layout.textHeight);
         painter->drawText(r, Qt::TextWordWrap, shownText);
         y += layout.textHeight;

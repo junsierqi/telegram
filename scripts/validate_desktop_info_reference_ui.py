@@ -31,6 +31,13 @@ def main() -> int:
 
     print("[scenario] Channel info panel reference capture")
     for token in (
+        "kColumnMinimalWidthThird = 292",
+        "kColumnMaximalWidthThird = 392",
+        "kInfoTopBarHeight = 54",
+        "kInfoProfilePhotoSize = 80",
+    ):
+        require(token in main_cpp, f"missing tdesktop info token: {token}")
+    for token in (
         "gui_smoke_reference_sync",
         "ref_channel_m_team",
         "M-Team",
