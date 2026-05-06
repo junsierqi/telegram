@@ -86,7 +86,9 @@ def main() -> int:
     print("[scenario] message hover/pressed rows are tracked by the view")
     for token in ("hovered_row_", "pressed_row_", "setInteractionRows",
                   "mouseMoveEvent(QMouseEvent* event)", "leaveEvent(QEvent* event)",
-                  "viewport()->update(visualRect(model_->index(row)))"):
+                  "viewport()->update(visualRect(model_->index(row)))",
+                  "actionButtonRect", "viewport()->setCursor(Qt::PointingHandCursor)",
+                  "messageContextMenuRequested("):
         assert token in h or token in cpp, f"missing hover interaction token: {token}"
     print("[ok ] BubbleListView owns Telegram-like row hover/pressed repaint state")
 

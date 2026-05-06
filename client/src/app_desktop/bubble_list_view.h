@@ -100,6 +100,8 @@ public:
     explicit BubbleDelegate(QObject* parent = nullptr);
     void setPalette(const DesktopBubblePalette& palette);
     void setInteractionRows(int hovered_row, int pressed_row);
+    QRect actionButtonRect(const QStyleOptionViewItem& option,
+                           const QModelIndex& index) const;
 
     void paint(QPainter* painter,
                const QStyleOptionViewItem& option,

@@ -231,6 +231,34 @@ void BubbleDelegate::setInteractionRows(int hovered_row, int pressed_row) {
     pressed_row_ = pressed_row;
 }
 
+QRect BubbleDelegate::actionButtonRect(const QStyleOptionViewItem& option,
+                                       const QModelIndex& index) const {
+    if (!index.isValid()) return {};
+    const bool outgoing = index.data(BubbleMessageModel::OutgoingRole).toBool();
+    const auto layout = measure(index, option.rect.width());
+    const QSize bubbleSize = layout.bubbleSize;
+    QRect bubbleRect;
+    if (outgoing) {
+        bubbleRect = QRect(option.rect.right() - kSideMargin - bubbleSize.width(),
+                           option.rect.top() + kRowMargin,
+                           bubbleSize.width(), bubbleSize.height());
+    } else {
+        const QRect avatarRect(option.rect.left() + kSideMargin,
+                               option.rect.top() + kRowMargin,
+                               kAvatarSize, kAvatarSize);
+        bubbleRect = QRect(avatarRect.right() + kAvatarBubbleGap,
+                           option.rect.top() + kRowMargin,
+                           bubbleSize.width(), bubbleSize.height());
+    }
+
+    const int actionSize = 28;
+    const int actionGap = 8;
+    const int actionX = outgoing
+        ? bubbleRect.left() - actionGap - actionSize
+        : bubbleRect.right() + actionGap;
+    return QRect(actionX, bubbleRect.top() + 4, actionSize, actionSize);
+}
+
 int BubbleDelegate::maxBubbleContentWidth(int viewportWidth) const {
     int w = static_cast<int>(viewportWidth * kMaxBubbleRatio) - 2 * kSideMargin
             - kAvatarSize - kAvatarBubbleGap;
@@ -454,12 +482,7 @@ void BubbleDelegate::paint(QPainter* painter,
     }
 
     if (hovered) {
-        const int actionSize = 28;
-        const int actionGap = 8;
-        const int actionX = outgoing
-            ? bubbleRect.left() - actionGap - actionSize
-            : bubbleRect.right() + actionGap;
-        QRect actionRect(actionX, bubbleRect.top() + 4, actionSize, actionSize);
+        QRect actionRect = actionButtonRect(option, index);
         if (option.rect.intersects(actionRect)) {
             QColor actionBg(palette_.peer_bubble);
             actionBg.setAlpha(210);
@@ -835,6 +858,18 @@ void BubbleListView::mouseDoubleClickEvent(QMouseEvent* event) {
 void BubbleListView::mouseMoveEvent(QMouseEvent* event) {
     const auto idx = indexAt(event->pos());
     setInteractionRows(idx.isValid() ? idx.row() : -1, pressed_row_);
+    bool overAction = false;
+    if (idx.isValid()) {
+        QStyleOptionViewItem option;
+        initViewItemOption(&option);
+        option.rect = visualRect(idx);
+        overAction = delegate_->actionButtonRect(option, idx).contains(event->pos());
+    }
+    if (overAction) {
+        viewport()->setCursor(Qt::PointingHandCursor);
+    } else {
+        viewport()->unsetCursor();
+    }
     QListView::mouseMoveEvent(event);
 }
 
@@ -849,12 +884,30 @@ void BubbleListView::mousePressEvent(QMouseEvent* event) {
 
 void BubbleListView::mouseReleaseEvent(QMouseEvent* event) {
     const auto idx = indexAt(event->pos());
+    if (event->button() == Qt::LeftButton && idx.isValid()) {
+        QStyleOptionViewItem option;
+        initViewItemOption(&option);
+        option.rect = visualRect(idx);
+        const QRect actionRect = delegate_->actionButtonRect(option, idx);
+        if (actionRect.contains(event->pos())) {
+            setInteractionRows(idx.row(), -1);
+            const auto id = model_->messageIdAt(idx.row());
+            if (!id.isEmpty()) {
+                emit messageContextMenuRequested(
+                    id,
+                    viewport()->mapToGlobal(actionRect.bottomRight()));
+            }
+            event->accept();
+            return;
+        }
+    }
     setInteractionRows(idx.isValid() ? idx.row() : -1, -1);
     QListView::mouseReleaseEvent(event);
 }
 
 void BubbleListView::leaveEvent(QEvent* event) {
     setInteractionRows(-1, -1);
+    viewport()->unsetCursor();
     QListView::leaveEvent(event);
 }
 

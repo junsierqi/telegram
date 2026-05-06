@@ -30,9 +30,10 @@ def main() -> int:
     require("chat_info_btn_" in m and 'setObjectName("chatInfoBtn")' in m,
             "chat overflow button missing")
     require('menu.setObjectName("topOverflowMenu")' in m, "top overflow menu objectName missing")
-    require('menu.addAction("Search"' in m, "overflow menu must expose Search")
-    require('menu.addAction("Chat info", [this] { show_chat_info_dialog(); });' in m,
+    require('menu.addAction(line_icon("search"' in m, "overflow menu must expose Search")
+    require('menu.addAction(line_icon("profile"' in m and '"Chat info"' in m,
             "overflow menu must expose Chat info")
+    require("configure_telegram_menu(&menu)" in m, "popup menus must use Telegram-like menu styling")
     require('"Hide Info" : "Show Info"' in m, "overflow menu must toggle info panel state")
     print("[ok ] top overflow menu is wired")
 
@@ -49,8 +50,9 @@ def main() -> int:
     require("emoji_panel_" in m and 'setObjectName("emojiStickerPanel")' in m,
             "emoji/sticker popup panel missing")
     require("show_emoji_sticker_panel()" in m, "emoji/sticker popup function missing")
-    for token in ("Emoji", "Stickers", "emojiGrid", "stickerGrid", "[sticker:wave]",
-                  "[sticker:party]", "stickerWaveAction", "composer_->insert(token)"):
+    for token in ("QWidgetAction", "Emoji", "Stickers", "emojiGrid", "stickerGrid",
+                  "[sticker:wave]", "[sticker:party]", "emojiGridButton",
+                  "composer_->insert(token)"):
         require(token in m, f"emoji/sticker panel missing {token}")
     print("[ok ] emoji/sticker panel inserts composer tokens")
 
@@ -62,8 +64,9 @@ def main() -> int:
     require("can_modify_message" in body.group("body") and "setEnabled(can_modify)" in body.group("body"),
             "message context menu must disable edit/delete for non-owned/deleted messages")
     for label in ("Reply", "Forward", "React", "Pin", "Unpin", "Edit", "Delete"):
-        require(f'menu.addAction("{label}"' in body.group("body"),
+        require(f'"{label}"' in body.group("body") and "line_icon(" in body.group("body"),
                 f"message context menu missing {label}")
+    require('"Quick reaction +1"' in body.group("body"), "message context menu must expose quick reaction action")
     print("[ok ] message context menu covers all message actions")
 
     print("\nAll 4/4 desktop popup-state scenarios passed.")

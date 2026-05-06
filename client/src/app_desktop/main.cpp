@@ -63,6 +63,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QWidgetAction>
 #include <QMoveEvent>
 #include <QMouseEvent>
 
@@ -488,6 +489,18 @@ QIcon line_icon(const QString& key, int side = 28, QColor color = QColor("#20212
         painter.drawLine(QPointF(side * 0.36, side * 0.22), QPointF(side * 0.64, side * 0.50));
         painter.drawLine(QPointF(side * 0.52, side * 0.62), QPointF(side * 0.76, side * 0.38));
         painter.drawLine(QPointF(cx, side * 0.58), QPointF(side * 0.28, side * 0.80));
+    } else if (key == "reply") {
+        painter.drawLine(QPointF(side * 0.24, cy), QPointF(side * 0.48, side * 0.30));
+        painter.drawLine(QPointF(side * 0.24, cy), QPointF(side * 0.48, side * 0.70));
+        painter.drawLine(QPointF(side * 0.28, cy), QPointF(side * 0.78, cy));
+    } else if (key == "forward") {
+        painter.drawLine(QPointF(side * 0.24, cy), QPointF(side * 0.72, cy));
+        painter.drawLine(QPointF(side * 0.52, side * 0.30), QPointF(side * 0.76, cy));
+        painter.drawLine(QPointF(side * 0.52, side * 0.70), QPointF(side * 0.76, cy));
+    } else if (key == "info") {
+        painter.drawEllipse(QPointF(cx, cy), side * 0.30, side * 0.30);
+        painter.drawLine(QPointF(cx, side * 0.46), QPointF(cx, side * 0.68));
+        painter.drawPoint(QPointF(cx, side * 0.34));
     } else if (key == "device" || key == "remote") {
         painter.drawRoundedRect(QRectF(side * 0.18, side * 0.24, side * 0.64, side * 0.42), side * 0.04, side * 0.04);
         painter.drawLine(QPointF(side * 0.40, side * 0.76), QPointF(side * 0.60, side * 0.76));
@@ -2396,13 +2409,16 @@ public:
         QObject::connect(chat_info_btn_, &QToolButton::clicked, [this] {
             QMenu menu(this);
             menu.setObjectName("topOverflowMenu");
-            menu.addAction("Search", [this] {
+            configure_telegram_menu(&menu);
+            menu.addAction(line_icon("search", 22, QColor("#7d8790")), "Search", [this] {
                 show_search_results_dialog(message_search_->text().trimmed());
             });
-            menu.addAction(details_panel_ != nullptr && details_panel_->isVisible()
+            menu.addAction(line_icon("info", 22, QColor("#7d8790")),
+                details_panel_ != nullptr && details_panel_->isVisible()
                 ? "Hide Info" : "Show Info", [this] { toggle_details_panel(); });
             menu.addSeparator();
-            menu.addAction("Chat info", [this] { show_chat_info_dialog(); });
+            menu.addAction(line_icon("profile", 22, QColor("#7d8790")), "Chat info",
+                           [this] { show_chat_info_dialog(); });
             menu.exec(chat_info_btn_->mapToGlobal(QPoint(0, chat_info_btn_->height())));
         });
 
@@ -2412,6 +2428,7 @@ public:
         QObject::connect(attach_, &QPushButton::clicked, [this] {
             QMenu menu(this);
             menu.setObjectName("attachmentMenu");
+            configure_telegram_menu(&menu);
             menu.addAction(line_icon("photo", 22, QColor("#7d8790")), "Photo or Video",
                            [this] { send_attachment(); });
             menu.addAction(line_icon("files", 22, QColor("#7d8790")), "File",
@@ -2449,15 +2466,28 @@ public:
                 message_action_id_->setText(message_id);
                 QMenu menu(this);
                 menu.setObjectName("messageContextMenu");
-                menu.addAction("Reply",   [this] { reply_message(); });
-                menu.addAction("Forward", [this] { forward_message(); });
-                menu.addAction("React",   [this] { react_to_message(); });
+                configure_telegram_menu(&menu);
+                menu.addAction(line_icon("reply", 22, QColor("#7d8790")), "Reply",
+                               [this] { reply_message(); });
+                menu.addAction(line_icon("forward", 22, QColor("#7d8790")), "Forward",
+                               [this] { forward_message(); });
+                menu.addAction(line_icon("smile", 22, QColor("#7d8790")), "React",
+                               [this] { react_to_message(); });
+                menu.addAction(line_icon("saved", 22, QColor("#7d8790")), "Quick reaction +1",
+                               [this] {
+                                   reaction_emoji_->setText(QStringLiteral("+1"));
+                                   react_to_message();
+                               });
                 menu.addSeparator();
-                menu.addAction("Pin",   [this] { pin_message(true);  });
-                menu.addAction("Unpin", [this] { pin_message(false); });
+                menu.addAction(line_icon("pin", 22, QColor("#7d8790")), "Pin",
+                               [this] { pin_message(true);  });
+                menu.addAction(line_icon("pin", 22, QColor("#7d8790")), "Unpin",
+                               [this] { pin_message(false); });
                 menu.addSeparator();
-                auto* edit_action = menu.addAction("Edit", [this] { edit_message_action(); });
-                auto* delete_action = menu.addAction("Delete", [this] { delete_message_action(); });
+                auto* edit_action = menu.addAction(line_icon("edit", 22, QColor("#7d8790")), "Edit",
+                                                   [this] { edit_message_action(); });
+                auto* delete_action = menu.addAction(line_icon("delete", 22, QColor("#d44d4d")), "Delete",
+                                                     [this] { delete_message_action(); });
                 const bool can_modify = can_modify_message(str(message_id));
                 edit_action->setEnabled(can_modify);
                 delete_action->setEnabled(can_modify);
@@ -2558,29 +2588,81 @@ private:
         if (emoji_panel_ == nullptr || composer_ == nullptr) return;
         QMenu panel(this);
         panel.setObjectName("emojiStickerPanel");
+        configure_telegram_menu(&panel);
         auto insert_text = [this](const QString& token) {
             composer_->insert(token);
             composer_->setFocus();
         };
-        auto* emoji_section = panel.addSection("Emoji");
-        emoji_section->setObjectName("emojiSection");
-        emoji_section->setData(QStringLiteral("emojiGrid"));
-        panel.addAction("👍  Like", [insert_text] { insert_text(QStringLiteral("+1")); });
-        panel.addAction("❤️  Heart", [insert_text] { insert_text(QStringLiteral("<3")); });
-        panel.addAction("😂  Laugh", [insert_text] { insert_text(QStringLiteral(":joy:")); });
-        panel.addAction("🔥  Fire", [insert_text] { insert_text(QStringLiteral(":fire:")); });
-        panel.addAction("🎉  Party", [insert_text] { insert_text(QStringLiteral(":party:")); });
+        auto add_grid = [&](const QString& objectName,
+                            const QString& title,
+                            const QVector<QPair<QString, QString>>& entries) {
+            auto* action = new QWidgetAction(&panel);
+            auto* wrap = new QWidget();
+            wrap->setObjectName(objectName);
+            auto* root = new QVBoxLayout(wrap);
+            root->setContentsMargins(12, 10, 12, 10);
+            root->setSpacing(8);
+            auto* label = new QLabel(title);
+            label->setObjectName("emojiPanelTitle");
+            root->addWidget(label);
+            auto* grid = new QGridLayout();
+            grid->setContentsMargins(0, 0, 0, 0);
+            grid->setHorizontalSpacing(6);
+            grid->setVerticalSpacing(6);
+            int i = 0;
+            for (const auto& entry : entries) {
+                auto* btn = new QPushButton(entry.first);
+                btn->setObjectName("emojiGridButton");
+                btn->setFixedSize(42, 36);
+                btn->setCursor(Qt::PointingHandCursor);
+                QObject::connect(btn, &QPushButton::clicked, &panel, [&, token = entry.second] {
+                    insert_text(token);
+                    panel.close();
+                });
+                grid->addWidget(btn, i / 5, i % 5);
+                ++i;
+            }
+            root->addLayout(grid);
+            action->setDefaultWidget(wrap);
+            panel.addAction(action);
+        };
+        add_grid("emojiGrid", "Emoji", {
+            {QString::fromUtf8("\xf0\x9f\x91\x8d"), QStringLiteral("+1")},
+            {QString::fromUtf8("\xe2\x9d\xa4"), QStringLiteral("<3")},
+            {QString::fromUtf8("\xf0\x9f\x98\x82"), QStringLiteral(":joy:")},
+            {QString::fromUtf8("\xf0\x9f\x94\xa5"), QStringLiteral(":fire:")},
+            {QString::fromUtf8("\xf0\x9f\x8e\x89"), QStringLiteral(":party:")},
+        });
         panel.addSeparator();
-        auto* sticker_section = panel.addSection("Stickers");
-        sticker_section->setObjectName("stickerSection");
-        sticker_section->setData(QStringLiteral("stickerGrid"));
-        auto* wave = panel.addAction("Telegram Wave", [insert_text] { insert_text(QStringLiteral("[sticker:wave]")); });
-        wave->setObjectName("stickerWaveAction");
-        auto* ok = panel.addAction("OK Hand", [insert_text] { insert_text(QStringLiteral("[sticker:ok]")); });
-        ok->setObjectName("stickerOkAction");
-        auto* party = panel.addAction("Party", [insert_text] { insert_text(QStringLiteral("[sticker:party]")); });
-        party->setObjectName("stickerPartyAction");
+        add_grid("stickerGrid", "Stickers", {
+            {QStringLiteral("Wave"), QStringLiteral("[sticker:wave]")},
+            {QStringLiteral("OK"), QStringLiteral("[sticker:ok]")},
+            {QStringLiteral("Party"), QStringLiteral("[sticker:party]")},
+        });
         panel.exec(emoji_panel_->mapToGlobal(QPoint(0, -panel.sizeHint().height())));
+    }
+
+    void configure_telegram_menu(QMenu* menu) const {
+        if (menu == nullptr) return;
+        const auto& t = telegram_like::client::app_desktop::design::active_theme();
+        menu->setAttribute(Qt::WA_TranslucentBackground, true);
+        menu->setWindowFlag(Qt::NoDropShadowWindowHint, false);
+        menu->setStyleSheet(QString::fromUtf8(R"(
+            QMenu { background:%1; color:%2; border:1px solid %3; border-radius:8px; padding:7px; }
+            QMenu::item { min-height:28px; padding:7px 32px 7px 34px; border-radius:6px; }
+            QMenu::item:selected { background:%4; }
+            QMenu::separator { height:1px; background:%5; margin:6px 8px; }
+            QLabel#emojiPanelTitle { color:%6; font-size:12px; font-weight:600; background:transparent; }
+            QWidget#emojiGrid, QWidget#stickerGrid { background:%1; }
+            QPushButton#emojiGridButton { border:none; border-radius:8px; background:transparent; color:%2; font-size:16px; padding:0; }
+            QPushButton#emojiGridButton:hover { background:%4; }
+        )")
+            .arg(QString::fromUtf8(t.surface),
+                 QString::fromUtf8(t.text_primary),
+                 QString::fromUtf8(t.border),
+                 QString::fromUtf8(t.hover),
+                 QString::fromUtf8(t.border_subtle),
+                 QString::fromUtf8(t.text_muted)));
     }
 
     static QString telegram_stylesheet() {
@@ -3188,7 +3270,8 @@ private:
         footer->setObjectName("drawerFooter");
         footer->setTextFormat(Qt::RichText);
         footer->setContentsMargins(32, 14, 32, 30);
-        content_layout->addWidget(footer);
+        footer->setMinimumHeight(76);
+        root->addWidget(footer);
         layer->show();
         drawer->show();
         layer->raise();
