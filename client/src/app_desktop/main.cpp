@@ -473,6 +473,132 @@ QIcon line_icon(const QString& key, int side = 28, QColor color = QColor("#20212
     return QIcon(pixmap);
 }
 
+QPixmap login_welcome_hero_pixmap(int width, int height) {
+    QPixmap pixmap(width, height);
+    pixmap.fill(QColor("#1d9bd8"));
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(99, 193, 241, 150));
+    painter.drawEllipse(QRectF(-90, height - 88, 210, 170));
+    painter.drawEllipse(QRectF(70, height - 72, 150, 118));
+    painter.drawEllipse(QRectF(width - 160, height - 92, 210, 170));
+    painter.drawEllipse(QRectF(width - 280, height - 62, 160, 120));
+
+    painter.setPen(QPen(QColor(112, 204, 244, 130), 8, Qt::SolidLine, Qt::RoundCap));
+    painter.drawLine(QPointF(width / 2.0 - 122, height / 2.0 + 42),
+                     QPointF(width / 2.0 + 58, height / 2.0 - 96));
+    painter.drawLine(QPointF(width / 2.0 + 68, height / 2.0 + 84),
+                     QPointF(width / 2.0 + 190, height / 2.0 - 22));
+
+    QPainterPath plane;
+    const QPointF center(width / 2.0, height / 2.0 - 34);
+    plane.moveTo(center.x() - 62, center.y() - 5);
+    plane.lineTo(center.x() + 118, center.y() - 78);
+    plane.quadTo(center.x() + 136, center.y() - 84, center.x() + 130, center.y() - 60);
+    plane.lineTo(center.x() + 92, center.y() + 76);
+    plane.quadTo(center.x() + 84, center.y() + 96, center.x() + 66, center.y() + 78);
+    plane.lineTo(center.x() + 20, center.y() + 28);
+    plane.lineTo(center.x() - 4, center.y() + 74);
+    plane.quadTo(center.x() - 16, center.y() + 90, center.x() - 22, center.y() + 62);
+    plane.lineTo(center.x() - 40, center.y() + 6);
+    plane.lineTo(center.x() - 64, center.y() + 0);
+    plane.quadTo(center.x() - 86, center.y() - 5, center.x() - 62, center.y() - 5);
+    painter.setBrush(Qt::white);
+    painter.setPen(Qt::NoPen);
+    painter.drawPath(plane);
+
+    QPainterPath fold;
+    fold.moveTo(center.x() + 20, center.y() + 28);
+    fold.lineTo(center.x() + 94, center.y() - 42);
+    fold.lineTo(center.x() - 4, center.y() + 74);
+    fold.closeSubpath();
+    painter.setBrush(QColor("#c7daea"));
+    painter.drawPath(fold);
+
+    const QColor icon_color(166, 222, 249, 145);
+    const std::vector<std::pair<QString, QPoint>> icons {
+        {QStringLiteral("voice"), QPoint(28, height - 150)},
+        {QStringLiteral("music"), QPoint(128, height - 126)},
+        {QStringLiteral("photo"), QPoint(260, height - 86)},
+        {QStringLiteral("chat"), QPoint(width - 310, height - 76)},
+        {QStringLiteral("files"), QPoint(width - 230, height - 150)},
+        {QStringLiteral("lock"), QPoint(width - 76, height - 220)},
+    };
+    for (const auto& [key, pos] : icons) {
+        const QPixmap icon = line_icon(key, 62, icon_color).pixmap(62, 62);
+        painter.drawPixmap(pos, icon);
+    }
+    return pixmap;
+}
+
+QPixmap login_qr_pixmap(int side) {
+    QPixmap pixmap(side, side);
+    pixmap.fill(Qt::white);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing, false);
+
+    constexpr int cells = 29;
+    const int margin = side / 24;
+    const int cell = (side - margin * 2) / cells;
+    const int qr_side = cell * cells;
+    const int origin = (side - qr_side) / 2;
+    painter.fillRect(QRect(origin, origin, qr_side, qr_side), Qt::white);
+
+    auto fill_cell = [&](int x, int y, int w = 1, int h = 1) {
+        painter.fillRect(QRect(origin + x * cell, origin + y * cell,
+                               w * cell, h * cell), Qt::black);
+    };
+    auto finder = [&](int x, int y) {
+        fill_cell(x, y, 7, 1);
+        fill_cell(x, y + 6, 7, 1);
+        fill_cell(x, y, 1, 7);
+        fill_cell(x + 6, y, 1, 7);
+        fill_cell(x + 2, y + 2, 3, 3);
+    };
+    finder(0, 0);
+    finder(22, 0);
+    finder(0, 22);
+
+    for (int y = 0; y < cells; ++y) {
+        for (int x = 0; x < cells; ++x) {
+            const bool in_finder =
+                (x < 8 && y < 8)
+                || (x >= 21 && y < 8)
+                || (x < 8 && y >= 21);
+            const bool in_center = x >= 10 && x <= 18 && y >= 10 && y <= 18;
+            if (in_finder || in_center) continue;
+            const int v = (x * 17 + y * 31 + (x * y) * 7 + ((x + y) % 5) * 11) % 13;
+            if (v < 6) fill_cell(x, y);
+        }
+    }
+
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    const int logo_side = side / 4;
+    const QRect logo((side - logo_side) / 2, (side - logo_side) / 2, logo_side, logo_side);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor("#39a9e8"));
+    painter.drawEllipse(logo);
+
+    QPainterPath plane;
+    const QPointF c = logo.center();
+    plane.moveTo(c.x() - logo_side * 0.25, c.y() - logo_side * 0.03);
+    plane.lineTo(c.x() + logo_side * 0.30, c.y() - logo_side * 0.24);
+    plane.quadTo(c.x() + logo_side * 0.39, c.y() - logo_side * 0.27,
+                 c.x() + logo_side * 0.34, c.y() - logo_side * 0.14);
+    plane.lineTo(c.x() + logo_side * 0.16, c.y() + logo_side * 0.32);
+    plane.quadTo(c.x() + logo_side * 0.11, c.y() + logo_side * 0.42,
+                 c.x() + logo_side * 0.02, c.y() + logo_side * 0.31);
+    plane.lineTo(c.x() - logo_side * 0.10, c.y() + logo_side * 0.12);
+    plane.lineTo(c.x() - logo_side * 0.25, c.y() + logo_side * 0.04);
+    plane.quadTo(c.x() - logo_side * 0.38, c.y() - logo_side * 0.03,
+                 c.x() - logo_side * 0.25, c.y() - logo_side * 0.03);
+    painter.setBrush(Qt::white);
+    painter.drawPath(plane);
+    return pixmap;
+}
+
 int run_two_client_flow_smoke(const Args& args) {
     ControlPlaneClient alice;
     ControlPlaneClient bob;
@@ -2516,16 +2642,16 @@ private:
             QToolButton#loginBackButton:hover { background:{login_back_hover}; }
             QPushButton#loginSettingsButton { background:transparent; border:none; color:{primary}; font-size:18px; font-weight:600; padding:10px 18px; }
             QPushButton#loginSettingsButton:hover { background:{primary_ghost_hover}; }
-            QWidget#loginHeroBanner { background:qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 {login_hero_start}, stop:1 {login_hero_end}); }
-            QLabel#loginHeroPlane { color:#ffffff; font-size:92px; font-weight:700; }
-            QLabel#loginHeroHint { color:rgba(255,255,255,0.42); font-size:34px; font-weight:700; }
+            QWidget#loginHeroBanner { background:{login_hero_start}; border:none; }
+            QLabel#loginHeroPlane { color:#ffffff; font-size:118px; font-weight:700; background:transparent; }
+            QLabel#loginHeroHint { color:rgba(255,255,255,0.36); font-size:36px; font-weight:700; background:transparent; }
             QLabel#loginLogo { background:{primary}; border-radius:66px; }
             QLabel#loginTitle { color:{text_primary}; font-size:28px; font-weight:700; }
             QLabel#loginSubtitle, QLabel#loginStatus { color:{text_muted}; font-size:18px; }
             QTabWidget#loginModeTabs::pane { border:none; padding:0; }
             QTabWidget#loginModeTabs QTabBar::tab { max-height:0px; padding:0; margin:0; border:none; }
             QLabel#loginWelcomeCopy { color:{text_muted}; font-size:22px; line-height:150%; }
-            QLabel#loginQrPlaceholder { background:{surface}; color:{primary}; border:10px solid {qr_border}; border-radius:18px; font-size:42px; font-weight:700; }
+            QLabel#loginQrPlaceholder { background:{surface}; border:none; }
             QLabel#loginStepText { color:{text_primary}; font-size:20px; }
             QWidget#loginAdvancedFields { background:{surface}; border-top:1px solid {border_subtle}; }
             QLineEdit#loginInput { background:{surface}; border:none; border-bottom:1px solid {border}; border-radius:0; padding:10px 4px; font-size:15px; }
@@ -3044,21 +3170,13 @@ protected:
         auto* welcome_layout = new QVBoxLayout(welcome_page);
         welcome_layout->setContentsMargins(0, 0, 0, 0);
         welcome_layout->setSpacing(0);
-        auto* hero = new QWidget();
+        auto* hero = new QLabel();
         hero->setObjectName("loginHeroBanner");
-        hero->setFixedHeight(285);
-        auto* hero_layout = new QVBoxLayout(hero);
-        hero_layout->setContentsMargins(0, 26, 0, 0);
-        auto* hero_plane = new QLabel("✈");
-        hero_plane->setObjectName("loginHeroPlane");
-        hero_plane->setAlignment(Qt::AlignCenter);
-        hero_layout->addWidget(hero_plane);
-        auto* hero_hint = new QLabel("♪   ☁      ◇      ▣");
-        hero_hint->setObjectName("loginHeroHint");
-        hero_hint->setAlignment(Qt::AlignCenter);
-        hero_layout->addWidget(hero_hint);
+        hero->setFixedHeight(324);
+        hero->setPixmap(login_welcome_hero_pixmap(980, 324));
+        hero->setScaledContents(true);
         welcome_layout->addWidget(hero);
-        welcome_layout->addSpacing(58);
+        welcome_layout->addSpacing(70);
         auto* title = new QLabel("Telegram Desktop");
         title->setObjectName("loginTitle");
         title->setAlignment(Qt::AlignCenter);
@@ -3072,27 +3190,37 @@ protected:
         auto* phone_page = new QWidget();
         phone_page->setObjectName("loginPhonePage");
         auto* phone_layout = new QVBoxLayout(phone_page);
-        phone_layout->setContentsMargins(250, 86, 250, 0);
-        phone_layout->setSpacing(22);
+        phone_layout->setContentsMargins(250, 92, 250, 0);
+        phone_layout->setSpacing(18);
         auto* phone_title = new QLabel("Your Phone Number");
         phone_title->setObjectName("loginTitle");
         phone_layout->addWidget(phone_title);
         auto* phone_copy = new QLabel("Please confirm your country code\nand enter your phone number.");
         phone_copy->setObjectName("loginSubtitle");
         phone_layout->addWidget(phone_copy);
-        phone_layout->addSpacing(42);
+        phone_layout->addSpacing(48);
         auto* country = new QLineEdit("USA");
         country->setObjectName("loginPhoneInput");
         country->setReadOnly(true);
         phone_layout->addWidget(country);
+        auto* phone_number_row = new QHBoxLayout();
+        phone_number_row->setContentsMargins(0, 0, 0, 0);
+        phone_number_row->setSpacing(22);
+        auto* phone_code = new QLineEdit("+1");
+        phone_code->setObjectName("loginPhoneCodeInput");
+        phone_code->setFixedWidth(128);
+        phone_code->setReadOnly(true);
+        phone_number_row->addWidget(phone_code);
         auto* phone_input = new QLineEdit();
         phone_input->setObjectName("loginPhoneInput");
-        phone_input->setPlaceholderText("+1        --- --- ----");
-        phone_layout->addWidget(phone_input);
-        auto* phone_code = new QLineEdit();
-        phone_code->setObjectName("loginPhoneCodeInput");
-        phone_code->setPlaceholderText("Code");
-        phone_layout->addWidget(phone_code);
+        phone_input->setPlaceholderText("--- --- ----");
+        phone_number_row->addWidget(phone_input, 1);
+        phone_layout->addLayout(phone_number_row);
+        phone_layout->addSpacing(64);
+        auto* phone_next = new QPushButton("Next");
+        phone_next->setObjectName("primary");
+        phone_next->setFixedWidth(430);
+        phone_layout->addWidget(phone_next, 0, Qt::AlignHCenter);
         phone_layout->addStretch(1);
         auto* phone_to_qr = new QPushButton("Quick log in using QR code");
         phone_to_qr->setObjectName("ghost");
@@ -3100,12 +3228,13 @@ protected:
         auto* qr_page = new QWidget();
         qr_page->setObjectName("loginQrPage");
         auto* qr_layout = new QVBoxLayout(qr_page);
-        qr_layout->setContentsMargins(0, 78, 0, 0);
+        qr_layout->setContentsMargins(0, 86, 0, 0);
         qr_layout->setSpacing(18);
-        auto* qr_box = new QLabel("QR");
+        auto* qr_box = new QLabel();
         qr_box->setObjectName("loginQrPlaceholder");
         qr_box->setAlignment(Qt::AlignCenter);
-        qr_box->setFixedSize(230, 230);
+        qr_box->setFixedSize(250, 250);
+        qr_box->setPixmap(login_qr_pixmap(250));
         qr_layout->addWidget(qr_box, 0, Qt::AlignHCenter);
         auto* qr_title = new QLabel("Scan From Mobile Telegram");
         qr_title->setObjectName("loginTitle");
@@ -3181,20 +3310,23 @@ protected:
             host_->setText(host->text().trimmed());
             port_->setValue(port->value());
         };
-        QObject::connect(login, &QPushButton::clicked, this, [this, dlg, status, apply_fields] {
+        QObject::connect(login, &QPushButton::clicked, this, [this, dlg, status, apply_fields, phone_next] {
             apply_fields();
             status->setText("Connecting to server...");
             if (login_submit_) login_submit_->setEnabled(false);
             if (login_register_) login_register_->setEnabled(false);
+            if (phone_next != nullptr) phone_next->setEnabled(false);
             connect_and_sync();
         });
-        QObject::connect(register_btn, &QPushButton::clicked, this, [this, dlg, status, apply_fields] {
+        QObject::connect(register_btn, &QPushButton::clicked, this, [this, dlg, status, apply_fields, phone_next] {
             apply_fields();
             status->setText("Creating account on server...");
             if (login_submit_) login_submit_->setEnabled(false);
             if (login_register_) login_register_->setEnabled(false);
+            if (phone_next != nullptr) phone_next->setEnabled(false);
             register_and_sync();
         });
+        QObject::connect(phone_next, &QPushButton::clicked, login, &QPushButton::click);
         QObject::connect(dlg, &QDialog::destroyed, this, [this] {
             login_dialog_.clear();
             login_status_.clear();
@@ -3213,6 +3345,15 @@ protected:
         QObject::connect(phone_to_qr, &QPushButton::clicked, login_modes, [login_modes] {
             login_modes->setCurrentIndex(2);
         });
+        auto sync_login_chrome = [chrome, login_modes, login, register_btn] {
+            chrome->setVisible(login_modes->currentIndex() != 0);
+            login->setVisible(login_modes->currentIndex() == 0);
+            register_btn->setVisible(login_modes->currentIndex() == 0);
+        };
+        QObject::connect(login_modes, &QTabWidget::currentChanged, dlg, [sync_login_chrome](int) {
+            sync_login_chrome();
+        });
+        sync_login_chrome();
         QObject::connect(pass, &QLineEdit::returnPressed, login, &QPushButton::click);
         dlg->show();
         login->setFocus();
