@@ -289,6 +289,7 @@ CI runs the same sweep + 6 build/verify jobs on every push.
 ```bash
 python scripts/_sweep_validators.py             # full local sweep
 python scripts/validate_desktop_smoke.py        # Qt desktop smoke (Windows)
+python scripts/validate_desktop_button_responses.py  # visible desktop button responses
 python scripts/validate_desktop_service_interactions.py  # service/bot desktop UI wiring
 python scripts/validate_service_commands.py     # service/bot command RPC behavior
 python scripts/validate_call_session.py         # voice/video FSM + AEAD audio frames

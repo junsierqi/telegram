@@ -59,10 +59,16 @@ def main() -> int:
         'setObjectName("drawerArchiveRow")',
         "archive_row->setVisible(!args_.gui_smoke)",
         "set_sidebar_folder(SidebarFolder::Archived)",
+        "show_account_export_summary",
+        'prefs.setValue(QStringLiteral("appearance/interface_scale"), 100)',
+        'open_settings_page_by_name(QStringLiteral("Calls"))',
+        'open_settings_page_by_name(QStringLiteral("Account"))',
         'setObjectName("drawerNightSwitch")',
         'QSettings prefs',
         "show_profile_reference_dialog();",
         "show_login_dialog();",
+        "content_layout->addWidget(footer)",
+        "footer->setMinimumHeight(std::max(76, docked.height() - 810))",
     ):
         require(token in main_cpp, f"missing drawer behavior token: {token}")
     print("[ok ] drawer routes account/profile/archive/night behavior")

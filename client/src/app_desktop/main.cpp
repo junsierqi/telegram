@@ -51,6 +51,7 @@
 #include <QPointer>
 #include <QRadioButton>
 #include <QScrollArea>
+#include <QScreen>
 #include <QSettings>
 #include <QSizePolicy>
 #include <QSlider>
@@ -68,6 +69,7 @@
 #include <QToolButton>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <QWindow>
 #include <QWidget>
 #include <QWidgetAction>
 #include <QMoveEvent>
@@ -1905,6 +1907,8 @@ public:
         detail_members_list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         members_layout->addWidget(detail_members_list_);
         info_layout->addWidget(members_section);
+        QObject::connect(detail_members_list_, &QListWidget::itemDoubleClicked,
+                         [this](QListWidgetItem* item) { handle_detail_member_activated(item); });
         QObject::connect(member_search, &QLineEdit::textChanged, this, [this] {
             update_details_profile_panel();
         });
@@ -1920,6 +1924,15 @@ public:
         report_btn->setObjectName("dangerAction");
         danger_layout->addWidget(leave_btn);
         danger_layout->addWidget(report_btn);
+        QObject::connect(leave_btn, &QPushButton::clicked, this, [this] {
+            handle_detail_action(2);
+        });
+        QObject::connect(report_btn, &QPushButton::clicked, this, [this] {
+            const auto conversation = store_.selected_conversation_id();
+            if (conversation.empty()) return;
+            append_line("[system] report selected chat: " + qstr(conversation));
+            statusBar()->showMessage("Report queued for selected chat", 2200);
+        });
         info_layout->addWidget(detail_danger);
         info_layout->addStretch(1);
         details_stack_->addWidget(info_page);
@@ -2481,7 +2494,7 @@ public:
         QObject::connect(settings_close, &QToolButton::clicked,
                          [this] { if (details_stack_ != nullptr) details_stack_->setCurrentIndex(0); });
         QObject::connect(detail_close, &QToolButton::clicked,
-                         [this] { if (details_panel_ != nullptr) details_panel_->setVisible(false); });
+                         [this] { set_details_panel_visible(false); });
         settings_nav_->setCurrentRow(0);
 
         details_stack_->addWidget(details_inner);
@@ -3062,8 +3075,10 @@ private:
             QPushButton#drawerSettingsButton:hover { background:{hover}; }
             QWidget#drawerNightRow { background:{surface}; border-top:1px solid {border_subtle}; }
             QLabel#drawerNightText { color:{text_primary}; font-size:14px; font-weight:600; background:transparent; }
-            QPushButton#drawerNightAnimatedToggle { border:none; border-radius:16px; background:{text_muted}; color:{surface}; font-size:10px; font-weight:700; }
-            QPushButton#drawerNightAnimatedToggle:checked { background:{primary}; }
+            QCheckBox#drawerNightSwitch { background:transparent; spacing:0; }
+            QCheckBox#drawerNightSwitch::indicator { width:58px; height:32px; border-radius:16px; background:#8b98a3; }
+            QCheckBox#drawerNightSwitch::indicator:checked { background:{primary}; }
+            QPushButton#drawerNightAnimatedToggle { border:none; border-radius:16px; background:transparent; }
             QLabel#drawerFooter { color:{text_muted}; font-size:12px; background:transparent; }
         )");
         css += QString::fromUtf8(R"(
@@ -3551,7 +3566,15 @@ private:
             "background:#48aee6; color:#ffffff; border-radius:5px; font-size:10px; font-weight:700;"));
         wallet_layout->addWidget(wallet_badge);
         wallet_row->setMinimumHeight(48);
+        wallet_row->setCursor(Qt::PointingHandCursor);
         content_layout->addWidget(wallet_row);
+        wallet_row->setProperty("drawerWalletAction", true);
+        wallet_row->installEventFilter(this);
+        for (auto* child : { wallet_icon, wallet_label, wallet_badge }) {
+            child->setCursor(Qt::PointingHandCursor);
+            child->setProperty("drawerWalletAction", true);
+            child->installEventFilter(this);
+        }
         auto* group_row = add_row("group", "New Group");
         QObject::connect(group_row, &QPushButton::clicked, drawer, [this, close_drawer] {
             close_drawer();
@@ -3570,12 +3593,12 @@ private:
         auto* calls_row = add_row("call", "Calls");
         QObject::connect(calls_row, &QPushButton::clicked, drawer, [this, close_drawer] {
             close_drawer();
-            show_settings_dialog();
-            statusBar()->showMessage("Calls are available from Settings", 2200);
+            open_settings_page_by_name(QStringLiteral("Calls"));
         });
         auto* saved_row = add_row("saved", "Saved Messages");
         QObject::connect(saved_row, &QPushButton::clicked, drawer, [this, close_drawer] {
             close_drawer();
+            open_settings_page_by_name(QStringLiteral("Account"));
             statusBar()->showMessage("Saved Messages uses the current account storage in this build", 2600);
         });
         const auto folder_counts = sidebar_folder_counts();
@@ -3598,10 +3621,14 @@ private:
         });
         QObject::connect(cloud_row, &QPushButton::clicked, drawer, [this, close_drawer] {
             close_drawer();
-            statusBar()->showMessage("Cloud Storage is backed by account export and attachments", 2600);
+            show_account_export_summary();
         });
-        QObject::connect(reset_scale_row, &QPushButton::clicked, drawer, [this] {
-            statusBar()->showMessage("Scale reset uses the current Qt platform scale", 2600);
+        QObject::connect(reset_scale_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            QSettings prefs;
+            prefs.setValue(QStringLiteral("appearance/interface_scale"), 100);
+            open_settings_page_by_name(QStringLiteral("Appearance"));
+            statusBar()->showMessage("Interface scale reset to 100%", 2600);
         });
         auto* settings = add_row("settings", "Settings");
         settings->setObjectName("drawerSettingsButton");
@@ -3625,12 +3652,12 @@ private:
         animated_night->setObjectName("drawerNightAnimatedToggle");
         animated_night->setCheckable(true);
         animated_night->setChecked(telegram_like::client::app_desktop::design::is_dark_theme());
-        animated_night->setText(animated_night->isChecked() ? "ON" : "OFF");
+        animated_night->setText(QString());
         animated_night->setFixedSize(58, 32);
         animated_night->setCursor(Qt::PointingHandCursor);
         auto* night = new QCheckBox();
         night->setObjectName("drawerNightSwitch");
-        night->setVisible(false);
+        night->setCursor(Qt::PointingHandCursor);
         const auto& drawer_theme = telegram_like::client::app_desktop::design::active_theme();
         night->setStyleSheet(QStringLiteral(
             "QCheckBox::indicator { width:58px; height:32px; border-radius:16px; background:%1; }"
@@ -3638,13 +3665,13 @@ private:
             .arg(QString::fromUtf8(drawer_theme.text_muted),
                  QString::fromUtf8(drawer_theme.primary)));
         night->setChecked(telegram_like::client::app_desktop::design::is_dark_theme());
-        night_layout->addWidget(animated_night);
+        animated_night->setVisible(false);
         night_layout->addWidget(night);
         content_layout->addWidget(night_wrap);
         QObject::connect(animated_night, &QPushButton::clicked, night, [night, animated_night] {
             const bool next = !night->isChecked();
             animated_night->setChecked(next);
-            animated_night->setText(next ? "ON" : "OFF");
+            animated_night->setText(QString());
             night->setChecked(next);
         });
         QObject::connect(night, &QCheckBox::toggled, [this, animated_night](bool dark) {
@@ -3654,7 +3681,7 @@ private:
             anim->setEndValue(58);
             anim->start(QAbstractAnimation::DeleteWhenStopped);
             animated_night->setChecked(dark);
-            animated_night->setText(dark ? "ON" : "OFF");
+            animated_night->setText(QString());
             telegram_like::client::app_desktop::design::set_active_theme(dark);
             QSettings prefs;
             prefs.setValue(QStringLiteral("appearance/dark_theme"), dark);
@@ -3671,7 +3698,7 @@ private:
         footer->setTextFormat(Qt::RichText);
         footer->setContentsMargins(32, 14, 32, 30);
         footer->setMinimumHeight(76);
-        root->addWidget(footer);
+        content_layout->addWidget(footer);
         layer->show();
         drawer->show();
         layer->raise();
@@ -3729,6 +3756,18 @@ protected:
                     action->setGeometry(widget->rect());
                     action->raise();
                 }
+            }
+        }
+        if (event != nullptr && event->type() == QEvent::MouseButtonRelease
+            && watched != nullptr
+            && watched->property("drawerWalletAction").toBool()) {
+            auto* mouse = static_cast<QMouseEvent*>(event);
+            if (mouse->button() == Qt::LeftButton) {
+                close_top_levels("accountDrawer");
+                open_settings_page_by_name(QStringLiteral("Account"));
+                statusBar()->showMessage("Wallet is represented by account storage in this build", 2600);
+                event->accept();
+                return true;
             }
         }
         return QMainWindow::eventFilter(watched, event);
@@ -4168,6 +4207,15 @@ protected:
                 }, Qt::QueuedConnection);
             }).detach();
         });
+        auto sort_descending = std::make_shared<bool>(false);
+        QObject::connect(sort, &QToolButton::clicked, this, [sort_descending, sort, list, status] {
+            *sort_descending = !*sort_descending;
+            list->sortItems(*sort_descending ? Qt::DescendingOrder : Qt::AscendingOrder);
+            sort->setText(*sort_descending
+                ? QString::fromUtf8("\xe2\x98\xb0\nZ")
+                : QString::fromUtf8("\xe2\x98\xb0\nA"));
+            status->setText(*sort_descending ? "Sorted Z-A" : "Sorted A-Z");
+        });
         load_contacts();
         dlg->show();
         if (args_.gui_smoke) {
@@ -4260,6 +4308,10 @@ protected:
         stories->setAlignment(Qt::AlignCenter);
         stories->setMinimumHeight(168);
         root->addWidget(stories, 1);
+        QObject::connect(edit, &QToolButton::clicked, dlg, [this, dlg] {
+            dlg->accept();
+            open_settings_page_by_name(QStringLiteral("Profile"));
+        });
         QObject::connect(close, &QToolButton::clicked, dlg, &QDialog::accept);
         dlg->show();
     }
@@ -4337,6 +4389,25 @@ protected:
         actions->addWidget(create);
         root->addLayout(actions);
         QObject::connect(cancel, &QPushButton::clicked, dlg, &QDialog::accept);
+        QObject::connect(more, &QToolButton::clicked, dlg, [this, more, status, channel_mode] {
+            QMenu menu(this);
+            configure_telegram_menu(&menu);
+            menu.setObjectName("createDialogMoreMenu");
+            menu.addAction("Open Contacts", this, [this] { show_contacts_dialog(); });
+            menu.addAction("Use current chat members", this, [status] {
+                status->setText("Current chat members will be used when available");
+            });
+            if (channel_mode) {
+                menu.addAction("Channel settings", this, [this] {
+                    open_settings_page_by_name(QStringLiteral("Groups"));
+                });
+            } else {
+                menu.addAction("Group settings", this, [this] {
+                    open_settings_page_by_name(QStringLiteral("Groups"));
+                });
+            }
+            menu.exec(more->mapToGlobal(QPoint(0, more->height())));
+        });
 
         QObject::connect(create, &QPushButton::clicked, this,
             [this, dlg, name, participants, status, channel_mode] {
@@ -4479,29 +4550,29 @@ protected:
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->setWindowTitle("Settings");
         dlg->setModal(false);
-        dlg->setMinimumSize(780, 920);
-        dlg->resize(780, 920);
+        dlg->setMinimumSize(700, 820);
+        dlg->resize(700, 820);
         dlg->setStyleSheet(QStringLiteral(
             "QDialog#settingsModal { background:#ffffff; border-radius:12px; }"
             "QWidget#settingsModalHeader { background:#ffffff; border-bottom:1px solid #e5e5e5; }"
-            "QLabel#settingsModalTitle { font-size:32px; font-weight:500; color:#2f3437; background:transparent; }"
+            "QLabel#settingsModalTitle { font-size:28px; font-weight:500; color:#2f3437; background:transparent; }"
             "QWidget#settingsModalContent { background:#ffffff; }"
-            "QWidget#settingsGeneralRow { background:#ffffff; min-height:78px; }"
+            "QWidget#settingsGeneralRow { background:#ffffff; min-height:64px; }"
             "QWidget#settingsGeneralRow QLabel { background:transparent; }"
-            "QLabel#settingsGeneralIcon { color:#222222; font-size:34px; background:transparent; }"
-            "QLabel#settingsGeneralLabel { color:#0f1419; font-size:28px; background:transparent; }"
-            "QLabel#settingsGeneralValue { color:#168acd; font-size:28px; background:transparent; }"
-            "QLabel#settingsGeneralMuted { color:#8a9299; font-size:26px; background:transparent; }"
-            "QLabel#settingsCheckBox { color:#ffffff; background:#48aee6; border-radius:5px; font-size:32px; font-weight:700; }"
+            "QLabel#settingsGeneralIcon { color:#222222; font-size:28px; background:transparent; }"
+            "QLabel#settingsGeneralLabel { color:#0f1419; font-size:24px; background:transparent; }"
+            "QLabel#settingsGeneralValue { color:#168acd; font-size:22px; background:transparent; }"
+            "QLabel#settingsGeneralMuted { color:#8a9299; font-size:22px; background:transparent; }"
+            "QLabel#settingsCheckBox { color:#ffffff; background:#48aee6; border-radius:5px; font-size:28px; font-weight:700; }"
             "QLabel#settingsCheckBoxOff { background:#ffffff; border:3px solid #b7b7b7; border-radius:5px; }"
             "QLabel#settingsToggleOn { background:#48aee6; border-radius:18px; }"
             "QWidget#settingsGeneralSection { background:#ffffff; border-top:6px solid #f1f2f3; }"
-            "QLabel#settingsScaleTitle { color:#0f1419; font-size:28px; background:transparent; }"
-            "QLabel#settingsScaleValue { color:#168acd; font-size:28px; background:transparent; }"
-            "QLabel#settingsThemeName { color:#8a9299; font-size:26px; background:transparent; }"
-            "QLabel#settingsThemeNameActive { color:#168acd; font-size:26px; background:transparent; }"
-            "QPushButton#settingsFaqRow { background:#ffffff; border:none; text-align:left; color:#0f1419; font-size:28px; padding:20px 44px; }"
-            "QToolButton#settingsClose { background:transparent; border:none; color:#92979b; font-size:34px; padding:8px; }"
+            "QLabel#settingsScaleTitle { color:#0f1419; font-size:24px; background:transparent; }"
+            "QLabel#settingsScaleValue { color:#168acd; font-size:24px; background:transparent; }"
+            "QLabel#settingsThemeName { color:#8a9299; font-size:22px; background:transparent; }"
+            "QLabel#settingsThemeNameActive { color:#168acd; font-size:22px; background:transparent; }"
+            "QPushButton#settingsFaqRow { background:#ffffff; border:none; text-align:left; color:#0f1419; font-size:24px; padding:18px 38px; }"
+            "QToolButton#settingsClose { background:transparent; border:none; color:#92979b; font-size:30px; padding:8px; }"
         ));
         const QRect mainGeo = geometry();
         dlg->move(mainGeo.center().x() - dlg->width() / 2,
@@ -4513,7 +4584,7 @@ protected:
         auto* header = new QWidget();
         header->setObjectName("settingsModalHeader");
         auto* header_layout = new QHBoxLayout(header);
-        header_layout->setContentsMargins(44, 36, 36, 34);
+        header_layout->setContentsMargins(38, 28, 32, 26);
         auto* title = new QLabel("Settings");
         title->setObjectName("settingsModalTitle");
         header_layout->addWidget(title, 1);
@@ -4540,8 +4611,8 @@ protected:
             row->setObjectName("settingsGeneralRow");
             row->setCursor(action ? Qt::PointingHandCursor : Qt::ArrowCursor);
             auto* row_layout = new QHBoxLayout(row);
-            row_layout->setContentsMargins(44, 0, 44, 0);
-            row_layout->setSpacing(34);
+            row_layout->setContentsMargins(38, 0, 24, 0);
+            row_layout->setSpacing(24);
             auto* icon = new QLabel(icon_text);
             icon->setObjectName("settingsGeneralIcon");
             icon->setFixedWidth(44);
@@ -4552,6 +4623,8 @@ protected:
             if (!trailing.isEmpty()) {
                 auto* tail = new QLabel(trailing);
                 tail->setObjectName("settingsGeneralValue");
+                tail->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+                tail->setFixedWidth(170);
                 row_layout->addWidget(tail);
             }
             layout->addWidget(row);
@@ -4572,15 +4645,17 @@ protected:
                 });
             }
         };
-        auto add_check_row = [&](const QString& text, bool checked) {
+        auto add_check_row = [&](const QString& text, const QString& key, bool checked) {
             auto* row = new QWidget();
             row->setObjectName("settingsGeneralRow");
+            row->setProperty("settingsActionName", text);
+            row->installEventFilter(this);
             auto* row_layout = new QHBoxLayout(row);
-            row_layout->setContentsMargins(44, 0, 44, 0);
-            row_layout->setSpacing(30);
+            row_layout->setContentsMargins(38, 0, 38, 0);
+            row_layout->setSpacing(26);
             auto* box = new QLabel(checked ? QString::fromUtf8("\xe2\x9c\x93") : QString());
             box->setObjectName(checked ? "settingsCheckBox" : "settingsCheckBoxOff");
-            box->setFixedSize(44, 44);
+            box->setFixedSize(38, 38);
             box->setAlignment(Qt::AlignCenter);
             box->setStyleSheet(checked
                 ? QStringLiteral("background:#48aee6; color:#ffffff; border-radius:5px; font-size:32px; font-weight:700;")
@@ -4590,11 +4665,36 @@ protected:
             label->setObjectName("settingsGeneralLabel");
             row_layout->addWidget(label, 1);
             layout->addWidget(row);
+            auto state = std::make_shared<bool>(checked);
+            auto* click = new QPushButton(row);
+            click->setObjectName("settingsGeneralRowAction");
+            click->setFlat(true);
+            click->setCursor(Qt::PointingHandCursor);
+            click->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
+            click->setGeometry(row->rect());
+            click->raise();
+            QObject::connect(click, &QPushButton::clicked, row, [this, box, state, key, text] {
+                *state = !*state;
+                box->setText(*state ? QString::fromUtf8("\xe2\x9c\x93") : QString());
+                box->setObjectName(*state ? "settingsCheckBox" : "settingsCheckBoxOff");
+                box->setStyleSheet(*state
+                    ? QStringLiteral("background:#48aee6; color:#ffffff; border-radius:5px; font-size:28px; font-weight:700;")
+                    : QStringLiteral("background:#ffffff; border:3px solid #b7b7b7; border-radius:5px;"));
+                QSettings prefs;
+                prefs.setValue(key, *state);
+                statusBar()->showMessage(
+                    text + (*state ? QStringLiteral(" enabled") : QStringLiteral(" disabled")),
+                    1600);
+            });
+            QTimer::singleShot(0, row, [row, click] {
+                click->setGeometry(row->rect());
+                click->raise();
+            });
         };
 
         add_general_row("A", "Language", "English",
                         [this, dlg] { open_settings_page_by_name("Appearance"); dlg->accept(); });
-        add_general_row(QString::fromUtf8("\xe2\x86\x95"), "Connection type", "Default (TCP used)",
+        add_general_row(QString::fromUtf8("\xe2\x86\x95"), "Connection type", "Default (TCP)",
                         [this, dlg] { open_settings_page_by_name("Connection"); dlg->accept(); });
         add_general_row(QString::fromUtf8("\xf0\x9f\x94\x92"), "Privacy", {},
                         [this, dlg] { open_settings_page_by_name("Privacy"); dlg->accept(); });
@@ -4612,10 +4712,10 @@ protected:
         divider_top->setObjectName("settingsGeneralSection");
         divider_top->setFixedHeight(12);
         layout->addWidget(divider_top);
-        add_check_row("Show tray icon", true);
-        add_check_row("Use monochrome icon", true);
-        add_check_row("Show taskbar icon", true);
-        add_check_row("Use system window frame", false);
+        add_check_row("Show tray icon", QStringLiteral("appearance/show_tray_icon"), true);
+        add_check_row("Use monochrome icon", QStringLiteral("appearance/monochrome_icon"), true);
+        add_check_row("Show taskbar icon", QStringLiteral("appearance/show_taskbar_icon"), true);
+        add_check_row("Use system window frame", QStringLiteral("appearance/system_window_frame"), false);
 
         auto* scale = new QWidget();
         scale->setObjectName("settingsGeneralSection");
@@ -4626,9 +4726,13 @@ protected:
         auto* scale_label = new QLabel("Default interface scale");
         scale_label->setObjectName("settingsScaleTitle");
         scale_top->addWidget(scale_label, 1);
-        auto* scale_toggle = new QLabel();
+        auto* scale_toggle = new QPushButton();
         scale_toggle->setObjectName("settingsToggleOn");
         scale_toggle->setFixedSize(62, 36);
+        scale_toggle->setCheckable(true);
+        scale_toggle->setChecked(true);
+        scale_toggle->setCursor(Qt::PointingHandCursor);
+        scale_toggle->setStyleSheet(QStringLiteral("background:#48aee6; border:none; border-radius:18px;"));
         scale_top->addWidget(scale_toggle);
         scale_layout->addLayout(scale_top);
         auto* slider_row = new QHBoxLayout();
@@ -4642,6 +4746,16 @@ protected:
         scale_layout->addLayout(slider_row);
         QObject::connect(slider, &QSlider::valueChanged,
                          [scale_value](int value) { scale_value->setText(QString::number(value) + "%"); });
+        QObject::connect(scale_toggle, &QPushButton::clicked, scale, [this, slider, scale_toggle] {
+            const bool enabled = scale_toggle->isChecked();
+            slider->setEnabled(enabled);
+            QSettings prefs;
+            prefs.setValue(QStringLiteral("appearance/default_interface_scale"), enabled);
+            statusBar()->showMessage(enabled
+                ? QStringLiteral("Default interface scale enabled")
+                : QStringLiteral("Custom interface scale enabled"),
+                1600);
+        });
         auto* theme_row = new QHBoxLayout();
         theme_row->setSpacing(18);
         const std::array<std::pair<const char*, const char*>, 4> theme_cards {{
@@ -4665,6 +4779,24 @@ protected:
                 ? "settingsThemeNameActive"
                 : "settingsThemeName");
             wrap_layout->addWidget(label);
+            wrap->setCursor(Qt::PointingHandCursor);
+            auto* click = new QPushButton(wrap);
+            click->setObjectName("settingsThemeCardAction");
+            click->setFlat(true);
+            click->setCursor(Qt::PointingHandCursor);
+            click->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
+            click->setGeometry(wrap->rect());
+            click->raise();
+            const QString theme_name = QString::fromUtf8(name);
+            QObject::connect(click, &QPushButton::clicked, wrap, [this, theme_name] {
+                QSettings prefs;
+                prefs.setValue(QStringLiteral("appearance/theme_name"), theme_name);
+                statusBar()->showMessage("Theme selected: " + theme_name, 1600);
+            });
+            QTimer::singleShot(0, wrap, [wrap, click] {
+                click->setGeometry(wrap->rect());
+                click->raise();
+            });
             theme_row->addWidget(wrap);
         }
         scale_layout->addLayout(theme_row);
@@ -4678,7 +4810,26 @@ protected:
             auto* swatch = new QLabel();
             swatch->setFixedSize(48, 48);
             swatch->setStyleSheet(QString("background:%1; border-radius:24px;").arg(c));
-            color_row->addWidget(swatch);
+            auto* holder = new QWidget();
+            holder->setFixedSize(48, 48);
+            auto* holder_layout = new QVBoxLayout(holder);
+            holder_layout->setContentsMargins(0, 0, 0, 0);
+            holder_layout->addWidget(swatch);
+            holder->setCursor(Qt::PointingHandCursor);
+            auto* click = new QPushButton(holder);
+            click->setObjectName("settingsAccentColorAction");
+            click->setFlat(true);
+            click->setCursor(Qt::PointingHandCursor);
+            click->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
+            click->setGeometry(holder->rect());
+            click->raise();
+            const QString accent = QString::fromUtf8(c);
+            QObject::connect(click, &QPushButton::clicked, holder, [this, accent] {
+                QSettings prefs;
+                prefs.setValue(QStringLiteral("appearance/accent_color"), accent);
+                statusBar()->showMessage("Accent color selected: " + accent, 1600);
+            });
+            color_row->addWidget(holder);
         }
         color_row->addStretch(1);
         scale_layout->addLayout(color_row);
@@ -4687,7 +4838,8 @@ protected:
         auto* faq = new QPushButton("Telegram FAQ");
         faq->setObjectName("settingsFaqRow");
         QObject::connect(faq, &QPushButton::clicked, [this] {
-            statusBar()->showMessage("Telegram FAQ opens the project help center in this build", 2600);
+            QApplication::clipboard()->setText(QStringLiteral("https://telegram.org/faq"));
+            statusBar()->showMessage("Telegram FAQ link copied", 2600);
         });
         layout->addWidget(faq);
         layout->addStretch(1);
@@ -4710,13 +4862,42 @@ protected:
             if (page_name == QLatin1String(settings_page_names[static_cast<std::size_t>(i)])) {
                 settings_nav_->setCurrentRow(i);
                 settings_pages_->setCurrentIndex(i);
-                details_panel_->setVisible(true);
+                set_details_panel_visible(true);
                 if (details_stack_ != nullptr) details_stack_->setCurrentIndex(1);
                 statusBar()->showMessage("Opened " + page_name + " settings", 1800);
                 return;
             }
         }
         statusBar()->showMessage(page_name + QStringLiteral(" settings are not mapped yet"), 2200);
+    }
+
+    void show_account_export_summary() {
+        if (!client_) {
+            open_settings_page_by_name(QStringLiteral("Account"));
+            statusBar()->showMessage("Cloud Storage is available after login", 2200);
+            return;
+        }
+        statusBar()->showMessage("Loading cloud storage summary...");
+        auto client = client_;
+        std::thread([this, client] {
+            const auto result = client->account_export();
+            QMetaObject::invokeMethod(this, [this, result] {
+                if (shutting_down_) return;
+                if (!result.ok) {
+                    statusBar()->showMessage("Cloud Storage summary failed");
+                    append_line("[error] cloud storage summary failed: "
+                                + qstr(result.error_code + " " + result.error_message));
+                    return;
+                }
+                open_settings_page_by_name(QStringLiteral("Account"));
+                statusBar()->showMessage(
+                    QStringLiteral("Cloud Storage: %1 authored messages, %2 contacts, %3 devices")
+                        .arg(result.authored_messages)
+                        .arg(result.contacts)
+                        .arg(result.devices),
+                    3200);
+            }, Qt::QueuedConnection);
+        }).detach();
     }
 
     void show_proxy_settings_dialog() {
@@ -4742,6 +4923,16 @@ protected:
         more->setObjectName("chatInfoBtn");
         header->addWidget(more);
         root->addLayout(header);
+        QObject::connect(more, &QToolButton::clicked, dlg, [this, more] {
+            QMenu menu(this);
+            configure_telegram_menu(&menu);
+            menu.setObjectName("proxySettingsMoreMenu");
+            menu.addAction("Add proxy", this, [this] { show_proxy_edit_dialog(); });
+            menu.addAction("Connection settings", this, [this] {
+                open_settings_page_by_name(QStringLiteral("Connection"));
+            });
+            menu.exec(more->mapToGlobal(QPoint(0, more->height())));
+        });
 
         auto* ipv6 = new QCheckBox("Try connecting through IPv6");
         ipv6->setObjectName("proxyCheck");
@@ -4855,6 +5046,21 @@ protected:
         root->addLayout(buttons);
         QObject::connect(cancel, &QPushButton::clicked, dlg, &QDialog::close);
         QObject::connect(save, &QPushButton::clicked, dlg, &QDialog::close);
+        QObject::connect(share, &QPushButton::clicked, dlg, [this, host, port, username] {
+            const QString host_text = host->text().trimmed();
+            const QString port_text = port->text().trimmed();
+            QString link = QStringLiteral("socks5://");
+            const QString user_text = username->text().trimmed();
+            if (!user_text.isEmpty()) {
+                link += QString::fromUtf8(QUrl::toPercentEncoding(user_text)) + QStringLiteral("@");
+            }
+            link += host_text.isEmpty() ? QStringLiteral("proxy.example") : host_text;
+            if (!port_text.isEmpty()) {
+                link += QStringLiteral(":") + port_text;
+            }
+            QApplication::clipboard()->setText(link);
+            statusBar()->showMessage("Proxy link copied", 2200);
+        });
         dlg->show();
         host->setFocus();
     }
@@ -5711,6 +5917,11 @@ protected:
             composer_->setFocus();
             return;
         }
+        if (label == QStringLiteral("Gift")) {
+            open_settings_page_by_name(QStringLiteral("Account"));
+            statusBar()->showMessage("Gift actions are represented by account storage in this build", 2200);
+            return;
+        }
         statusBar()->showMessage(label + QStringLiteral(" is available from chat settings"), 2200);
     }
 
@@ -6047,6 +6258,7 @@ protected:
             auto* item = new QListWidgetItem(
                 QIcon(avatar_pixmap_for(uid, name, 36)),
                 QStringLiteral("%1\n%2").arg(name, status));
+            item->setData(Qt::UserRole, name);
             item->setSizeHint(QSize(0, 54));
             detail_members_list_->addItem(item);
             ++index;
@@ -6055,6 +6267,15 @@ protected:
             detail_members_list_->addItem(QStringLiteral("No members match"));
         }
         fit_detail_list(detail_members_list_);
+    }
+
+    void handle_detail_member_activated(QListWidgetItem* item) {
+        if (item == nullptr) return;
+        const QString user_id = item->data(Qt::UserRole).toString().trimmed();
+        if (user_id.isEmpty()) return;
+        contact_user_id_->setText(user_id);
+        open_settings_page_by_name(QStringLiteral("Contacts"));
+        statusBar()->showMessage("Opened contact actions for " + user_id, 2200);
     }
 
     void update_chat_header() {
@@ -6085,10 +6306,45 @@ protected:
     }
 
     void toggle_details_panel() {
-        const bool visible = details_panel_->isVisible();
-        details_panel_->setVisible(!visible);
-        if (!visible && details_stack_ != nullptr) details_stack_->setCurrentIndex(0);
-        toggle_details_->setText(visible ? "Info ▸" : "Info ▾");
+        if (details_panel_ == nullptr) return;
+        set_details_panel_visible(!details_panel_->isVisible());
+    }
+
+    void set_details_panel_visible(bool visible) {
+        if (details_panel_ == nullptr) return;
+        const bool was_visible = details_panel_->isVisible();
+        if (was_visible == visible) {
+            if (visible && details_stack_ != nullptr) details_stack_->setCurrentIndex(0);
+            return;
+        }
+        const int column_width = std::clamp(
+            details_panel_->width() > 0 ? details_panel_->width() : tdstyle::kColumnMinimalWidthThird,
+            tdstyle::kColumnMinimalWidthThird,
+            tdstyle::kColumnMaximalWidthThird);
+        details_panel_->setVisible(visible);
+        if (visible && details_stack_ != nullptr) details_stack_->setCurrentIndex(0);
+        adjust_window_for_details_panel(visible ? column_width : -column_width);
+        if (toggle_details_ != nullptr) {
+            toggle_details_->setText(visible ? QStringLiteral("Info ▾") : QStringLiteral("Info ▸"));
+        }
+    }
+
+    void adjust_window_for_details_panel(int delta_width) {
+        if (args_.gui_smoke || delta_width == 0 || isMaximized() || isFullScreen()) return;
+        const auto* target_screen = windowHandle() != nullptr && windowHandle()->screen() != nullptr
+            ? windowHandle()->screen()
+            : screen();
+        if (target_screen == nullptr) return;
+        const QRect available = target_screen->availableGeometry();
+        QRect next = geometry();
+        if (delta_width > 0) {
+            const int grow = std::min(delta_width, available.right() - next.right());
+            if (grow <= 0) return;
+            next.setWidth(next.width() + grow);
+        } else {
+            next.setWidth(std::max(minimumWidth(), next.width() + delta_width));
+        }
+        setGeometry(next);
     }
 
     static QColor avatar_color_for(const std::string& seed) {

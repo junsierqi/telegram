@@ -82,7 +82,20 @@ def main() -> int:
         require(token in main_cpp, f"missing shared media action token: {token}")
     print("[ok ] media/files/links/voice rows expose focus/copy/save selection behavior")
 
-    print("\nAll 3/3 desktop service interaction scenarios passed.")
+    print("[scenario] right info column follows tdesktop open/close sizing")
+    for token in (
+        "set_details_panel_visible",
+        "adjust_window_for_details_panel",
+        "availableGeometry()",
+        "tdstyle::kColumnMinimalWidthThird",
+        "tdstyle::kColumnMaximalWidthThird",
+        "args_.gui_smoke",
+        "setGeometry(next)",
+    ):
+        require(token in main_cpp, f"missing right-column sizing token: {token}")
+    print("[ok ] right column open/close adjusts window width outside screenshot mode")
+
+    print("\nAll 4/4 desktop service interaction scenarios passed.")
     return 0
 
 

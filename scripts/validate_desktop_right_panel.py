@@ -50,6 +50,9 @@ def main() -> int:
         "detail_member_search_->text().trimmed()",
         "conversation.participant_user_ids",
         "name.contains(query, Qt::CaseInsensitive)",
+        "handle_detail_member_activated",
+        "contact_user_id_->setText(user_id)",
+        'open_settings_page_by_name(QStringLiteral("Contacts"))',
         "No members match",
     ):
         require(token in main_cpp, f"missing member-search token: {token}")
