@@ -79,7 +79,10 @@ def main() -> int:
     for label in ("Reply", "Forward", "React", "Pin", "Unpin", "Edit", "Delete"):
         require(f'"{label}"' in body.group("body") and "line_icon(" in body.group("body"),
                 f"message context menu missing {label}")
-    require('"Quick reaction +1"' in body.group("body"), "message context menu must expose quick reaction action")
+    require("add_quick_reaction_selector(&menu, message_id)" in body.group("body"),
+            "message context menu must expose quick reaction selector")
+    require('"Save Attachment"' in body.group("body") and '"Copy Attachment ID"' in body.group("body"),
+            "message context menu must expose attachment actions when available")
     print("[ok ] message context menu covers all message actions")
 
     print("\nAll 6/6 desktop popup-state scenarios passed.")

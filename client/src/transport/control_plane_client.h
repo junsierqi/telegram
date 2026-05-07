@@ -418,6 +418,8 @@ public:
                                              const std::string& text,
                                              bool silent = false,
                                              long long scheduled_at_ms = 0);
+    [[nodiscard]] MessageResult service_command(const std::string& conversation_id,
+                                                const std::string& command);
     [[nodiscard]] MessageResult reply_message(const std::string& conversation_id,
                                               const std::string& reply_to_message_id,
                                               const std::string& text,

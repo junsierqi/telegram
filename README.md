@@ -122,6 +122,9 @@ wsl bash -lc "docker compose -f deploy/docker/docker-compose.yml --env-file depl
   delegate with date/service chips, image/document surfaces, reaction affordances,
   bottom info metadata, per-bubble action menus and attachment drop/send-as
   composer controls.
+- Desktop service/bot chats have Telegram-style right-column command rows,
+  slash-command suggestions, and backend `service_command` handling for
+  `/start`, `/help`, `/security` and unknown-command guidance.
 - conversations: create / add / remove participants; per-message read markers
 - **incremental sync** with cursors + version vectors + bounded older-history pagination
 - **conversation_updated** push so being added to a group lands without manual sync
@@ -286,6 +289,8 @@ CI runs the same sweep + 6 build/verify jobs on every push.
 ```bash
 python scripts/_sweep_validators.py             # full local sweep
 python scripts/validate_desktop_smoke.py        # Qt desktop smoke (Windows)
+python scripts/validate_desktop_service_interactions.py  # service/bot desktop UI wiring
+python scripts/validate_service_commands.py     # service/bot command RPC behavior
 python scripts/validate_call_session.py         # voice/video FSM + AEAD audio frames
 python scripts/validate_media_codec.py          # codec abstraction E2E
 python scripts/validate_media_aead.py           # AES-256-GCM relay round-trip

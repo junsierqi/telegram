@@ -178,6 +178,73 @@ class ChatService:
             scheduled=bool(message.get("scheduled", False)),
         )
 
+    def service_command(
+        self,
+        *,
+        conversation_id: str,
+        sender_user_id: str,
+        command: str,
+    ) -> MessageDeliverPayload:
+        conversation = self._state.conversations.get(conversation_id)
+        if conversation is None:
+            raise ServiceError(ErrorCode.UNKNOWN_CONVERSATION)
+        if sender_user_id not in conversation.participant_user_ids:
+            raise ServiceError(ErrorCode.CONVERSATION_ACCESS_DENIED)
+        normalized = command.strip()
+        if not normalized:
+            raise ServiceError(ErrorCode.EMPTY_MESSAGE)
+        replies = {
+            "/start": "Telegram service is ready. Use /help to see available commands.",
+            "/help": "Available commands: /start, /help, /security.",
+            "/security": "Security alerts are enabled for login codes and account activity.",
+        }
+        reply_text = replies.get(
+            normalized,
+            f"Unknown service command: {normalized}. Use /help.",
+        )
+        now_ms = self._now_ms()
+        user_message = {
+            "message_id": f"msg_{self._message_counter}",
+            "sender_user_id": sender_user_id,
+            "text": normalized,
+            "created_at_ms": now_ms,
+        }
+        self._message_counter += 1
+        service_message = {
+            "message_id": f"msg_{self._message_counter}",
+            "sender_user_id": "telegram",
+            "text": reply_text,
+            "created_at_ms": now_ms + 1,
+            "reply_to_message_id": user_message["message_id"],
+        }
+        self._message_counter += 1
+        conversation.messages.append(user_message)
+        conversation.messages.append(service_message)
+        self._record_change(
+            conversation,
+            kind="message_deliver",
+            message_id=str(user_message["message_id"]),
+            sender_user_id=sender_user_id,
+            text=normalized,
+        )
+        self._record_change(
+            conversation,
+            kind="message_deliver",
+            message_id=str(service_message["message_id"]),
+            sender_user_id="telegram",
+            text=reply_text,
+            reply_to_message_id=str(user_message["message_id"]),
+        )
+        self._state.save_runtime_state()
+        return MessageDeliverPayload(
+            conversation_id=conversation_id,
+            message_id=str(service_message["message_id"]),
+            sender_user_id="telegram",
+            text=reply_text,
+            created_at_ms=int(service_message["created_at_ms"]),
+            reply_to_message_id=str(user_message["message_id"]),
+        )
+
     def release_due_scheduled(self, *, now_ms: int | None = None) -> list[MessageDeliverPayload]:
         now = self._now_ms() if now_ms is None else int(now_ms)
         released: list[MessageDeliverPayload] = []

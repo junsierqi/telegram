@@ -39,7 +39,8 @@ enum class MessageType : std::uint16_t {
     kMessagePin = 31,
     kMessagePinUpdated = 32,
     kMessageSearchRequest = 33,
-    kMessageSearchResponse = 34
+    kMessageSearchResponse = 34,
+    kServiceCommand = 35
 };
 
 [[nodiscard]] constexpr std::string_view to_string(MessageType type) {
@@ -112,6 +113,8 @@ enum class MessageType : std::uint16_t {
         return "message_search_request";
     case MessageType::kMessageSearchResponse:
         return "message_search_response";
+    case MessageType::kServiceCommand:
+        return "service_command";
     }
 
     return "unknown";

@@ -38,6 +38,7 @@ from .protocol import (
     MessageSendAttachmentRequestPayload,
     MessageSendRequestPayload,
     MessageType,
+    ServiceCommandRequestPayload,
     PresenceQueryRequestPayload,
     PresenceQueryResponsePayload,
     PresenceUpdatePayload,
@@ -818,6 +819,44 @@ class ServerApplication:
                 # the conversation — Telegram parity. Silent no-op if no
                 # draft exists.
                 self.drafts_service.clear(session.user_id, payload.conversation_id)
+                return make_response(
+                    MessageType.MESSAGE_DELIVER,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=message_result,
+                ).to_dict()
+            except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.SERVICE_COMMAND:
+            limited = self._rate_check(
+                op="service_command", key=session_id,
+                correlation_id=correlation_id,
+                session_id=session_id, actor_user_id=session.user_id,
+            )
+            if limited is not None:
+                return limited
+            try:
+                assert isinstance(payload, ServiceCommandRequestPayload)
+                message_result = self.chat_service.service_command(
+                    conversation_id=payload.conversation_id,
+                    sender_user_id=session.user_id,
+                    command=payload.command,
+                )
+                self._fanout_to_conversation(
+                    conversation_id=payload.conversation_id,
+                    origin_session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message_type=MessageType.MESSAGE_DELIVER,
+                    payload=message_result,
+                    correlation_id=f"push_{message_result.message_id}",
+                )
                 return make_response(
                     MessageType.MESSAGE_DELIVER,
                     correlation_id=correlation_id,

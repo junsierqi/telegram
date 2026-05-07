@@ -21,6 +21,7 @@
 #include <QApplication>
 #include <QAbstractItemView>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QFile>
 #include <QComboBox>
 #include <QDialog>
@@ -238,6 +239,14 @@ enum ChatListRole {
     ChatMentionRole,
     ChatReactionRole,
     ChatPollRole,
+};
+
+enum DetailRowRole {
+    DetailRowKindRole = Qt::UserRole + 80,
+    DetailRowMessageIdRole,
+    DetailRowAttachmentIdRole,
+    DetailRowLinkRole,
+    DetailRowCommandRole,
 };
 
 enum class SidebarFolder {
@@ -1702,6 +1711,11 @@ public:
         center_layout->addWidget(composer_reply_bar_);
         QObject::connect(reply_bar_close, &QToolButton::clicked,
                          [this] { hide_composer_reply_bar(); });
+        composer_status_label_ = new QLabel();
+        composer_status_label_->setObjectName("composerStatusLabel");
+        composer_status_label_->setWordWrap(false);
+        composer_status_label_->setVisible(false);
+        center_layout->addWidget(composer_status_label_);
         // composer
         auto* composer_wrap = new QWidget();
         composer_wrap->setObjectName("composer");
@@ -1859,6 +1873,15 @@ public:
         detail_media_tabs_->addTab(detail_voice_list_, "Voice");
         detail_media_layout->addWidget(detail_media_tabs_);
         info_layout->addWidget(detail_media);
+        for (auto* list : {detail_media_list_, detail_files_list_, detail_links_list_, detail_voice_list_}) {
+            list->setContextMenuPolicy(Qt::CustomContextMenu);
+            QObject::connect(list, &QListWidget::itemDoubleClicked,
+                             [this](QListWidgetItem* item) { handle_detail_row_activated(item); });
+            QObject::connect(list, &QListWidget::customContextMenuRequested,
+                             [this, list](const QPoint& pos) {
+                                 show_detail_row_context_menu(list, pos);
+                             });
+        }
 
         auto* members_section = new QWidget();
         detail_members_section_ = members_section;
@@ -2602,6 +2625,7 @@ public:
             const bool empty = text.trimmed().isEmpty();
             if (voice_ != nullptr) voice_->setVisible(empty && logged_in_);
             if (send_ != nullptr) send_->setVisible(true);
+            show_service_command_suggestions(text);
         });
         QObject::connect(attach_, &QPushButton::clicked, [this] {
             QMenu menu(this);
@@ -2655,11 +2679,20 @@ public:
                                [this] { forward_message(); });
                 menu.addAction(line_icon("smile", 22, QColor("#7d8790")), "React",
                                [this] { react_to_message(); });
-                menu.addAction(line_icon("saved", 22, QColor("#7d8790")), "Quick reaction +1",
-                               [this] {
-                                   reaction_emoji_->setText(QStringLiteral("+1"));
-                                   react_to_message();
-                               });
+                add_quick_reaction_selector(&menu, message_id);
+                const QString attachment_id = attachment_id_for_message(message_id);
+                if (!attachment_id.isEmpty()) {
+                    menu.addSeparator();
+                    menu.addAction(line_icon("files", 22, QColor("#7d8790")), "Save Attachment",
+                                   [this, attachment_id] {
+                                       attachment_id_->setText(attachment_id);
+                                       save_attachment();
+                                   });
+                    menu.addAction(line_icon("copy", 22, QColor("#7d8790")), "Copy Attachment ID",
+                                   [attachment_id] {
+                                       QApplication::clipboard()->setText(attachment_id);
+                                   });
+                }
                 menu.addSeparator();
                 menu.addAction(line_icon("pin", 22, QColor("#7d8790")), "Pin",
                                [this] { pin_message(true);  });
@@ -2669,7 +2702,9 @@ public:
                 auto* edit_action = menu.addAction(line_icon("edit", 22, QColor("#7d8790")), "Edit",
                                                    [this, message_id] {
                                                        show_composer_reply_bar(message_id, QStringLiteral("Edit"));
-                                                       edit_message_action();
+                                                       composer_->setText(message_full_text_for(message_id));
+                                                       composer_->setFocus();
+                                                       statusBar()->showMessage("Editing " + message_id, 1800);
                                                    });
                 auto* delete_action = menu.addAction(line_icon("delete", 22, QColor("#d44d4d")), "Delete",
                                                      [this] { delete_message_action(); });
@@ -2782,9 +2817,15 @@ private:
         QMenu panel(this);
         panel.setObjectName("emojiStickerPanel");
         configure_telegram_menu(&panel);
+        auto* preview_action = new QWidgetAction(&panel);
+        auto* preview = new QLabel("Select emoji or sticker");
+        preview->setObjectName("emojiStickerPreview");
+        preview->setMinimumWidth(250);
+        preview->setContentsMargins(12, 8, 12, 8);
+        preview_action->setDefaultWidget(preview);
+        panel.addAction(preview_action);
         auto insert_text = [this](const QString& token) {
-            composer_->insert(token);
-            composer_->setFocus();
+            insert_composer_token(token);
         };
         auto add_grid = [&](const QString& objectName,
                             const QString& title,
@@ -2808,6 +2849,10 @@ private:
                 btn->setObjectName("emojiGridButton");
                 btn->setFixedSize(42, 36);
                 btn->setCursor(Qt::PointingHandCursor);
+                btn->setToolTip(entry.second);
+                QObject::connect(btn, &QPushButton::pressed, &panel, [preview, title, token = entry.second] {
+                    preview->setText(title + QStringLiteral("  ") + token);
+                });
                 QObject::connect(btn, &QPushButton::clicked, &panel, [&, token = entry.second] {
                     insert_text(token);
                     panel.close();
@@ -2819,6 +2864,14 @@ private:
             action->setDefaultWidget(wrap);
             panel.addAction(action);
         };
+        if (!recent_composer_tokens_.isEmpty()) {
+            QVector<QPair<QString, QString>> recent;
+            for (const QString& token : recent_composer_tokens_) {
+                recent.push_back({token.left(6), token});
+            }
+            add_grid("emojiRecentGrid", "Recent", recent);
+            panel.addSeparator();
+        }
         add_grid("emojiGrid", "Emoji", {
             {QString::fromUtf8("\xf0\x9f\x91\x8d"), QStringLiteral("+1")},
             {QString::fromUtf8("\xe2\x9d\xa4"), QStringLiteral("<3")},
@@ -2833,6 +2886,21 @@ private:
             {QStringLiteral("Party"), QStringLiteral("[sticker:party]")},
         });
         panel.exec(emoji_panel_->mapToGlobal(QPoint(0, -panel.sizeHint().height())));
+    }
+
+    void remember_recent_composer_token(const QString& token) {
+        if (token.trimmed().isEmpty()) return;
+        recent_composer_tokens_.removeAll(token);
+        recent_composer_tokens_.prepend(token);
+        while (recent_composer_tokens_.size() > 10) {
+            recent_composer_tokens_.removeLast();
+        }
+    }
+
+    void insert_composer_token(const QString& token) {
+        remember_recent_composer_token(token);
+        composer_->insert(token);
+        composer_->setFocus();
     }
 
     void configure_telegram_menu(QMenu* menu) const {
@@ -2899,6 +2967,7 @@ private:
             QFrame#composerReplyAccent { background:{primary}; border:none; border-radius:1px; }
             QLabel#composerReplyLabel { color:{text_primary}; font-size:13px; }
             QLabel#composerReplyLabel span { color:{text_muted}; }
+            QLabel#composerStatusLabel { background:{surface}; color:{text_muted}; font-size:12px; padding:3px 24px 5px 28px; }
             QWidget#attachmentDropOverlay { background:rgba(51,144,236,0.14); border:2px dashed {primary}; border-radius:14px; }
             QLabel#attachmentDropPhotoZone, QLabel#attachmentDropFileZone { background:rgba(255,255,255,0.74); color:{primary}; border-radius:12px; font-size:18px; font-weight:600; }
             QLabel#attachmentDropPhotoZone span, QLabel#attachmentDropFileZone span { color:{text_muted}; font-size:13px; font-weight:400; }
@@ -2911,6 +2980,7 @@ private:
             QLabel#detailTitle { font-weight:700; font-size:20px; color:{text_primary}; }
             QLabel#detailSubtitle { font-size:17px; color:{text_muted}; }
             QWidget#detailSection { background:{surface}; border-bottom:8px solid {app_background}; }
+            QWidget#detailServiceInfoSection, QWidget#detailServiceMediaSection { background:{surface}; border-bottom:8px solid {app_background}; }
             QLabel#detailLink { color:{primary}; font-size:13px; }
             QLabel#detailDescription { color:{text_secondary}; font-size:13px; }
             QListWidget#detailMembers { background:{surface}; border:none; outline:0; }
@@ -2986,10 +3056,14 @@ private:
             QPushButton#drawerAccountCurrent:hover, QPushButton#drawerAccountRow:hover { background:{hover}; }
             QPushButton#drawerRow { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 20px; font-size:14px; font-weight:600; color:{text_primary}; }
             QPushButton#drawerRow:hover { background:{hover}; }
+            QPushButton#drawerAccountSwitchRow { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 20px; font-size:14px; font-weight:600; color:{text_primary}; min-height:48px; }
+            QPushButton#drawerAccountSwitchRow:hover { background:{hover}; }
             QPushButton#drawerSettingsButton { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 20px; font-size:14px; font-weight:600; color:{text_primary}; min-height:48px; }
             QPushButton#drawerSettingsButton:hover { background:{hover}; }
             QWidget#drawerNightRow { background:{surface}; border-top:1px solid {border_subtle}; }
             QLabel#drawerNightText { color:{text_primary}; font-size:14px; font-weight:600; background:transparent; }
+            QPushButton#drawerNightAnimatedToggle { border:none; border-radius:16px; background:{text_muted}; color:{surface}; font-size:10px; font-weight:700; }
+            QPushButton#drawerNightAnimatedToggle:checked { background:{primary}; }
             QLabel#drawerFooter { color:{text_muted}; font-size:12px; background:transparent; }
         )");
         css += QString::fromUtf8(R"(
@@ -3415,8 +3489,25 @@ private:
             voice_->setEnabled(false);
             show_login_dialog();
         });
-        accounts->setVisible(false);
+        accounts->setVisible(drawer_accounts_expanded_);
         content_layout->addWidget(accounts);
+
+        auto* account_switch_row = new QPushButton(drawer_accounts_expanded_
+            ? "Hide Accounts" : "Switch Accounts");
+        account_switch_row->setObjectName("drawerAccountSwitchRow");
+        account_switch_row->setIcon(line_icon("account", 24));
+        account_switch_row->setIconSize(QSize(24, 24));
+        account_switch_row->setMinimumHeight(48);
+        account_switch_row->setCursor(Qt::PointingHandCursor);
+        content_layout->addWidget(account_switch_row);
+        QObject::connect(account_switch_row, &QPushButton::clicked, drawer,
+                         [this, accounts, account_switch_row] {
+            drawer_accounts_expanded_ = !drawer_accounts_expanded_;
+            accounts->setVisible(drawer_accounts_expanded_);
+            account_switch_row->setText(drawer_accounts_expanded_
+                ? "Hide Accounts" : "Switch Accounts");
+            if (account_drawer_ != nullptr) sync_account_drawer_geometry();
+        });
 
         auto add_row = [&](const QString& icon_key, const QString& text, QObject* receiver = nullptr,
                            const char* slot = nullptr) -> QPushButton* {
@@ -3487,7 +3578,12 @@ private:
             close_drawer();
             statusBar()->showMessage("Saved Messages uses the current account storage in this build", 2600);
         });
-        auto* archive_row = add_row("folder", "Archived Chats");
+        const auto folder_counts = sidebar_folder_counts();
+        auto* archive_row = add_row(
+            "folder",
+            folder_counts.archived > 0
+                ? QStringLiteral("Archived Chats  %1").arg(folder_counts.archived)
+                : QStringLiteral("Archived Chats"));
         archive_row->setObjectName("drawerArchiveRow");
         auto* cloud_row = add_row("saved", "Cloud Storage");
         cloud_row->setObjectName("drawerCloudRow");
@@ -3527,22 +3623,38 @@ private:
         night_layout->addWidget(night_text, 1);
         auto* animated_night = new QPushButton();
         animated_night->setObjectName("drawerNightAnimatedToggle");
-        animated_night->setVisible(false);
-        content_layout->addWidget(animated_night);
+        animated_night->setCheckable(true);
+        animated_night->setChecked(telegram_like::client::app_desktop::design::is_dark_theme());
+        animated_night->setText(animated_night->isChecked() ? "ON" : "OFF");
+        animated_night->setFixedSize(58, 32);
+        animated_night->setCursor(Qt::PointingHandCursor);
         auto* night = new QCheckBox();
         night->setObjectName("drawerNightSwitch");
+        night->setVisible(false);
+        const auto& drawer_theme = telegram_like::client::app_desktop::design::active_theme();
         night->setStyleSheet(QStringLiteral(
-            "QCheckBox::indicator { width:58px; height:32px; border-radius:16px; background:#9ea3a7; }"
-            "QCheckBox::indicator:checked { background:#48aee6; }"));
+            "QCheckBox::indicator { width:58px; height:32px; border-radius:16px; background:%1; }"
+            "QCheckBox::indicator:checked { background:%2; }")
+            .arg(QString::fromUtf8(drawer_theme.text_muted),
+                 QString::fromUtf8(drawer_theme.primary)));
         night->setChecked(telegram_like::client::app_desktop::design::is_dark_theme());
+        night_layout->addWidget(animated_night);
         night_layout->addWidget(night);
         content_layout->addWidget(night_wrap);
+        QObject::connect(animated_night, &QPushButton::clicked, night, [night, animated_night] {
+            const bool next = !night->isChecked();
+            animated_night->setChecked(next);
+            animated_night->setText(next ? "ON" : "OFF");
+            night->setChecked(next);
+        });
         QObject::connect(night, &QCheckBox::toggled, [this, animated_night](bool dark) {
             auto* anim = new QPropertyAnimation(animated_night, "maximumWidth", animated_night);
             anim->setDuration(150);
             anim->setStartValue(54);
             anim->setEndValue(58);
             anim->start(QAbstractAnimation::DeleteWhenStopped);
+            animated_night->setChecked(dark);
+            animated_night->setText(dark ? "ON" : "OFF");
             telegram_like::client::app_desktop::design::set_active_theme(dark);
             QSettings prefs;
             prefs.setValue(QStringLiteral("appearance/dark_theme"), dark);
@@ -3608,6 +3720,20 @@ private:
     }
 
 protected:
+    bool eventFilter(QObject* watched, QEvent* event) override {
+        if (event != nullptr && event->type() == QEvent::Resize
+            && watched != nullptr
+            && !watched->property("settingsActionName").toString().isEmpty()) {
+            if (auto* widget = qobject_cast<QWidget*>(watched)) {
+                if (auto* action = widget->findChild<QPushButton*>("settingsGeneralRowAction")) {
+                    action->setGeometry(widget->rect());
+                    action->raise();
+                }
+            }
+        }
+        return QMainWindow::eventFilter(watched, event);
+    }
+
     void resizeEvent(QResizeEvent* event) override {
         QMainWindow::resizeEvent(event);
         sync_account_drawer_geometry();
@@ -4408,9 +4534,11 @@ protected:
         layout->setContentsMargins(0, 0, 0, 0);
         layout->setSpacing(0);
         auto add_general_row = [&](const QString& icon_text, const QString& text,
-                                   const QString& trailing = {}) {
+                                   const QString& trailing = {},
+                                   std::function<void()> action = {}) {
             auto* row = new QWidget();
             row->setObjectName("settingsGeneralRow");
+            row->setCursor(action ? Qt::PointingHandCursor : Qt::ArrowCursor);
             auto* row_layout = new QHBoxLayout(row);
             row_layout->setContentsMargins(44, 0, 44, 0);
             row_layout->setSpacing(34);
@@ -4427,6 +4555,22 @@ protected:
                 row_layout->addWidget(tail);
             }
             layout->addWidget(row);
+            if (action) {
+                row->installEventFilter(this);
+                row->setProperty("settingsActionName", text);
+                auto* click = new QPushButton(row);
+                click->setObjectName("settingsGeneralRowAction");
+                click->setFlat(true);
+                click->setCursor(Qt::PointingHandCursor);
+                click->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
+                click->setGeometry(row->rect());
+                click->raise();
+                QObject::connect(click, &QPushButton::clicked, row, std::move(action));
+                QTimer::singleShot(0, row, [row, click] {
+                    click->setGeometry(row->rect());
+                    click->raise();
+                });
+            }
         };
         auto add_check_row = [&](const QString& text, bool checked) {
             auto* row = new QWidget();
@@ -4448,8 +4592,22 @@ protected:
             layout->addWidget(row);
         };
 
-        add_general_row("A", "Language", "English");
-        add_general_row(QString::fromUtf8("\xe2\x86\x95"), "Connection type", "Default (TCP used)");
+        add_general_row("A", "Language", "English",
+                        [this, dlg] { open_settings_page_by_name("Appearance"); dlg->accept(); });
+        add_general_row(QString::fromUtf8("\xe2\x86\x95"), "Connection type", "Default (TCP used)",
+                        [this, dlg] { open_settings_page_by_name("Connection"); dlg->accept(); });
+        add_general_row(QString::fromUtf8("\xf0\x9f\x94\x92"), "Privacy", {},
+                        [this, dlg] { open_settings_page_by_name("Privacy"); dlg->accept(); });
+        add_general_row(QString::fromUtf8("\xf0\x9f\x92\xac"), "Chat Tools", {},
+                        [this, dlg] { open_settings_page_by_name("Chat Tools"); dlg->accept(); });
+        add_general_row(QString::fromUtf8("\xf0\x9f\x93\xb1"), "Devices", {},
+                        [this, dlg] { open_settings_page_by_name("Devices"); dlg->accept(); });
+        add_general_row(QString::fromUtf8("\xf0\x9f\x91\xa5"), "Contacts", {},
+                        [this, dlg] { open_settings_page_by_name("Contacts"); dlg->accept(); });
+        add_general_row(QString::fromUtf8("\xf0\x9f\x8c\x90"), "Proxy", {},
+                        [this, dlg] { show_proxy_settings_dialog(); dlg->accept(); });
+        add_general_row(QString::fromUtf8("\xe2\x9a\x99"), "Advanced", {},
+                        [this, dlg] { open_settings_page_by_name("Advanced"); dlg->accept(); });
         auto* divider_top = new QWidget();
         divider_top->setObjectName("settingsGeneralSection");
         divider_top->setFixedHeight(12);
@@ -4528,11 +4686,37 @@ protected:
 
         auto* faq = new QPushButton("Telegram FAQ");
         faq->setObjectName("settingsFaqRow");
+        QObject::connect(faq, &QPushButton::clicked, [this] {
+            statusBar()->showMessage("Telegram FAQ opens the project help center in this build", 2600);
+        });
         layout->addWidget(faq);
         layout->addStretch(1);
         scroll->setWidget(content);
         root->addWidget(scroll, 1);
         dlg->show();
+    }
+
+    void open_settings_page_by_name(const QString& page_name) {
+        if (settings_nav_ == nullptr || settings_pages_ == nullptr) {
+            statusBar()->showMessage(page_name + QStringLiteral(" settings are available after login"), 2200);
+            return;
+        }
+        static const std::array<const char*, 14> settings_page_names {{
+            "Profile", "Account", "Privacy", "Appearance", "Connection", "Devices",
+            "Contacts", "Find Users", "Groups", "Chat Tools", "Attachments",
+            "Remote", "Calls", "Advanced",
+        }};
+        for (int i = 0; i < static_cast<int>(settings_page_names.size()); ++i) {
+            if (page_name == QLatin1String(settings_page_names[static_cast<std::size_t>(i)])) {
+                settings_nav_->setCurrentRow(i);
+                settings_pages_->setCurrentIndex(i);
+                details_panel_->setVisible(true);
+                if (details_stack_ != nullptr) details_stack_->setCurrentIndex(1);
+                statusBar()->showMessage("Opened " + page_name + " settings", 1800);
+                return;
+            }
+        }
+        statusBar()->showMessage(page_name + QStringLiteral(" settings are not mapped yet"), 2200);
     }
 
     void show_proxy_settings_dialog() {
@@ -5322,14 +5506,21 @@ protected:
         const bool is_channel = !is_group && (title.contains("channel", Qt::CaseInsensitive)
             || title.contains("team", Qt::CaseInsensitive)
             || title.contains("proxy", Qt::CaseInsensitive));
+        const bool is_service = is_service_conversation(*conv, title);
         detail_avatar_label_->setPixmap(avatar_pixmap_for(
             conv->conversation_id, title, tdstyle::kInfoProfilePhotoSize));
         detail_title_label_->setText(title);
         detail_subtitle_label_->setText(reference_subtitle_for(*conv));
-        set_detail_action_texts(is_channel, is_group);
+        set_detail_action_texts(is_channel, is_group, is_service);
         if (detail_member_search_ != nullptr) detail_member_search_->setVisible(false);
 
+        if (is_service) {
+            set_service_detail_panel(*conv);
+            return;
+        }
+
         if (is_channel) {
+            set_detail_service_mode(false);
             if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(true);
             if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
             if (detail_members_section_ != nullptr) detail_members_section_->setVisible(false);
@@ -5343,6 +5534,7 @@ protected:
         }
 
         if (is_group) {
+            set_detail_service_mode(false);
             if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(false);
             if (detail_media_section_ != nullptr) detail_media_section_->setVisible(false);
             if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
@@ -5357,6 +5549,7 @@ protected:
             return;
         }
 
+        set_detail_service_mode(false);
         if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(true);
         if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
         if (detail_members_section_ != nullptr) detail_members_section_->setVisible(true);
@@ -5380,9 +5573,73 @@ protected:
             * detail_members_list_->count() + 8);
     }
 
-    void set_detail_action_texts(bool is_channel, bool is_group) {
+    static bool is_service_conversation(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation,
+        const QString& title) {
+        return title == QStringLiteral("Telegram")
+            || conversation.conversation_id.find("service") != std::string::npos
+            || conversation.conversation_id.find("bot") != std::string::npos;
+    }
+
+    bool current_conversation_is_service() const {
+        if (const auto* conv = store_.selected_conversation()) {
+            const QString title = reference_title_for(conv->conversation_id, conv->title);
+            return is_service_conversation(*conv, title);
+        }
+        const auto current_id = str(conversation_->text().trimmed());
+        return current_id.find("service") != std::string::npos
+            || current_id.find("bot") != std::string::npos;
+    }
+
+    void set_detail_service_mode(bool service) {
+        if (detail_identity_section_ != nullptr) {
+            detail_identity_section_->setObjectName(service
+                ? "detailServiceInfoSection"
+                : "detailSection");
+            detail_identity_section_->style()->unpolish(detail_identity_section_);
+            detail_identity_section_->style()->polish(detail_identity_section_);
+        }
+        if (detail_media_section_ != nullptr) {
+            detail_media_section_->setObjectName(service
+                ? "detailServiceMediaSection"
+                : "detailSection");
+            detail_media_section_->style()->unpolish(detail_media_section_);
+            detail_media_section_->style()->polish(detail_media_section_);
+        }
+    }
+
+    void set_service_detail_panel(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation) {
+        set_detail_service_mode(true);
+        if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(true);
+        if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
+        if (detail_members_section_ != nullptr) detail_members_section_->setVisible(false);
+        if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
+        if (detail_member_search_ != nullptr) detail_member_search_->setVisible(false);
+        detail_link_label_->setText(QStringLiteral("service@telegram.local\nOfficial service"));
+        detail_description_label_->setText(QStringLiteral(
+            "Official service notifications, login codes and security alerts for this account."));
+        set_detail_media_rows(conversation, false, false);
+        clear_detail_list(detail_files_list_);
+        clear_detail_list(detail_voice_list_);
+        add_detail_row(detail_links_list_, QStringLiteral("lock"), QStringLiteral("Security alerts"));
+        add_detail_row(detail_links_list_, QStringLiteral("settings"), QStringLiteral("Notification settings"));
+        add_detail_row(detail_links_list_, QStringLiteral("message"), QStringLiteral("Start service"),
+                       QStringLiteral("command"), {}, {}, {}, QStringLiteral("/start"));
+        add_detail_row(detail_links_list_, QStringLiteral("search"), QStringLiteral("Help"),
+                       QStringLiteral("command"), {}, {}, {}, QStringLiteral("/help"));
+        add_detail_row(detail_links_list_, QStringLiteral("lock"), QStringLiteral("Security"),
+                       QStringLiteral("command"), {}, {}, {}, QStringLiteral("/security"));
+        fit_detail_list(detail_links_list_);
+    }
+
+    void set_detail_action_texts(bool is_channel, bool is_group, bool is_service = false) {
         if (detail_action_buttons_.size() < 3) return;
-        const QStringList labels = is_group
+        const QStringList labels = is_service
+            ? QStringList{QStringLiteral("Notifications"),
+                          QStringLiteral("Search"),
+                          QStringLiteral("Settings")}
+            : (is_group
             ? QStringList{QStringLiteral("Mute"),
                           QStringLiteral("Manage"),
                           QStringLiteral("Leave")}
@@ -5392,12 +5649,14 @@ protected:
                               QStringLiteral("Gift")}
                 : QStringList{QStringLiteral("Message"),
                               QStringLiteral("Mute"),
-                              QStringLiteral("Gift")});
-        const QStringList icons = is_group
+                              QStringLiteral("Gift")}));
+        const QStringList icons = is_service
+            ? QStringList{QStringLiteral("bell"), QStringLiteral("search"), QStringLiteral("settings")}
+            : (is_group
             ? QStringList{QStringLiteral("mute"), QStringLiteral("settings"), QStringLiteral("leave")}
             : (is_channel
                 ? QStringList{QStringLiteral("mute"), QStringLiteral("discuss"), QStringLiteral("gift")}
-                : QStringList{QStringLiteral("message"), QStringLiteral("mute"), QStringLiteral("gift")});
+                : QStringList{QStringLiteral("message"), QStringLiteral("mute"), QStringLiteral("gift")}));
         for (int i = 0; i < 3; ++i) {
             auto* button = detail_action_buttons_[static_cast<std::size_t>(i)];
             button->setText(labels.at(i));
@@ -5416,7 +5675,8 @@ protected:
         const QString label = index >= 0 && index < static_cast<int>(detail_action_buttons_.size())
             ? detail_action_buttons_[static_cast<std::size_t>(index)]->text()
             : QString();
-        if (label.contains("Mute", Qt::CaseInsensitive)
+        if (label == QStringLiteral("Notifications")
+            || label.contains("Mute", Qt::CaseInsensitive)
             || label.contains("Unmute", Qt::CaseInsensitive)) {
             run_conversation_flag_action(
                 conversation,
@@ -5428,6 +5688,14 @@ protected:
         }
         if (label == QStringLiteral("Manage") || label == QStringLiteral("Discuss")) {
             show_chat_info_dialog();
+            return;
+        }
+        if (label == QStringLiteral("Search")) {
+            message_search_->setFocus();
+            return;
+        }
+        if (label == QStringLiteral("Settings")) {
+            open_settings_page_by_name(QStringLiteral("Privacy"));
             return;
         }
         if (label == QStringLiteral("Leave")) {
@@ -5456,6 +5724,20 @@ protected:
             || text.find("t.me/") != std::string::npos;
     }
 
+    static QString first_link_in_text(const std::string& text) {
+        const QString q = qstr(text);
+        for (const QString& marker : {QStringLiteral("https://"),
+                                      QStringLiteral("http://"),
+                                      QStringLiteral("t.me/")}) {
+            const int start = q.indexOf(marker);
+            if (start < 0) continue;
+            int end = start;
+            while (end < q.size() && !q.at(end).isSpace()) ++end;
+            return q.mid(start, end - start);
+        }
+        return {};
+    }
+
     static QString message_row_label(
         const telegram_like::client::app_desktop::DesktopMessage& message,
         const QString& fallback) {
@@ -5470,11 +5752,175 @@ protected:
         list->setFixedHeight(0);
     }
 
-    void add_detail_row(QListWidget* list, const QString& icon_key, const QString& label) {
+    void add_detail_row(QListWidget* list,
+                        const QString& icon_key,
+                        const QString& label,
+                        const QString& kind = {},
+                        const QString& message_id = {},
+                        const QString& attachment_id = {},
+                        const QString& link = {},
+                        const QString& command = {}) {
         if (list == nullptr) return;
         auto* item = new QListWidgetItem(line_icon(icon_key, 24, QColor("#7d8790")), label);
         item->setSizeHint(QSize(0, 38));
+        item->setData(DetailRowKindRole, kind);
+        item->setData(DetailRowMessageIdRole, message_id);
+        item->setData(DetailRowAttachmentIdRole, attachment_id);
+        item->setData(DetailRowLinkRole, link);
+        item->setData(DetailRowCommandRole, command);
         list->addItem(item);
+    }
+
+    void handle_detail_row_activated(QListWidgetItem* item) {
+        if (item == nullptr) return;
+        const QString kind = item->data(DetailRowKindRole).toString();
+        const QString message_id = item->data(DetailRowMessageIdRole).toString();
+        const QString attachment_id = item->data(DetailRowAttachmentIdRole).toString();
+        const QString link = item->data(DetailRowLinkRole).toString();
+        const QString command = item->data(DetailRowCommandRole).toString();
+        if (kind == QLatin1String("command") && !command.isEmpty()) {
+            run_service_command(command);
+            return;
+        }
+        if (!message_id.isEmpty()) {
+            message_action_id_->setText(message_id);
+            messages_->setSearchHighlight(QString(), message_id);
+        }
+        if ((kind == QLatin1String("file") || kind == QLatin1String("media")
+             || kind == QLatin1String("voice")) && !attachment_id.isEmpty()) {
+            attachment_id_->setText(attachment_id);
+            statusBar()->showMessage("Selected attachment " + attachment_id, 1800);
+            return;
+        }
+        if (kind == QLatin1String("link") && !link.isEmpty()) {
+            QApplication::clipboard()->setText(link);
+            statusBar()->showMessage("Copied link", 1600);
+            return;
+        }
+        if (!message_id.isEmpty()) {
+            statusBar()->showMessage("Focused message " + message_id, 1600);
+        }
+    }
+
+    void run_service_command(const QString& command) {
+        if (composer_ == nullptr || command.trimmed().isEmpty()) return;
+        const auto conversation = str(conversation_->text().trimmed());
+        if (!client_ || conversation.empty()) {
+            composer_->setText(command);
+            composer_->setFocus();
+            statusBar()->showMessage("Prepared service command " + command, 1800);
+            return;
+        }
+        composer_->setText(command);
+        composer_->setEnabled(false);
+        statusBar()->showMessage("Sending service command " + command + "...");
+        auto client = client_;
+        const auto command_text = str(command);
+        std::thread([this, client, conversation, command_text] {
+            const auto result = client->service_command(conversation, command_text);
+            QMetaObject::invokeMethod(this, [this, conversation, command_text, result] {
+                if (shutting_down_) return;
+                composer_->setEnabled(true);
+                if (!result.ok) {
+                    append_line("[error] service command failed: "
+                                + qstr(result.error_code + " " + result.error_message));
+                    composer_->setFocus();
+                    statusBar()->showMessage("Service command failed");
+                    return;
+                }
+                composer_->clear();
+                store_.apply_sent_message(conversation, result);
+                save_cache();
+                render_store();
+                sync_after_server_mutation();
+                statusBar()->showMessage("Service command sent " + qstr(command_text), 1800);
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void show_service_command_suggestions(const QString& text) {
+        if (composer_ == nullptr || !current_conversation_is_service()) {
+            if (service_command_menu_ != nullptr) service_command_menu_->hide();
+            return;
+        }
+        const QString typed = text.trimmed();
+        if (!typed.startsWith(QLatin1Char('/')) || typed.contains(QLatin1Char(' '))) {
+            if (service_command_menu_ != nullptr) service_command_menu_->hide();
+            return;
+        }
+        const QStringList commands {
+            QStringLiteral("/start"),
+            QStringLiteral("/help"),
+            QStringLiteral("/security"),
+        };
+        QStringList matches;
+        for (const QString& command : commands) {
+            if (command.startsWith(typed, Qt::CaseInsensitive)) {
+                matches << command;
+            }
+        }
+        if (matches.isEmpty()) {
+            if (service_command_menu_ != nullptr) service_command_menu_->hide();
+            return;
+        }
+        if (service_command_menu_ != nullptr) {
+            service_command_menu_->hide();
+            service_command_menu_->deleteLater();
+        }
+        service_command_menu_ = new QMenu(this);
+        service_command_menu_->setObjectName("serviceCommandSuggestionMenu");
+        configure_telegram_menu(service_command_menu_);
+        for (const QString& command : matches) {
+            service_command_menu_->addAction(line_icon("message", 22, QColor("#7d8790")),
+                                             command + QStringLiteral("  Bot command"),
+                                             [this, command] {
+                                                 composer_->setText(command + QStringLiteral(" "));
+                                                 composer_->setFocus();
+                                             });
+        }
+        service_command_menu_->popup(
+            composer_->mapToGlobal(QPoint(0, -service_command_menu_->sizeHint().height())));
+    }
+
+    void show_detail_row_context_menu(QListWidget* list, const QPoint& pos) {
+        if (list == nullptr) return;
+        auto* item = list->itemAt(pos);
+        if (item == nullptr) return;
+        const QString kind = item->data(DetailRowKindRole).toString();
+        const QString message_id = item->data(DetailRowMessageIdRole).toString();
+        const QString attachment_id = item->data(DetailRowAttachmentIdRole).toString();
+        const QString link = item->data(DetailRowLinkRole).toString();
+        const QString command = item->data(DetailRowCommandRole).toString();
+        QMenu menu(this);
+        menu.setObjectName("detailRowContextMenu");
+        configure_telegram_menu(&menu);
+        if (!message_id.isEmpty()) {
+            menu.addAction(line_icon("search", 22, QColor("#7d8790")), "Focus message",
+                           [this, message_id] {
+                               message_action_id_->setText(message_id);
+                               messages_->setSearchHighlight(QString(), message_id);
+                               statusBar()->showMessage("Focused message " + message_id, 1600);
+                           });
+        }
+        if (!attachment_id.isEmpty()) {
+            menu.addAction(line_icon("copy", 22, QColor("#7d8790")), "Copy attachment id",
+                           [attachment_id] { QApplication::clipboard()->setText(attachment_id); });
+            menu.addAction(line_icon("files", 22, QColor("#7d8790")), "Save selected attachment",
+                           [this, attachment_id] {
+                               attachment_id_->setText(attachment_id);
+                               save_attachment();
+                           });
+        }
+        if (!link.isEmpty()) {
+            menu.addAction(line_icon("copy", 22, QColor("#7d8790")), "Copy link",
+                           [link] { QApplication::clipboard()->setText(link); });
+        }
+        if (kind == QLatin1String("command") && !command.isEmpty()) {
+            menu.addAction(line_icon("message", 22, QColor("#7d8790")), "Use command",
+                           [this, command] { run_service_command(command); });
+        }
+        if (menu.actions().isEmpty()) return;
+        menu.exec(list->viewport()->mapToGlobal(pos));
     }
 
     void fit_detail_list(QListWidget* list) {
@@ -5532,22 +5978,35 @@ protected:
             if (text_has_link(message.text)) {
                 ++link_count;
                 add_detail_row(detail_links_list_, QStringLiteral("link"),
-                               message_row_label(message, QStringLiteral("Link")));
+                               message_row_label(message, QStringLiteral("Link")),
+                               QStringLiteral("link"),
+                               qstr(message.message_id),
+                               {},
+                               first_link_in_text(message.text));
             }
             if (message.attachment_id.empty()) continue;
             if (mime_starts_with(message.mime_type, "image/")
                 || mime_starts_with(message.mime_type, "video/")) {
                 ++media_count;
                 add_detail_row(detail_media_list_, QStringLiteral("photo"),
-                               message_row_label(message, QStringLiteral("Media")));
+                               message_row_label(message, QStringLiteral("Media")),
+                               QStringLiteral("media"),
+                               qstr(message.message_id),
+                               qstr(message.attachment_id));
             } else if (mime_starts_with(message.mime_type, "audio/")) {
                 ++voice_count;
                 add_detail_row(detail_voice_list_, QStringLiteral("voice"),
-                               message_row_label(message, QStringLiteral("Voice")));
+                               message_row_label(message, QStringLiteral("Voice")),
+                               QStringLiteral("voice"),
+                               qstr(message.message_id),
+                               qstr(message.attachment_id));
             } else {
                 ++file_count;
                 add_detail_row(detail_files_list_, QStringLiteral("files"),
-                               message_row_label(message, QStringLiteral("File")));
+                               message_row_label(message, QStringLiteral("File")),
+                               QStringLiteral("file"),
+                               qstr(message.message_id),
+                               qstr(message.attachment_id));
             }
         }
         if (media_count == 0) add_detail_row(detail_media_list_, QStringLiteral("photo"), QStringLiteral("No media yet"));
@@ -5604,6 +6063,9 @@ protected:
             chat_header_title_->setText(QString());
             chat_header_subtitle_->setText(connecting_ ? QStringLiteral("Connecting...") : QString());
             if (send_as_ != nullptr) send_as_->setVisible(false);
+            if (send_as_identity_ != QLatin1String("personal")) {
+                set_send_as_identity(QStringLiteral("personal"), QStringLiteral("Personal account"));
+            }
             return;
         }
         const QString title = reference_title_for(conversation->conversation_id, conversation->title);
@@ -5614,6 +6076,12 @@ protected:
             || title.contains("M-Team", Qt::CaseInsensitive)
             || title.contains(QString::fromUtf8("三叉戟"));
         if (send_as_ != nullptr) send_as_->setVisible(group_or_channel);
+        if (!group_or_channel && send_as_identity_ != QLatin1String("personal")) {
+            set_send_as_identity(QStringLiteral("personal"), QStringLiteral("Personal account"));
+        } else {
+            update_send_as_button();
+            refresh_composer_status();
+        }
     }
 
     void toggle_details_panel() {
@@ -5887,6 +6355,7 @@ protected:
     }
 
     void refresh_sidebar_folder_tabs() {
+        refresh_sidebar_folder_counts();
         auto mark = [this](QPushButton* button, SidebarFolder folder) {
             if (button == nullptr) return;
             button->setObjectName(sidebar_folder_ == folder
@@ -5899,6 +6368,14 @@ protected:
         mark(sidebar_unread_tab_, SidebarFolder::Unread);
         mark(sidebar_pinned_tab_, SidebarFolder::Pinned);
         mark(sidebar_archived_tab_, SidebarFolder::Archived);
+    }
+
+    void refresh_sidebar_folder_counts() {
+        const auto counts = sidebar_folder_counts();
+        set_sidebar_folder_tab_text(sidebar_all_tab_, QStringLiteral("All"), counts.all, true);
+        set_sidebar_folder_tab_text(sidebar_unread_tab_, QStringLiteral("Unread"), counts.unread);
+        set_sidebar_folder_tab_text(sidebar_pinned_tab_, QStringLiteral("Pinned"), counts.pinned);
+        set_sidebar_folder_tab_text(sidebar_archived_tab_, QStringLiteral("Archived"), counts.archived);
     }
 
     bool conversation_matches_sidebar_folder(
@@ -5914,6 +6391,37 @@ protected:
             return conversation.archived;
         }
         return true;
+    }
+
+    struct SidebarFolderCounts {
+        int all = 0;
+        int unread = 0;
+        int pinned = 0;
+        int archived = 0;
+    };
+
+    SidebarFolderCounts sidebar_folder_counts() const {
+        SidebarFolderCounts counts;
+        for (const auto& conversation : store_.conversations()) {
+            if (conversation.archived) {
+                ++counts.archived;
+                continue;
+            }
+            ++counts.all;
+            if (conversation.unread_count > 0) ++counts.unread;
+            if (conversation.pinned) ++counts.pinned;
+        }
+        return counts;
+    }
+
+    void set_sidebar_folder_tab_text(QPushButton* button,
+                                     const QString& label,
+                                     int count,
+                                     bool show_zero = false) {
+        if (button == nullptr) return;
+        button->setText(count > 0 || show_zero
+            ? QStringLiteral("%1 %2").arg(label).arg(count)
+            : label);
     }
 
     std::string focused_search_message_id() const {
@@ -6225,19 +6733,69 @@ protected:
         return message_id;
     }
 
+    QString message_full_text_for(const QString& message_id) const {
+        const auto* conversation = store_.selected_conversation();
+        if (conversation == nullptr) return {};
+        const std::string needle = str(message_id);
+        for (const auto& message : conversation->messages) {
+            if (message.message_id == needle) return qstr(message.text);
+        }
+        return {};
+    }
+
+    QString attachment_id_for_message(const QString& message_id) const {
+        const auto* conversation = store_.selected_conversation();
+        if (conversation == nullptr) return {};
+        const std::string needle = str(message_id);
+        for (const auto& message : conversation->messages) {
+            if (message.message_id == needle) return qstr(message.attachment_id);
+        }
+        return {};
+    }
+
+    void add_quick_reaction_selector(QMenu* menu, const QString& message_id) {
+        auto* reaction_menu = menu->addMenu(line_icon("smile", 22, QColor("#7d8790")),
+                                           "Quick reactions");
+        reaction_menu->setObjectName("reactionSelectorMenu");
+        configure_telegram_menu(reaction_menu);
+        const QStringList quick_reactions = {
+            QStringLiteral("+1"),
+            QStringLiteral("heart"),
+            QStringLiteral("fire"),
+            QStringLiteral("laugh"),
+            QStringLiteral("sad"),
+        };
+        for (const QString& token : quick_reactions) {
+            reaction_menu->addAction(token, [this, message_id, token] {
+                message_action_id_->setText(message_id);
+                reaction_emoji_->setText(token);
+                react_to_message();
+            });
+        }
+        reaction_menu->addSeparator();
+        reaction_menu->addAction("Custom reaction...", [this, message_id] {
+            message_action_id_->setText(message_id);
+            reaction_emoji_->setFocus();
+        });
+    }
+
     void show_composer_reply_bar(const QString& message_id, const QString& mode) {
         if (composer_reply_bar_ == nullptr || composer_reply_label_ == nullptr) return;
         composer_reply_target_id_ = message_id;
+        composer_reply_mode_ = mode;
         message_action_id_->setText(message_id);
         const QString preview = message_preview_for(message_id).toHtmlEscaped();
         composer_reply_label_->setText(QStringLiteral("<b>%1</b><br><span>%2</span>")
                                            .arg(mode.toHtmlEscaped(), preview));
         composer_reply_bar_->setVisible(true);
+        refresh_composer_status();
     }
 
     void hide_composer_reply_bar() {
         composer_reply_target_id_.clear();
+        composer_reply_mode_.clear();
         if (composer_reply_bar_ != nullptr) composer_reply_bar_->setVisible(false);
+        refresh_composer_status();
     }
 
     void show_send_options_menu() {
@@ -6264,11 +6822,57 @@ protected:
         QMenu menu(this);
         menu.setObjectName("sendAsMenu");
         configure_telegram_menu(&menu);
-        menu.addAction(QIcon(avatar_pixmap_for(store_.current_user_id(), display_name_->text(), 24)),
-                       display_name_->text().trimmed().isEmpty() ? "Personal account" : display_name_->text());
-        menu.addAction(line_icon("channel", 22, QColor("#7d8790")), "Channel identity");
-        menu.addAction(line_icon("group", 22, QColor("#7d8790")), "Group identity");
+        auto add_identity = [&](const QString& key, const QIcon& icon, const QString& label) {
+            auto* action = menu.addAction(icon, label, [this, key, label] {
+                set_send_as_identity(key, label);
+            });
+            action->setCheckable(true);
+            action->setChecked(send_as_identity_ == key);
+        };
+        const QString personal_label = display_name_->text().trimmed().isEmpty()
+            ? QStringLiteral("Personal account")
+            : display_name_->text().trimmed();
+        add_identity(QStringLiteral("personal"),
+                     QIcon(avatar_pixmap_for(store_.current_user_id(), personal_label, 24)),
+                     personal_label);
+        add_identity(QStringLiteral("channel"),
+                     line_icon("channel", 22, QColor("#7d8790")),
+                     QStringLiteral("Channel identity"));
+        add_identity(QStringLiteral("group"),
+                     line_icon("group", 22, QColor("#7d8790")),
+                     QStringLiteral("Group identity"));
         menu.exec(send_as_->mapToGlobal(QPoint(0, -menu.sizeHint().height())));
+    }
+
+    void set_send_as_identity(const QString& key, const QString& label) {
+        send_as_identity_ = key.isEmpty() ? QStringLiteral("personal") : key;
+        send_as_label_ = label.isEmpty() ? QStringLiteral("Personal account") : label;
+        update_send_as_button();
+        refresh_composer_status();
+        statusBar()->showMessage("Send as " + send_as_label_, 1800);
+    }
+
+    void update_send_as_button() {
+        if (send_as_ == nullptr) return;
+        const QString text = send_as_label_.trimmed().isEmpty()
+            ? QStringLiteral("HB")
+            : send_as_label_.left(2).toUpper();
+        send_as_->setText(text);
+        send_as_->setToolTip("Send as " + send_as_label_);
+    }
+
+    void refresh_composer_status() {
+        if (composer_status_label_ == nullptr) return;
+        QStringList parts;
+        if (composer_reply_bar_ != nullptr && composer_reply_bar_->isVisible()
+            && !composer_reply_mode_.isEmpty() && !composer_reply_target_id_.isEmpty()) {
+            parts << composer_reply_mode_ + QStringLiteral(" ") + composer_reply_target_id_;
+        }
+        if (send_as_identity_ != QLatin1String("personal")) {
+            parts << QStringLiteral("Send as ") + send_as_label_;
+        }
+        composer_status_label_->setText(parts.join(QStringLiteral("  |  ")));
+        composer_status_label_->setVisible(!parts.isEmpty());
     }
 
     void show_conversation_quick_menu(const std::string& conversation_id, const QPoint& global_pos) {
@@ -6276,6 +6880,14 @@ protected:
         bool archived = false;
         long long muted_until_ms = 0;
         conversation_flag_snapshot(conversation_id, pinned, archived, muted_until_ms);
+        const auto last_read_target = store_.last_message_id(conversation_id);
+        int unread_count = 0;
+        for (const auto& conversation : store_.conversations()) {
+            if (conversation.conversation_id == conversation_id) {
+                unread_count = static_cast<int>(conversation.unread_count);
+                break;
+            }
+        }
         QMenu menu(this);
         menu.setObjectName("conversationQuickMenu");
         configure_telegram_menu(&menu);
@@ -6310,6 +6922,20 @@ protected:
                                muted_until_ms == 0 ? -1 : 0);
                        });
         menu.addSeparator();
+        auto* folder_menu = menu.addMenu(line_icon("folder", 22, QColor("#7d8790")), "Show in folder");
+        folder_menu->setObjectName("conversationFolderRouteMenu");
+        configure_telegram_menu(folder_menu);
+        folder_menu->addAction("All", [this] { set_sidebar_folder(SidebarFolder::All); });
+        folder_menu->addAction("Unread", [this] { set_sidebar_folder(SidebarFolder::Unread); });
+        folder_menu->addAction("Pinned", [this] { set_sidebar_folder(SidebarFolder::Pinned); });
+        folder_menu->addAction("Archived", [this] { set_sidebar_folder(SidebarFolder::Archived); });
+        auto* read_action = menu.addAction(line_icon("read", 22, QColor("#7d8790")),
+                                           unread_count > 0 ? "Mark as read" : "Already read",
+                                           [this, conversation_id, last_read_target] {
+                                               run_mark_conversation_read(conversation_id, last_read_target);
+                                           });
+        read_action->setEnabled(unread_count > 0 && !last_read_target.empty());
+        menu.addSeparator();
         menu.addAction(line_icon("search", 22, QColor("#7d8790")), "Search in chat",
                        [this, conversation_id] {
                            store_.set_selected_conversation(conversation_id);
@@ -6323,6 +6949,10 @@ protected:
         if (!client_ || composer_->text().trimmed().isEmpty()) return;
         if (composer_reply_bar_ != nullptr && composer_reply_bar_->isVisible()
             && !composer_reply_target_id_.isEmpty()) {
+            if (composer_reply_mode_ == QLatin1String("Edit")) {
+                edit_message_action(composer_->text());
+                return;
+            }
             reply_message(silent, scheduled_at_ms);
             return;
         }
@@ -6330,6 +6960,11 @@ protected:
         const auto conversation = str(conversation_->text());
         if (conversation.empty()) {
             statusBar()->showMessage("Select a chat first");
+            return;
+        }
+        if (current_conversation_is_service()
+            && composer_->text().trimmed().startsWith(QLatin1Char('/'))) {
+            run_service_command(composer_->text().trimmed());
             return;
         }
         const bool scheduled = scheduled_at_ms > QDateTime::currentMSecsSinceEpoch();
@@ -6506,17 +7141,23 @@ protected:
         }).detach();
     }
 
-    void edit_message_action() {
+    void edit_message_action(const QString& inline_text = QString()) {
         if (!client_ || message_action_id_->text().trimmed().isEmpty()) return;
         const auto conversation = str(conversation_->text());
         const auto message_id = str(message_action_id_->text().trimmed());
-        bool ok = false;
-        const QString new_text = QInputDialog::getText(
-            this, "Edit message",
-            "New text for " + qstr(message_id) + ":",
-            QLineEdit::Normal, QString(), &ok);
-        if (!ok || new_text.trimmed().isEmpty()) return;
+        QString new_text = inline_text;
+        if (new_text.isNull()) {
+            bool ok = false;
+            new_text = QInputDialog::getText(
+                this, "Edit message",
+                "New text for " + qstr(message_id) + ":",
+                QLineEdit::Normal, message_full_text_for(qstr(message_id)), &ok);
+            if (!ok) return;
+        }
+        if (new_text.trimmed().isEmpty()) return;
         const auto text = str(new_text);
+        composer_->clear();
+        hide_composer_reply_bar();
         set_message_action_enabled(false);
         auto client = client_;
         std::thread([this, client, conversation, message_id, text] {
@@ -7341,6 +7982,29 @@ protected:
         }).detach();
     }
 
+    void run_mark_conversation_read(const std::string& conversation_id,
+                                    const std::string& message_id) {
+        if (!client_ || conversation_id.empty() || message_id.empty()) return;
+        auto client = client_;
+        statusBar()->showMessage("Marking chat as read...");
+        std::thread([this, client, conversation_id, message_id] {
+            const auto result = client->mark_read(conversation_id, message_id);
+            QMetaObject::invokeMethod(this, [this, conversation_id, message_id, result] {
+                if (shutting_down_) return;
+                if (!result.ok) {
+                    statusBar()->showMessage("Mark as read failed");
+                    append_line("[error] mark read failed: "
+                                + qstr(result.error_code + " " + result.error_message));
+                    return;
+                }
+                store_.mark_conversation_read(conversation_id, message_id);
+                save_cache();
+                render_store();
+                statusBar()->showMessage("Marked as read");
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
     void advanced_avatar_action(bool conversation_avatar) {
         if (!client_) return;
         const auto attachment_id = str(advanced_avatar_id_->text().trimmed());
@@ -7655,6 +8319,7 @@ protected:
     QPushButton* sidebar_unread_tab_ {nullptr};
     QPushButton* sidebar_pinned_tab_ {nullptr};
     QPushButton* sidebar_archived_tab_ {nullptr};
+    bool drawer_accounts_expanded_ {false};
     QWidget* search_row_wrap_ {nullptr};
     QLineEdit* message_search_ {nullptr};
     QPushButton* prev_match_ {nullptr};
@@ -7700,11 +8365,17 @@ protected:
     QWidget* attachment_drop_overlay_ {nullptr};
     QWidget* composer_reply_bar_ {nullptr};
     QLabel* composer_reply_label_ {nullptr};
+    QLabel* composer_status_label_ {nullptr};
     QString composer_reply_target_id_;
+    QString composer_reply_mode_;
     QLineEdit* composer_ {nullptr};
+    QMenu* service_command_menu_ {nullptr};
     QPushButton* attach_ {nullptr};
     QPushButton* emoji_panel_ {nullptr};
     QToolButton* send_as_ {nullptr};
+    QString send_as_identity_ {QStringLiteral("personal")};
+    QString send_as_label_ {QStringLiteral("Personal account")};
+    QStringList recent_composer_tokens_;
     QPushButton* voice_ {nullptr};
     QLineEdit* message_action_id_ {nullptr};
     QLineEdit* reaction_emoji_ {nullptr};

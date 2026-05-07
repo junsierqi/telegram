@@ -1226,6 +1226,14 @@ void DesktopChatStore::apply_read_marker(const std::string& conversation_id,
     }
 }
 
+void DesktopChatStore::mark_conversation_read(const std::string& conversation_id,
+                                              const std::string& message_id) {
+    if (conversation_id.empty() || message_id.empty()) return;
+    auto& conversation = ensure_conversation(conversation_id);
+    conversation.unread_count = 0;
+    apply_read_marker(conversation_id, current_user_id_, message_id);
+}
+
 void DesktopChatStore::apply_reaction_summary(const std::string& conversation_id,
                                               const std::string& message_id,
                                               const std::string& reaction_summary) {

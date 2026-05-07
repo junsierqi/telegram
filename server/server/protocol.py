@@ -218,6 +218,7 @@ class MessageType(StrEnum):
     CONVERSATION_UPDATED = "conversation_updated"
     MESSAGE_SEND = "message_send"
     MESSAGE_DELIVER = "message_deliver"
+    SERVICE_COMMAND = "service_command"
     MESSAGE_READ = "message_read"
     MESSAGE_READ_UPDATE = "message_read_update"
     MESSAGE_EDIT = "message_edit"
@@ -462,6 +463,12 @@ class MessageSendRequestPayload:
     reply_to_message_id: str = ""
     silent: bool = False
     scheduled_at_ms: int = 0
+
+
+@dataclass(slots=True)
+class ServiceCommandRequestPayload:
+    conversation_id: str
+    command: str
 
 
 @dataclass(slots=True)
@@ -1504,6 +1511,11 @@ def parse_request_payload(message_type: MessageType, payload: dict[str, Any]) ->
             reply_to_message_id=payload.get("reply_to_message_id", ""),
             silent=bool(payload.get("silent", False)),
             scheduled_at_ms=int(payload.get("scheduled_at_ms", 0) or 0),
+        )
+    if message_type == MessageType.SERVICE_COMMAND:
+        return ServiceCommandRequestPayload(
+            conversation_id=payload["conversation_id"],
+            command=payload["command"],
         )
     if message_type == MessageType.REMOTE_INVITE:
         return RemoteInviteRequestPayload(

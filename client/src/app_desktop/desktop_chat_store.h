@@ -119,6 +119,8 @@ public:
                                   bool pinned,
                                   bool archived,
                                   long long muted_until_ms);
+    void mark_conversation_read(const std::string& conversation_id,
+                                const std::string& message_id);
 
     [[nodiscard]] const std::string& selected_conversation_id() const noexcept;
     [[nodiscard]] const DesktopConversation* selected_conversation() const;

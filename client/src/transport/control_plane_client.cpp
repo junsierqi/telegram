@@ -585,6 +585,32 @@ MessageResult ControlPlaneClient::send_message(const std::string& conversation_i
     return reply_message(conversation_id, "", text, silent, scheduled_at_ms);
 }
 
+MessageResult ControlPlaneClient::service_command(const std::string& conversation_id,
+                                                  const std::string& command) {
+    MessageResult result;
+    std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+                        + ",\"command\":" + quote(command) + "}";
+    auto response = send_and_wait("service_command", payload);
+    if (!response) {
+        result.error_code = "transport_error";
+        return result;
+    }
+    auto payload_obj = parse_payload(*response);
+    if (!payload_obj) {
+        result.error_code = "bad_response";
+        return result;
+    }
+    const std::string type = extract_type(*response);
+    if (type != "message_deliver") {
+        result.error_code = extract_string(*payload_obj, "code");
+        result.error_message = extract_string(*payload_obj, "message");
+        return result;
+    }
+    result.ok = true;
+    fill_message_result(result, *payload_obj);
+    return result;
+}
+
 MessageResult ControlPlaneClient::reply_message(const std::string& conversation_id,
                                                 const std::string& reply_to_message_id,
                                                 const std::string& text,
