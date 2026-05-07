@@ -1925,13 +1925,65 @@ public:
         danger_layout->addWidget(leave_btn);
         danger_layout->addWidget(report_btn);
         QObject::connect(leave_btn, &QPushButton::clicked, this, [this] {
-            handle_detail_action(2);
+            const auto conversation = store_.selected_conversation_id();
+            if (conversation.empty()) return;
+            if (QMessageBox::question(this, "Leave Channel",
+                                      "Leave this chat? You will need to be invited again to rejoin.")
+                != QMessageBox::Yes) {
+                return;
+            }
+            if (!client_) {
+                statusBar()->showMessage("Connect before leaving a chat", 2400);
+                return;
+            }
+            auto client = client_;
+            std::thread([this, client, conversation] {
+                const auto result = client->leave_conversation(conversation, true);
+                QMetaObject::invokeMethod(this, [this, result] {
+                    if (!result.ok) {
+                        statusBar()->showMessage(
+                            "Leave failed: " + qstr(result.error_code + " " + result.error_message), 3200);
+                        return;
+                    }
+                    statusBar()->showMessage("Left chat", 2200);
+                    sync_after_server_mutation();
+                }, Qt::QueuedConnection);
+            }).detach();
         });
         QObject::connect(report_btn, &QPushButton::clicked, this, [this] {
             const auto conversation = store_.selected_conversation_id();
             if (conversation.empty()) return;
-            append_line("[system] report selected chat: " + qstr(conversation));
-            statusBar()->showMessage("Report queued for selected chat", 2200);
+            QStringList reasons {
+                "Spam",
+                "Violence",
+                "Child abuse",
+                "Copyright",
+                "Pornography",
+                "Other",
+            };
+            bool ok = false;
+            const QString reason = QInputDialog::getItem(
+                this, "Report", "Reason", reasons, 0, false, &ok);
+            if (!ok || reason.trimmed().isEmpty()) return;
+            const QString comment = QInputDialog::getText(
+                this, "Report", "Comment (optional)", QLineEdit::Normal, QString(), &ok);
+            if (!ok) return;
+            if (!client_) {
+                statusBar()->showMessage("Connect before reporting a chat", 2400);
+                return;
+            }
+            auto client = client_;
+            std::thread([this, client, conversation, reason = str(reason), comment = str(comment)] {
+                const auto result = client->report_conversation(conversation, reason, comment);
+                QMetaObject::invokeMethod(this, [this, result] {
+                    if (!result.ok) {
+                        statusBar()->showMessage(
+                            "Report failed: " + qstr(result.error_code + " " + result.error_message), 3200);
+                        return;
+                    }
+                    statusBar()->showMessage("Report submitted", 2200);
+                }, Qt::QueuedConnection);
+            }).detach();
         });
         info_layout->addWidget(detail_danger);
         info_layout->addStretch(1);
@@ -2131,6 +2183,9 @@ public:
         privacy_chat_row->addWidget(privacy_unmute);
         privacy_chat_row->addStretch(1);
         privacy_body->addLayout(privacy_chat_row);
+        auto* privacy_sync = new QPushButton("Save Privacy Settings");
+        privacy_sync->setObjectName("settingsBackendSyncButton");
+        privacy_body->addWidget(privacy_sync);
         QObject::connect(privacy_block, &QPushButton::clicked, [this, privacy_target] {
             if (advanced_target_user_ != nullptr) advanced_target_user_->setText(privacy_target->text().trimmed());
             advanced_block_action(true);
@@ -2143,6 +2198,9 @@ public:
                          [this] { advanced_chat_ack_action(AdvancedChatOp::Mute); });
         QObject::connect(privacy_unmute, &QPushButton::clicked,
                          [this] { advanced_chat_ack_action(AdvancedChatOp::Unmute); });
+        QObject::connect(privacy_sync, &QPushButton::clicked, [this] {
+            sync_account_settings_to_backend(QStringLiteral("Privacy"));
+        });
         settings_pages_->addWidget(
             make_page("Privacy", "Block users and mute selected chats.", privacy_body));
 
@@ -2196,6 +2254,12 @@ public:
         conn_conv_lab->setObjectName("fieldLabel");
         connection_body->addWidget(conn_conv_lab);
         connection_body->addWidget(conversation_);
+        auto* connection_sync = new QPushButton("Save Connection Settings");
+        connection_sync->setObjectName("settingsBackendSyncButton");
+        connection_body->addWidget(connection_sync);
+        QObject::connect(connection_sync, &QPushButton::clicked, [this] {
+            sync_account_settings_to_backend(QStringLiteral("Connection"));
+        });
         settings_pages_->addWidget(
             make_page("Connection", "Where to connect and how to secure the link.", connection_body));
 
@@ -3076,7 +3140,7 @@ private:
             QWidget#drawerNightRow { background:{surface}; border-top:1px solid {border_subtle}; }
             QLabel#drawerNightText { color:{text_primary}; font-size:14px; font-weight:600; background:transparent; }
             QCheckBox#drawerNightSwitch { background:transparent; spacing:0; }
-            QCheckBox#drawerNightSwitch::indicator { width:58px; height:32px; border-radius:16px; background:#8b98a3; }
+            QCheckBox#drawerNightSwitch::indicator { width:58px; height:32px; border-radius:16px; background:{text_muted}; }
             QCheckBox#drawerNightSwitch::indicator:checked { background:{primary}; }
             QPushButton#drawerNightAnimatedToggle { border:none; border-radius:16px; background:transparent; }
             QLabel#drawerFooter { color:{text_muted}; font-size:12px; background:transparent; }
@@ -3469,6 +3533,9 @@ private:
         header_layout->addWidget(name);
         auto* status = new QLabel("Set Emoji Status");
         status->setObjectName("drawerStatus");
+        status->setCursor(Qt::PointingHandCursor);
+        status->setProperty("drawerEmojiStatusAction", true);
+        status->installEventFilter(this);
         header_layout->addWidget(status);
         content_layout->addWidget(header);
 
@@ -3764,8 +3831,18 @@ protected:
             auto* mouse = static_cast<QMouseEvent*>(event);
             if (mouse->button() == Qt::LeftButton) {
                 close_top_levels("accountDrawer");
-                open_settings_page_by_name(QStringLiteral("Account"));
-                statusBar()->showMessage("Wallet is represented by account storage in this build", 2600);
+                open_account_features_surface(QStringLiteral("Wallet"));
+                event->accept();
+                return true;
+            }
+        }
+        if (event != nullptr && event->type() == QEvent::MouseButtonRelease
+            && watched != nullptr
+            && watched->property("drawerEmojiStatusAction").toBool()) {
+            auto* mouse = static_cast<QMouseEvent*>(event);
+            if (mouse->button() == Qt::LeftButton) {
+                close_top_levels("accountDrawer");
+                update_emoji_status_from_dialog();
                 event->accept();
                 return true;
             }
@@ -4120,13 +4197,25 @@ protected:
         list->setFrameShape(QFrame::NoFrame);
         list->setIconSize(QSize(82, 82));
         list->setFocusPolicy(Qt::NoFocus);
-        list->setSelectionMode(QAbstractItemView::NoSelection);
+        list->setSelectionMode(QAbstractItemView::SingleSelection);
         body_layout->addWidget(list, 1);
         auto* actions = new QHBoxLayout();
         auto* add = new QPushButton("Add Contact");
         add->setObjectName("contactsTextAction");
         add->setEnabled(client_ != nullptr);
         actions->addWidget(add);
+        auto* edit = new QPushButton("Edit");
+        edit->setObjectName("contactsTextAction");
+        edit->setEnabled(client_ != nullptr);
+        actions->addWidget(edit);
+        auto* share = new QPushButton("Share");
+        share->setObjectName("contactsTextAction");
+        share->setEnabled(client_ != nullptr);
+        actions->addWidget(share);
+        auto* remove = new QPushButton("Delete");
+        remove->setObjectName("contactsTextAction");
+        remove->setEnabled(client_ != nullptr);
+        actions->addWidget(remove);
         actions->addStretch(1);
         auto* refresh = new QPushButton("Refresh");
         refresh->setObjectName("contactsTextAction");
@@ -4155,6 +4244,9 @@ protected:
                                             82)),
                     label);
                 item->setSizeHint(QSize(0, 94));
+                item->setData(Qt::UserRole, qstr(contact.user_id));
+                item->setData(Qt::UserRole + 1,
+                              qstr(contact.display_name.empty() ? contact.user_id : contact.display_name));
                 list->addItem(item);
             }
             if (result.contacts.empty()) {
@@ -4163,6 +4255,11 @@ protected:
                 empty->setSizeHint(QSize(0, 54));
                 list->addItem(empty);
             }
+        };
+        auto selected_contact_id = [list]() -> QString {
+            auto* item = list->currentItem();
+            if (item == nullptr) return {};
+            return item->data(Qt::UserRole).toString();
         };
         auto load_contacts = [this, dlg, render_result] {
             if (!client_) return;
@@ -4207,6 +4304,86 @@ protected:
                 }, Qt::QueuedConnection);
             }).detach();
         });
+        auto run_contact_list_action =
+            [this, dlg, status, render_result](const QString& label,
+                                               std::function<telegram_like::client::transport::ContactListResult(
+                                                   telegram_like::client::transport::ControlPlaneClient*)> action) {
+                if (!client_) return;
+                status->setText(label);
+                auto client = client_;
+                std::thread([this, dlg, client, render_result, action = std::move(action)] {
+                    const auto result = action(client.get());
+                    QMetaObject::invokeMethod(this, [dlg, result, render_result] {
+                        if (dlg == nullptr || !dlg->isVisible()) return;
+                        render_result(result);
+                    }, Qt::QueuedConnection);
+                }).detach();
+            };
+        QObject::connect(edit, &QPushButton::clicked, this,
+                         [this, list, status, selected_contact_id, run_contact_list_action] {
+            const QString user_id = selected_contact_id();
+            auto* item = list->currentItem();
+            if (user_id.isEmpty() || item == nullptr) {
+                status->setText("Select a contact to edit");
+                return;
+            }
+            bool ok = false;
+            const QString current = item->data(Qt::UserRole + 1).toString();
+            const QString alias = QInputDialog::getText(
+                this, "Edit Contact", "Name", QLineEdit::Normal, current, &ok);
+            if (!ok || alias.trimmed().isEmpty()) return;
+            const std::string target = str(user_id);
+            const std::string display = str(alias.trimmed());
+            run_contact_list_action("Saving contact name...",
+                                    [target, display](auto* client) {
+                                        return client->edit_contact(target, display);
+                                    });
+        });
+        QObject::connect(remove, &QPushButton::clicked, this,
+                         [this, status, selected_contact_id, run_contact_list_action] {
+            const QString user_id = selected_contact_id();
+            if (user_id.isEmpty()) {
+                status->setText("Select a contact to delete");
+                return;
+            }
+            if (QMessageBox::question(this, "Delete Contact",
+                                      "Delete this contact from your list?")
+                != QMessageBox::Yes) {
+                return;
+            }
+            const std::string target = str(user_id);
+            run_contact_list_action("Deleting contact...",
+                                    [target](auto* client) {
+                                        return client->remove_contact(target);
+                                    });
+        });
+        QObject::connect(share, &QPushButton::clicked, this,
+                         [this, dlg, status, selected_contact_id] {
+            const QString user_id = selected_contact_id();
+            if (user_id.isEmpty()) {
+                status->setText("Select a contact to share");
+                return;
+            }
+            if (!client_) return;
+            status->setText("Preparing shared contact...");
+            const std::string target = str(user_id);
+            auto client = client_;
+            std::thread([this, dlg, client, target] {
+                const auto result = client->share_contact(target);
+                QMetaObject::invokeMethod(this, [dlg, result] {
+                    if (dlg == nullptr || !dlg->isVisible()) return;
+                    if (!result.ok) {
+                        QMessageBox::warning(dlg, "Share Contact",
+                                             "Share failed: "
+                                             + qstr(result.error_code + " " + result.error_message));
+                        return;
+                    }
+                    QApplication::clipboard()->setText(qstr(result.share_text));
+                    QMessageBox::information(dlg, "Share Contact",
+                                             "Contact share text copied to clipboard.");
+                }, Qt::QueuedConnection);
+            }).detach();
+        });
         auto sort_descending = std::make_shared<bool>(false);
         QObject::connect(sort, &QToolButton::clicked, this, [sort_descending, sort, list, status] {
             *sort_descending = !*sort_descending;
@@ -4236,16 +4413,17 @@ protected:
         dlg->setObjectName("profileModal");
         dlg->setAttribute(Qt::WA_DeleteOnClose);
         dlg->setWindowTitle("Profile");
-        dlg->resize(785, 802);
+        dlg->resize(560, 690);
         dlg->setStyleSheet(QStringLiteral(
             "QDialog#profileModal { background:#ffffff; border-radius:12px; }"
-            "QWidget#profileModalHero { background:#f3f3f3; }"
-            "QLabel#profileModalName { color:#0f1419; font-size:28px; font-weight:700; }"
-            "QLabel#profileModalOnline { color:#168acd; font-size:24px; }"
+            "QWidget#profileModalHero { background:#f3f6f8; border-bottom:1px solid #dfe3e7; }"
+            "QLabel#profileModalName { color:#0f1419; font-size:21px; font-weight:700; }"
+            "QLabel#profileModalOnline { color:#168acd; font-size:14px; }"
             "QWidget#profileModalRow { background:#ffffff; border-bottom:1px solid #e7e9eb; }"
-            "QLabel#profileModalPrimary { color:#0f1419; font-size:24px; }"
-            "QLabel#profileModalSecondary { color:#8a9299; font-size:24px; }"
-            "QLabel#profileModalStories { color:#8a9299; font-size:24px; border-top:1px solid #e7e9eb; background:#ffffff; }"
+            "QLabel#profileModalSecondary { color:#7f8b94; font-size:13px; }"
+            "QLineEdit#profileModalField { background:#ffffff; border:none; color:#0f1419; font-size:15px; padding:0; }"
+            "QToolButton#profileModalTopButton { background:transparent; border:none; color:#687680; font-size:18px; padding:8px; }"
+            "QLabel#profileModalStories { color:#8a9299; font-size:14px; border-top:1px solid #e7e9eb; background:#ffffff; }"
         ));
         const QRect mainGeo = geometry();
         dlg->move(mainGeo.center().x() - dlg->width() / 2,
@@ -4256,21 +4434,21 @@ protected:
         auto* hero = new QWidget();
         hero->setObjectName("profileModalHero");
         auto* hero_layout = new QVBoxLayout(hero);
-        hero_layout->setContentsMargins(28, 34, 28, 56);
+        hero_layout->setContentsMargins(22, 18, 22, 28);
         auto* top = new QHBoxLayout();
         top->addStretch(1);
         auto* edit = new QToolButton();
-        edit->setObjectName("chatInfoBtn");
+        edit->setObjectName("profileModalTopButton");
         edit->setText(QString::fromUtf8("\xe2\x9c\x8e"));
         top->addWidget(edit);
         auto* close = new QToolButton();
-        close->setObjectName("settingsClose");
+        close->setObjectName("profileModalTopButton");
         close->setText(QString::fromUtf8("\xe2\x9c\x95"));
         top->addWidget(close);
         hero_layout->addLayout(top);
         auto* avatar = new QLabel();
-        avatar->setFixedSize(160, 160);
-        avatar->setPixmap(avatar_pixmap_for("xirmir", QStringLiteral("XZMQ"), 160));
+        avatar->setFixedSize(112, 112);
+        avatar->setPixmap(avatar_pixmap_for("xirmir", QStringLiteral("XZMQ"), 112));
         hero_layout->addWidget(avatar, 0, Qt::AlignHCenter);
         auto* name = new QLabel("XZMQ");
         name->setObjectName("profileModalName");
@@ -4285,10 +4463,13 @@ protected:
             auto* row = new QWidget();
             row->setObjectName("profileModalRow");
             auto* layout = new QHBoxLayout(row);
-            layout->setContentsMargins(48, 22, 48, 18);
+            layout->setContentsMargins(28, 13, 24, 12);
             auto* texts = new QVBoxLayout();
-            auto* p = new QLabel(primary);
-            p->setObjectName("profileModalPrimary");
+            texts->setSpacing(2);
+            auto* p = new QLineEdit(primary);
+            p->setObjectName("profileModalField");
+            p->setReadOnly(true);
+            p->setFrame(false);
             auto* s = new QLabel(secondary);
             s->setObjectName("profileModalSecondary");
             texts->addWidget(p);
@@ -4303,11 +4484,14 @@ protected:
         };
         add_field("+1 302 276 8530", "Mobile");
         add_field("@xirmir", "Username", true);
-        auto* stories = new QLabel("Your stories will be here.");
+        auto* stories = new QPushButton("Your stories will be here.");
         stories->setObjectName("profileModalStories");
-        stories->setAlignment(Qt::AlignCenter);
+        stories->setCursor(Qt::PointingHandCursor);
         stories->setMinimumHeight(168);
         root->addWidget(stories, 1);
+        QObject::connect(stories, &QPushButton::clicked, dlg, [this] {
+            publish_story_from_dialog();
+        });
         QObject::connect(edit, &QToolButton::clicked, dlg, [this, dlg] {
             dlg->accept();
             open_settings_page_by_name(QStringLiteral("Profile"));
@@ -4896,6 +5080,169 @@ protected:
                         .arg(result.contacts)
                         .arg(result.devices),
                     3200);
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void sync_account_settings_to_backend(const QString& source) {
+        if (!client_) {
+            statusBar()->showMessage(source + QStringLiteral(" settings sync requires login"), 2400);
+            return;
+        }
+        const bool tls_enabled = tls_ != nullptr && tls_->isChecked();
+        const bool two_fa_hint = advanced_code_ != nullptr
+            && !advanced_code_->text().trimmed().isEmpty();
+        QSettings prefs;
+        const QString proxy_mode = prefs.value(QStringLiteral("proxy/mode"), QStringLiteral("system")).toString();
+        const QString proxy_host = prefs.value(QStringLiteral("proxy/host"), QString()).toString();
+        const int proxy_port = prefs.value(QStringLiteral("proxy/port"), 0).toInt();
+        const QString proxy_secret = prefs.value(QStringLiteral("proxy/secret"), QString()).toString();
+        statusBar()->showMessage("Saving " + source + " settings...");
+        auto client = client_;
+        std::thread([this, client, tls_enabled, two_fa_hint,
+                     proxy_mode = str(proxy_mode),
+                     proxy_host = str(proxy_host),
+                     proxy_port,
+                     proxy_secret = str(proxy_secret)] {
+            const auto result = client->account_settings_update(
+                true,
+                true,
+                "contacts",
+                "contacts",
+                two_fa_hint,
+                tls_enabled,
+                proxy_mode,
+                proxy_host,
+                proxy_port,
+                proxy_secret);
+            QMetaObject::invokeMethod(this, [this, result] {
+                if (shutting_down_) return;
+                if (!result.ok) {
+                    statusBar()->showMessage("Settings sync failed: "
+                        + qstr(result.error_code + " " + result.error_message), 3200);
+                    return;
+                }
+                statusBar()->showMessage(
+                    QStringLiteral("Settings saved: proxy=%1 notifications=%2")
+                        .arg(qstr(result.proxy_mode))
+                        .arg(result.notifications_enabled ? QStringLiteral("on") : QStringLiteral("off")),
+                    2600);
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void open_account_features_surface(const QString& source) {
+        if (!client_) {
+            open_settings_page_by_name(QStringLiteral("Account"));
+            statusBar()->showMessage(source + QStringLiteral(" requires login"), 2200);
+            return;
+        }
+        statusBar()->showMessage("Loading " + source + "...");
+        auto client = client_;
+        std::thread([this, client, source] {
+            const auto result = client->account_features_get();
+            QMetaObject::invokeMethod(this, [this, result, source] {
+                if (shutting_down_) return;
+                if (!result.ok) {
+                    statusBar()->showMessage(source + " failed: "
+                        + qstr(result.error_code + " " + result.error_message), 3200);
+                    return;
+                }
+                open_settings_page_by_name(QStringLiteral("Account"));
+                QMessageBox::information(
+                    this,
+                    source,
+                    QStringLiteral("Premium: %1\nWallet balance: %2\nStars: %3\nGifts: %4\nStories: %5\nEmoji status: %6")
+                        .arg(result.premium ? QStringLiteral("active") : QStringLiteral("inactive"))
+                        .arg(result.wallet_balance)
+                        .arg(result.stars_balance)
+                        .arg(result.gifts_available)
+                        .arg(result.stories_count)
+                        .arg(qstr(result.emoji_status)));
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void update_emoji_status_from_dialog() {
+        if (!client_) {
+            statusBar()->showMessage("Emoji Status requires login", 2200);
+            return;
+        }
+        bool ok = false;
+        const QString status = QInputDialog::getText(
+            this, "Emoji Status", "Status", QLineEdit::Normal, QStringLiteral("✨"), &ok);
+        if (!ok || status.trimmed().isEmpty()) return;
+        auto client = client_;
+        const std::string emoji = str(status.trimmed());
+        std::thread([this, client, emoji] {
+            const auto result = client->account_features_update(emoji, "", "", "", "");
+            QMetaObject::invokeMethod(this, [this, result] {
+                if (!result.ok) {
+                    statusBar()->showMessage("Emoji Status failed: "
+                        + qstr(result.error_code + " " + result.error_message), 3200);
+                    return;
+                }
+                statusBar()->showMessage("Emoji Status saved: " + qstr(result.emoji_status), 2400);
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void publish_story_from_dialog() {
+        if (!client_) {
+            statusBar()->showMessage("Stories require login", 2200);
+            return;
+        }
+        bool ok = false;
+        const QString title = QInputDialog::getText(
+            this, "New Story", "Title", QLineEdit::Normal, QStringLiteral("Desktop story"), &ok);
+        if (!ok || title.trimmed().isEmpty()) return;
+        const QString text = QInputDialog::getText(
+            this, "New Story", "Text", QLineEdit::Normal, QString(), &ok);
+        if (!ok) return;
+        auto client = client_;
+        std::thread([this, client, title = str(title.trimmed()), text = str(text)] {
+            const auto result = client->account_features_update("", title, text, "", "");
+            QMetaObject::invokeMethod(this, [this, result] {
+                if (!result.ok) {
+                    statusBar()->showMessage("Story failed: "
+                        + qstr(result.error_code + " " + result.error_message), 3200);
+                    return;
+                }
+                statusBar()->showMessage(
+                    QStringLiteral("Story published: %1 total").arg(result.stories_count), 2400);
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void send_gift_to_selected_chat() {
+        if (!client_) {
+            statusBar()->showMessage("Gift requires login", 2200);
+            return;
+        }
+        const auto* conversation = store_.selected_conversation();
+        std::string recipient;
+        if (conversation != nullptr) {
+            for (const auto& uid : conversation->participant_user_ids) {
+                if (uid != store_.current_user_id()) {
+                    recipient = uid;
+                    break;
+                }
+            }
+        }
+        bool ok = false;
+        const QString gift = QInputDialog::getText(
+            this, "Send Gift", "Gift", QLineEdit::Normal, QStringLiteral("Telegram Gift"), &ok);
+        if (!ok || gift.trimmed().isEmpty()) return;
+        auto client = client_;
+        std::thread([this, client, gift = str(gift.trimmed()), recipient] {
+            const auto result = client->account_features_update("", "", "", gift, recipient);
+            QMetaObject::invokeMethod(this, [this, result] {
+                if (!result.ok) {
+                    statusBar()->showMessage("Gift failed: "
+                        + qstr(result.error_code + " " + result.error_message), 3200);
+                    return;
+                }
+                statusBar()->showMessage("Gift recorded: " + qstr(result.last_gift_title), 2400);
             }, Qt::QueuedConnection);
         }).detach();
     }
@@ -5918,8 +6265,7 @@ protected:
             return;
         }
         if (label == QStringLiteral("Gift")) {
-            open_settings_page_by_name(QStringLiteral("Account"));
-            statusBar()->showMessage("Gift actions are represented by account storage in this build", 2200);
+            send_gift_to_selected_chat();
             return;
         }
         statusBar()->showMessage(label + QStringLiteral(" is available from chat settings"), 2200);
@@ -5989,6 +6335,10 @@ protected:
         const QString attachment_id = item->data(DetailRowAttachmentIdRole).toString();
         const QString link = item->data(DetailRowLinkRole).toString();
         const QString command = item->data(DetailRowCommandRole).toString();
+        if (kind == QLatin1String("shared_media_more")) {
+            load_shared_media_page(command.isEmpty() ? QStringLiteral("media") : command, 0);
+            return;
+        }
         if (kind == QLatin1String("command") && !command.isEmpty()) {
             run_service_command(command);
             return;
@@ -6230,10 +6580,85 @@ protected:
                                .arg(poll_count)
                                .arg(poll_count == 1 ? QString() : QStringLiteral("s")));
         }
+        if (client_ != nullptr) {
+            add_detail_row(detail_media_list_, QStringLiteral("download"),
+                           QStringLiteral("Load media from server"),
+                           QStringLiteral("shared_media_more"),
+                           {}, {}, {}, QStringLiteral("media"));
+            add_detail_row(detail_files_list_, QStringLiteral("download"),
+                           QStringLiteral("Load files from server"),
+                           QStringLiteral("shared_media_more"),
+                           {}, {}, {}, QStringLiteral("files"));
+            add_detail_row(detail_links_list_, QStringLiteral("download"),
+                           QStringLiteral("Load links from server"),
+                           QStringLiteral("shared_media_more"),
+                           {}, {}, {}, QStringLiteral("links"));
+            add_detail_row(detail_voice_list_, QStringLiteral("download"),
+                           QStringLiteral("Load voice from server"),
+                           QStringLiteral("shared_media_more"),
+                           {}, {}, {}, QStringLiteral("voice"));
+        }
         fit_detail_list(detail_media_list_);
         fit_detail_list(detail_files_list_);
         fit_detail_list(detail_links_list_);
         fit_detail_list(detail_voice_list_);
+    }
+
+    void load_shared_media_page(const QString& kind, int offset) {
+        const auto conversation = store_.selected_conversation_id();
+        if (conversation.empty() || !client_) return;
+        statusBar()->showMessage("Loading shared " + kind + "...");
+        auto client = client_;
+        const std::string request_kind = str(kind);
+        std::thread([this, client, conversation, request_kind, offset] {
+            const auto result = client->shared_media_page(conversation, request_kind, offset, 30);
+            QMetaObject::invokeMethod(this, [this, result] {
+                if (!result.ok) {
+                    statusBar()->showMessage(
+                        "Shared media load failed: "
+                        + qstr(result.error_code + " " + result.error_message), 3200);
+                    return;
+                }
+                QListWidget* target = detail_media_list_;
+                QString icon = QStringLiteral("photo");
+                QString row_kind = QStringLiteral("media");
+                if (result.kind == "files" || result.kind == "file") {
+                    target = detail_files_list_;
+                    icon = QStringLiteral("files");
+                    row_kind = QStringLiteral("file");
+                } else if (result.kind == "links" || result.kind == "link") {
+                    target = detail_links_list_;
+                    icon = QStringLiteral("link");
+                    row_kind = QStringLiteral("link");
+                } else if (result.kind == "voice" || result.kind == "audio") {
+                    target = detail_voice_list_;
+                    icon = QStringLiteral("voice");
+                    row_kind = QStringLiteral("voice");
+                }
+                if (target == nullptr) return;
+                target->clear();
+                for (const auto& entry : result.entries) {
+                    const QString title = !entry.filename.empty()
+                        ? qstr(entry.filename)
+                        : (!entry.link.empty() ? qstr(entry.link) : qstr(entry.text));
+                    add_detail_row(target,
+                                   icon,
+                                   title.isEmpty() ? qstr(entry.message_id) : title,
+                                   row_kind,
+                                   qstr(entry.message_id),
+                                   qstr(entry.attachment_id),
+                                   qstr(entry.link));
+                }
+                if (result.has_more) {
+                    add_detail_row(target, QStringLiteral("download"),
+                                   QStringLiteral("Load more"),
+                                   QStringLiteral("shared_media_more"),
+                                   {}, {}, {}, qstr(result.kind));
+                }
+                fit_detail_list(target);
+                statusBar()->showMessage("Shared media loaded", 1800);
+            }, Qt::QueuedConnection);
+        }).detach();
     }
 
     void populate_detail_members(

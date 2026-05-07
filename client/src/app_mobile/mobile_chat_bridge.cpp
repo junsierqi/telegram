@@ -543,6 +543,142 @@ void MobileChatBridge::callEnd(const QString& callId) {
     }).detach();
 }
 
+// ---- tdesktop account settings / account features parity ----
+
+namespace {
+
+QVariantMap account_settings_map(const telegram_like::client::transport::AccountSettingsResult& r) {
+    QVariantMap p;
+    p["userId"] = to_q(r.user_id);
+    p["notificationsEnabled"] = r.notifications_enabled;
+    p["messagePreviewEnabled"] = r.message_preview_enabled;
+    p["whoCanAddToGroups"] = to_q(r.who_can_add_to_groups);
+    p["phoneNumberVisibility"] = to_q(r.phone_number_visibility);
+    p["twoStepVerificationEnabled"] = r.two_step_verification_enabled;
+    p["passcodeLockEnabled"] = r.passcode_lock_enabled;
+    p["proxyMode"] = to_q(r.proxy_mode);
+    p["proxyHost"] = to_q(r.proxy_host);
+    p["proxyPort"] = r.proxy_port;
+    p["proxySecret"] = to_q(r.proxy_secret);
+    return p;
+}
+
+QVariantMap account_features_map(const telegram_like::client::transport::AccountFeaturesResult& r) {
+    QVariantMap p;
+    p["userId"] = to_q(r.user_id);
+    p["premium"] = r.premium;
+    p["starsBalance"] = r.stars_balance;
+    p["walletBalance"] = r.wallet_balance;
+    p["giftsAvailable"] = r.gifts_available;
+    p["storiesCount"] = r.stories_count;
+    p["emojiStatus"] = to_q(r.emoji_status);
+    p["lastStoryTitle"] = to_q(r.last_story_title);
+    p["lastGiftTitle"] = to_q(r.last_gift_title);
+    return p;
+}
+
+}  // namespace
+
+void MobileChatBridge::refreshAccountSettings() {
+    if (!client_) return;
+    auto client = client_;
+    std::thread([this, client] {
+        const auto r = client->account_settings_get();
+        QMetaObject::invokeMethod(this, [this, r] {
+            if (shutting_down_) return;
+            if (!r.ok) { emit errorReported(to_q("account_settings " + r.error_code + " " + r.error_message)); return; }
+            emit accountSettingsReady(account_settings_map(r));
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void MobileChatBridge::saveAccountSettings(bool notificationsEnabled,
+                                           bool messagePreviewEnabled,
+                                           const QString& whoCanAddToGroups,
+                                           const QString& phoneNumberVisibility,
+                                           bool twoStepVerificationEnabled,
+                                           bool passcodeLockEnabled,
+                                           const QString& proxyMode,
+                                           const QString& proxyHost,
+                                           int proxyPort,
+                                           const QString& proxySecret) {
+    if (!client_) return;
+    auto client = client_;
+    const auto groups = to_std(whoCanAddToGroups);
+    const auto phone = to_std(phoneNumberVisibility);
+    const auto mode = to_std(proxyMode);
+    const auto host = to_std(proxyHost);
+    const auto secret = to_std(proxySecret);
+    std::thread([this, client, notificationsEnabled, messagePreviewEnabled, groups, phone,
+                 twoStepVerificationEnabled, passcodeLockEnabled, mode, host, proxyPort, secret] {
+        const auto r = client->account_settings_update(
+            notificationsEnabled, messagePreviewEnabled, groups, phone,
+            twoStepVerificationEnabled, passcodeLockEnabled, mode, host, proxyPort, secret);
+        QMetaObject::invokeMethod(this, [this, r] {
+            if (shutting_down_) return;
+            if (!r.ok) { emit errorReported(to_q("account_settings_save " + r.error_code + " " + r.error_message)); return; }
+            emit accountSettingsReady(account_settings_map(r));
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void MobileChatBridge::refreshAccountFeatures() {
+    if (!client_) return;
+    auto client = client_;
+    std::thread([this, client] {
+        const auto r = client->account_features_get();
+        QMetaObject::invokeMethod(this, [this, r] {
+            if (shutting_down_) return;
+            if (!r.ok) { emit errorReported(to_q("account_features " + r.error_code + " " + r.error_message)); return; }
+            emit accountFeaturesReady(account_features_map(r));
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void MobileChatBridge::setEmojiStatus(const QString& emojiStatus) {
+    if (!client_) return;
+    auto client = client_;
+    const auto emoji = to_std(emojiStatus);
+    std::thread([this, client, emoji] {
+        const auto r = client->account_features_update(emoji, "", "", "", "");
+        QMetaObject::invokeMethod(this, [this, r] {
+            if (shutting_down_) return;
+            if (!r.ok) { emit errorReported(to_q("emoji_status " + r.error_code + " " + r.error_message)); return; }
+            emit accountFeaturesReady(account_features_map(r));
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void MobileChatBridge::publishStory(const QString& title, const QString& text) {
+    if (!client_) return;
+    auto client = client_;
+    const auto t = to_std(title);
+    const auto body = to_std(text);
+    std::thread([this, client, t, body] {
+        const auto r = client->account_features_update("", t, body, "", "");
+        QMetaObject::invokeMethod(this, [this, r] {
+            if (shutting_down_) return;
+            if (!r.ok) { emit errorReported(to_q("story " + r.error_code + " " + r.error_message)); return; }
+            emit accountFeaturesReady(account_features_map(r));
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
+void MobileChatBridge::sendGift(const QString& title, const QString& recipientUserId) {
+    if (!client_) return;
+    auto client = client_;
+    const auto gift = to_std(title);
+    const auto recipient = to_std(recipientUserId);
+    std::thread([this, client, gift, recipient] {
+        const auto r = client->account_features_update("", "", "", gift, recipient);
+        QMetaObject::invokeMethod(this, [this, r] {
+            if (shutting_down_) return;
+            if (!r.ok) { emit errorReported(to_q("gift " + r.error_code + " " + r.error_message)); return; }
+            emit accountFeaturesReady(account_features_map(r));
+        }, Qt::QueuedConnection);
+    }).detach();
+}
+
 QVariantList MobileChatBridge::selectedMessages() const {
     QVariantList out;
     const auto* conv = store_.selected_conversation();

@@ -1031,6 +1031,121 @@ ContactListResult parse_contact_list(const std::string& response) {
     return result;
 }
 
+ContactShareResult parse_contact_share(const std::string& response) {
+    ContactShareResult result;
+    auto payload_obj = parse_payload(response);
+    if (!payload_obj) {
+        result.error_code = "bad_response";
+        return result;
+    }
+    std::string type = extract_type(response);
+    if (type != "contact_share_response") {
+        result.error_code = extract_string(*payload_obj, "code");
+        result.error_message = extract_string(*payload_obj, "message");
+        return result;
+    }
+    result.ok = true;
+    result.user_id = extract_string(*payload_obj, "user_id");
+    result.display_name = extract_string(*payload_obj, "display_name");
+    result.username = extract_string(*payload_obj, "username");
+    result.share_text = extract_string(*payload_obj, "share_text");
+    return result;
+}
+
+SharedMediaPageResult parse_shared_media_page(const std::string& response) {
+    SharedMediaPageResult result;
+    auto payload_obj = parse_payload(response);
+    if (!payload_obj) {
+        result.error_code = "bad_response";
+        return result;
+    }
+    std::string type = extract_type(response);
+    if (type != "shared_media_page_response") {
+        result.error_code = extract_string(*payload_obj, "code");
+        result.error_message = extract_string(*payload_obj, "message");
+        return result;
+    }
+    result.ok = true;
+    result.conversation_id = extract_string(*payload_obj, "conversation_id");
+    result.kind = extract_string(*payload_obj, "kind");
+    result.next_offset = static_cast<int>(extract_number(*payload_obj, "next_offset"));
+    result.has_more = extract_bool(*payload_obj, "has_more");
+    const auto* entries = find_member(*payload_obj, "entries");
+    if (entries && entries->is_array()) {
+        for (const auto& value : *entries->as_array()) {
+            if (!value.is_object()) continue;
+            const auto* object = value.as_object();
+            SharedMediaEntry entry;
+            entry.conversation_id = extract_string(*object, "conversation_id");
+            entry.message_id = extract_string(*object, "message_id");
+            entry.sender_user_id = extract_string(*object, "sender_user_id");
+            entry.text = extract_string(*object, "text");
+            entry.created_at_ms = extract_number(*object, "created_at_ms");
+            entry.attachment_id = extract_string(*object, "attachment_id");
+            entry.filename = extract_string(*object, "filename");
+            entry.mime_type = extract_string(*object, "mime_type");
+            entry.size_bytes = extract_number(*object, "size_bytes");
+            entry.link = extract_string(*object, "link");
+            result.entries.push_back(std::move(entry));
+        }
+    }
+    return result;
+}
+
+AccountSettingsResult parse_account_settings(const std::string& response) {
+    AccountSettingsResult result;
+    auto payload_obj = parse_payload(response);
+    if (!payload_obj) {
+        result.error_code = "bad_response";
+        return result;
+    }
+    const std::string type = extract_type(response);
+    if (type != "account_settings_response") {
+        result.error_code = extract_string(*payload_obj, "code");
+        result.error_message = extract_string(*payload_obj, "message");
+        return result;
+    }
+    result.ok = true;
+    result.user_id = extract_string(*payload_obj, "user_id");
+    result.notifications_enabled = extract_bool(*payload_obj, "notifications_enabled", true);
+    result.message_preview_enabled = extract_bool(*payload_obj, "message_preview_enabled", true);
+    result.who_can_add_to_groups = extract_string(*payload_obj, "who_can_add_to_groups");
+    result.phone_number_visibility = extract_string(*payload_obj, "phone_number_visibility");
+    result.two_step_verification_enabled = extract_bool(*payload_obj, "two_step_verification_enabled");
+    result.passcode_lock_enabled = extract_bool(*payload_obj, "passcode_lock_enabled");
+    result.proxy_mode = extract_string(*payload_obj, "proxy_mode");
+    result.proxy_host = extract_string(*payload_obj, "proxy_host");
+    result.proxy_port = static_cast<int>(extract_number(*payload_obj, "proxy_port"));
+    result.proxy_secret = extract_string(*payload_obj, "proxy_secret");
+    return result;
+}
+
+AccountFeaturesResult parse_account_features(const std::string& response) {
+    AccountFeaturesResult result;
+    auto payload_obj = parse_payload(response);
+    if (!payload_obj) {
+        result.error_code = "bad_response";
+        return result;
+    }
+    const std::string type = extract_type(response);
+    if (type != "account_features_response") {
+        result.error_code = extract_string(*payload_obj, "code");
+        result.error_message = extract_string(*payload_obj, "message");
+        return result;
+    }
+    result.ok = true;
+    result.user_id = extract_string(*payload_obj, "user_id");
+    result.premium = extract_bool(*payload_obj, "premium");
+    result.stars_balance = static_cast<int>(extract_number(*payload_obj, "stars_balance"));
+    result.wallet_balance = static_cast<int>(extract_number(*payload_obj, "wallet_balance"));
+    result.gifts_available = static_cast<int>(extract_number(*payload_obj, "gifts_available"));
+    result.stories_count = static_cast<int>(extract_number(*payload_obj, "stories_count"));
+    result.emoji_status = extract_string(*payload_obj, "emoji_status");
+    result.last_story_title = extract_string(*payload_obj, "last_story_title");
+    result.last_gift_title = extract_string(*payload_obj, "last_gift_title");
+    return result;
+}
+
 ProfileResult parse_profile_response(const std::string& response) {
     ProfileResult result;
     auto payload_obj = parse_payload(response);
@@ -1183,6 +1298,100 @@ ContactListResult ControlPlaneClient::remove_contact(const std::string& target_u
     return parse_contact_list(*response);
 }
 
+ContactListResult ControlPlaneClient::edit_contact(const std::string& target_user_id,
+                                                   const std::string& display_name) {
+    std::string payload = "{\"target_user_id\":" + quote(target_user_id)
+                        + ",\"display_name\":" + quote(display_name) + "}";
+    auto response = send_and_wait("contact_edit", payload);
+    if (!response) {
+        ContactListResult r;
+        r.error_code = "transport_error";
+        return r;
+    }
+    return parse_contact_list(*response);
+}
+
+ContactShareResult ControlPlaneClient::share_contact(const std::string& target_user_id) {
+    std::string payload = "{\"target_user_id\":" + quote(target_user_id) + "}";
+    auto response = send_and_wait("contact_share_request", payload);
+    if (!response) {
+        ContactShareResult r;
+        r.error_code = "transport_error";
+        return r;
+    }
+    return parse_contact_share(*response);
+}
+
+AccountSettingsResult ControlPlaneClient::account_settings_get() {
+    auto response = send_and_wait("account_settings_get_request", "{}");
+    if (!response) {
+        AccountSettingsResult r;
+        r.error_code = "transport_error";
+        return r;
+    }
+    return parse_account_settings(*response);
+}
+
+AccountSettingsResult ControlPlaneClient::account_settings_update(
+        bool notifications_enabled,
+        bool message_preview_enabled,
+        const std::string& who_can_add_to_groups,
+        const std::string& phone_number_visibility,
+        bool two_step_verification_enabled,
+        bool passcode_lock_enabled,
+        const std::string& proxy_mode,
+        const std::string& proxy_host,
+        int proxy_port,
+        const std::string& proxy_secret) {
+    std::string payload = "{\"notifications_enabled\":" + std::string(notifications_enabled ? "true" : "false")
+                        + ",\"message_preview_enabled\":" + std::string(message_preview_enabled ? "true" : "false")
+                        + ",\"who_can_add_to_groups\":" + quote(who_can_add_to_groups)
+                        + ",\"phone_number_visibility\":" + quote(phone_number_visibility)
+                        + ",\"two_step_verification_enabled\":" + std::string(two_step_verification_enabled ? "true" : "false")
+                        + ",\"passcode_lock_enabled\":" + std::string(passcode_lock_enabled ? "true" : "false")
+                        + ",\"proxy_mode\":" + quote(proxy_mode)
+                        + ",\"proxy_host\":" + quote(proxy_host)
+                        + ",\"proxy_port\":" + std::to_string(proxy_port)
+                        + ",\"proxy_secret\":" + quote(proxy_secret) + "}";
+    auto response = send_and_wait("account_settings_update_request", payload);
+    if (!response) {
+        AccountSettingsResult r;
+        r.error_code = "transport_error";
+        return r;
+    }
+    return parse_account_settings(*response);
+}
+
+AccountFeaturesResult ControlPlaneClient::account_features_get() {
+    auto response = send_and_wait("account_features_get_request", "{}");
+    if (!response) {
+        AccountFeaturesResult r;
+        r.error_code = "transport_error";
+        return r;
+    }
+    return parse_account_features(*response);
+}
+
+AccountFeaturesResult ControlPlaneClient::account_features_update(
+        const std::string& emoji_status,
+        const std::string& story_title,
+        const std::string& story_text,
+        const std::string& gift_title,
+        const std::string& gift_recipient_user_id) {
+    std::string payload = "{\"emoji_status\":" + quote(emoji_status)
+                        + ",\"story_title\":" + quote(story_title)
+                        + ",\"story_text\":" + quote(story_text)
+                        + ",\"gift_title\":" + quote(gift_title)
+                        + ",\"gift_recipient_user_id\":" + quote(gift_recipient_user_id) + "}";
+    auto response = send_and_wait("account_features_update_request", payload);
+    if (!response) {
+        AccountFeaturesResult r;
+        r.error_code = "transport_error";
+        return r;
+    }
+    return parse_account_features(*response);
+}
+
 ProfileResult ControlPlaneClient::profile_get() {
     auto response = send_and_wait("profile_get_request", "{}");
     if (!response) {
@@ -1285,8 +1494,8 @@ ConversationActionResult ControlPlaneClient::add_conversation_participant(
 }
 
 ConversationActionResult ControlPlaneClient::remove_conversation_participant(
-    const std::string& conversation_id,
-    const std::string& user_id) {
+        const std::string& conversation_id,
+        const std::string& user_id) {
     std::string payload = "{\"conversation_id\":" + quote(conversation_id)
                         + ",\"user_id\":" + quote(user_id) + "}";
     auto response = send_and_wait("conversation_remove_participant", payload);
@@ -1296,6 +1505,46 @@ ConversationActionResult ControlPlaneClient::remove_conversation_participant(
         return result;
     }
     return parse_conversation_action_response(*response);
+}
+
+ConversationActionResult ControlPlaneClient::leave_conversation(const std::string& conversation_id,
+                                                                bool confirmed) {
+    std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+                        + ",\"confirmed\":" + std::string(confirmed ? "true" : "false") + "}";
+    auto response = send_and_wait("conversation_leave_request", payload);
+    if (!response) {
+        ConversationActionResult result;
+        result.error_code = "transport_error";
+        return result;
+    }
+    return parse_conversation_action_response(*response);
+}
+
+AckResult ControlPlaneClient::report_conversation(const std::string& conversation_id,
+                                                  const std::string& reason,
+                                                  const std::string& comment) {
+    std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+                        + ",\"reason\":" + quote(reason)
+                        + ",\"comment\":" + quote(comment) + "}";
+    return parse_ack_response(send_and_wait("report_conversation_request", payload),
+                              "report_conversation_response");
+}
+
+SharedMediaPageResult ControlPlaneClient::shared_media_page(const std::string& conversation_id,
+                                                            const std::string& kind,
+                                                            int offset,
+                                                            int limit) {
+    std::string payload = "{\"conversation_id\":" + quote(conversation_id)
+                        + ",\"kind\":" + quote(kind)
+                        + ",\"offset\":" + std::to_string(offset)
+                        + ",\"limit\":" + std::to_string(limit) + "}";
+    auto response = send_and_wait("shared_media_page_request", payload);
+    if (!response) {
+        SharedMediaPageResult result;
+        result.error_code = "transport_error";
+        return result;
+    }
+    return parse_shared_media_page(*response);
 }
 
 DeviceListResult ControlPlaneClient::list_devices() {

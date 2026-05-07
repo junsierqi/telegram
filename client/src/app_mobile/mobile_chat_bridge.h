@@ -89,6 +89,24 @@ public:
     Q_INVOKABLE void callDecline(const QString& callId);
     Q_INVOKABLE void callEnd(const QString& callId);
 
+    // tdesktop account-domain parity: mobile exposes the same backend-backed
+    // settings/features contracts as the desktop drawer/settings/profile flows.
+    Q_INVOKABLE void refreshAccountSettings();
+    Q_INVOKABLE void saveAccountSettings(bool notificationsEnabled,
+                                         bool messagePreviewEnabled,
+                                         const QString& whoCanAddToGroups,
+                                         const QString& phoneNumberVisibility,
+                                         bool twoStepVerificationEnabled,
+                                         bool passcodeLockEnabled,
+                                         const QString& proxyMode,
+                                         const QString& proxyHost,
+                                         int proxyPort,
+                                         const QString& proxySecret);
+    Q_INVOKABLE void refreshAccountFeatures();
+    Q_INVOKABLE void setEmojiStatus(const QString& emojiStatus);
+    Q_INVOKABLE void publishStory(const QString& title, const QString& text);
+    Q_INVOKABLE void sendGift(const QString& title, const QString& recipientUserId);
+
 signals:
     void connectedChanged();
     void identityChanged();
@@ -107,6 +125,8 @@ signals:
                          const QString& mimeType, qlonglong sizeBytes);
     // M122
     void callStateChanged(const QVariantMap& callState);
+    void accountSettingsReady(const QVariantMap& settings);
+    void accountFeaturesReady(const QVariantMap& features);
 
 private:
     void setStatus(const QString& s);

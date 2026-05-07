@@ -228,6 +228,12 @@ class InMemoryState:
         # in-flight calls (acceptable for a real-time channel).
         self.calls: dict[str, CallRecord] = {}
         self.contacts: dict[str, list[str]] = {}
+        # Per-owner contact display aliases, matching Telegram's edit-contact
+        # model without changing the target user's global profile name.
+        self.contact_aliases: dict[str, dict[str, str]] = {}
+        self.conversation_reports: list[dict[str, object]] = []
+        self.account_settings: dict[str, dict[str, object]] = {}
+        self.account_features: dict[str, dict[str, object]] = {}
         self.attachments: dict[str, AttachmentRecord] = {}
         # Push tokens are kept in a flat list because (user_id, device_id) can
         # have multiple tokens (e.g., FCM rotates tokens) and we want fan-out
@@ -297,6 +303,19 @@ class InMemoryState:
             "remote_sessions": [asdict(session) for session in self.remote_sessions.values()],
             "sessions": [asdict(session) for session in self.sessions.values()],
             "contacts": {owner: list(targets) for owner, targets in self.contacts.items()},
+            "contact_aliases": {
+                owner: dict(aliases)
+                for owner, aliases in self.contact_aliases.items()
+            },
+            "conversation_reports": [dict(report) for report in self.conversation_reports],
+            "account_settings": {
+                user_id: dict(settings)
+                for user_id, settings in self.account_settings.items()
+            },
+            "account_features": {
+                user_id: dict(features)
+                for user_id, features in self.account_features.items()
+            },
             "attachments": [asdict(att) for att in self.attachments.values()],
         }
 
@@ -399,6 +418,37 @@ class InMemoryState:
             self.contacts = {
                 owner: [str(t) for t in targets]
                 for owner, targets in contacts.items()
+            }
+        contact_aliases = payload.get("contact_aliases", {})
+        if contact_aliases:
+            self.contact_aliases = {
+                str(owner): {
+                    str(target): str(display_name)
+                    for target, display_name in aliases.items()
+                }
+                for owner, aliases in contact_aliases.items()
+                if isinstance(aliases, dict)
+            }
+        reports = payload.get("conversation_reports", [])
+        if reports:
+            self.conversation_reports = [
+                dict(report)
+                for report in reports
+                if isinstance(report, dict)
+            ]
+        account_settings = payload.get("account_settings", {})
+        if account_settings:
+            self.account_settings = {
+                str(user_id): dict(settings)
+                for user_id, settings in account_settings.items()
+                if isinstance(settings, dict)
+            }
+        account_features = payload.get("account_features", {})
+        if account_features:
+            self.account_features = {
+                str(user_id): dict(features)
+                for user_id, features in account_features.items()
+                if isinstance(features, dict)
             }
 
         attachments = payload.get("attachments", [])

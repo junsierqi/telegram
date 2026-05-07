@@ -19,6 +19,19 @@ const els = {
   callInvite: $('callInvite'), callAccept: $('callAccept'),
   callDecline: $('callDecline'), callEnd: $('callEnd'),
   callClose: $('callClose'),
+  infoTitle: $('infoTitle'), infoMeta: $('infoMeta'),
+  sharedKind: $('sharedKind'), loadSharedMedia: $('loadSharedMedia'),
+  sharedMediaList: $('sharedMediaList'),
+  webNotifications: $('webNotifications'), webPreview: $('webPreview'),
+  webGroups: $('webGroups'), webPhone: $('webPhone'),
+  webTwoStep: $('webTwoStep'), webPasscode: $('webPasscode'),
+  webProxyMode: $('webProxyMode'), webProxyHost: $('webProxyHost'),
+  webProxyPort: $('webProxyPort'), webProxySecret: $('webProxySecret'),
+  saveWebSettings: $('saveWebSettings'),
+  featureSummary: $('featureSummary'), webEmojiStatus: $('webEmojiStatus'),
+  saveEmojiStatus: $('saveEmojiStatus'), webStoryTitle: $('webStoryTitle'),
+  publishWebStory: $('publishWebStory'), webGiftRecipient: $('webGiftRecipient'),
+  sendWebGift: $('sendWebGift'),
 };
 
 let ws = null;
@@ -28,6 +41,7 @@ const inflight = new Map();
 const conversations = new Map();        // conversation_id -> {title, messages, unread, lastSnippet, participants}
 let selectedConversationId = null;
 let activeCall = null;                  // {callId, state, kind}
+let sharedMediaOffset = 0;
 
 function nextCorrelation() { return 'web_' + Math.random().toString(36).slice(2, 10); }
 
@@ -111,6 +125,10 @@ function selectConversation(id) {
   if (!c) return;
   c.unread = 0;
   els.chatHeader.textContent = c.title + ' · ' + (c.participants.length) + ' members';
+  els.infoTitle.textContent = c.title;
+  els.infoMeta.textContent = c.participants.length + ' participants · ' + (c.messages.length) + ' messages';
+  els.sharedMediaList.innerHTML = '';
+  sharedMediaOffset = 0;
   els.emptyChat.style.display = 'none';
   els.log.style.display = 'block';
   els.composer.style.display = 'flex';
@@ -126,7 +144,23 @@ function renderMessage(m) {
     ? { attachment_id: m.attachment_id, filename: m.filename || m.attachment_filename || '(file)',
         mime_type: m.mime_type || '', size_bytes: m.size_bytes || 0 }
     : null;
+  const before = els.log.children.length;
   appendRow(isMe ? 'me' : 'peer', m.sender_user_id + ': ' + text, attach);
+  const row = els.log.children[before];
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  for (const [label, fn] of [
+    ['👍', () => toggleReaction(m.message_id, '👍')],
+    ['Pin', () => pinMessage(m.message_id, !m.pinned)],
+    ['Edit', () => editMessage(m)],
+    ['Delete', () => deleteMessage(m.message_id)],
+  ]) {
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.onclick = fn;
+    actions.appendChild(btn);
+  }
+  row.appendChild(actions);
 }
 
 function ingestPushMessage(env) {
@@ -203,6 +237,122 @@ async function uploadAttachment(file) {
   appendRow('system', 'sent attachment ' + file.name + ' (' + file.size + ' B)');
 }
 
+async function loadAccountDomains() {
+  const settings = await send('account_settings_get_request', {});
+  if (settings && settings.type === 'account_settings_response') applyAccountSettings(settings.payload);
+  const features = await send('account_features_get_request', {});
+  if (features && features.type === 'account_features_response') applyAccountFeatures(features.payload);
+}
+
+function applyAccountSettings(p) {
+  els.webNotifications.checked = !!p.notifications_enabled;
+  els.webPreview.checked = !!p.message_preview_enabled;
+  els.webGroups.value = p.who_can_add_to_groups || 'everybody';
+  els.webPhone.value = p.phone_number_visibility || 'contacts';
+  els.webTwoStep.checked = !!p.two_step_verification_enabled;
+  els.webPasscode.checked = !!p.passcode_lock_enabled;
+  els.webProxyMode.value = p.proxy_mode || 'system';
+  els.webProxyHost.value = p.proxy_host || '';
+  els.webProxyPort.value = p.proxy_port ? String(p.proxy_port) : '';
+  els.webProxySecret.value = p.proxy_secret || '';
+}
+
+function applyAccountFeatures(p) {
+  els.webEmojiStatus.value = p.emoji_status || '';
+  els.featureSummary.textContent =
+    'Premium: ' + (p.premium ? 'active' : 'inactive') +
+    ' · Stars: ' + (p.stars_balance || 0) +
+    ' · Wallet: ' + (p.wallet_balance || 0) +
+    ' · Gifts: ' + (p.gifts_available || 0) +
+    ' · Stories: ' + (p.stories_count || 0) +
+    (p.last_story_title ? ' · Last story: ' + p.last_story_title : '') +
+    (p.last_gift_title ? ' · Last gift: ' + p.last_gift_title : '');
+}
+
+async function saveAccountSettings() {
+  const resp = await send('account_settings_update_request', {
+    notifications_enabled: els.webNotifications.checked,
+    message_preview_enabled: els.webPreview.checked,
+    who_can_add_to_groups: els.webGroups.value,
+    phone_number_visibility: els.webPhone.value,
+    two_step_verification_enabled: els.webTwoStep.checked,
+    passcode_lock_enabled: els.webPasscode.checked,
+    proxy_mode: els.webProxyMode.value,
+    proxy_host: els.webProxyHost.value.trim(),
+    proxy_port: parseInt(els.webProxyPort.value || '0', 10),
+    proxy_secret: els.webProxySecret.value,
+  });
+  if (resp && resp.type === 'account_settings_response') {
+    applyAccountSettings(resp.payload);
+    appendRow('system', 'account settings saved');
+  }
+}
+
+async function updateAccountFeatures(payload) {
+  const resp = await send('account_features_update_request', payload);
+  if (resp && resp.type === 'account_features_response') {
+    applyAccountFeatures(resp.payload);
+    appendRow('system', 'account features updated');
+  }
+}
+
+async function loadSharedMedia() {
+  if (!selectedConversationId) return;
+  const resp = await send('shared_media_page_request', {
+    conversation_id: selectedConversationId,
+    kind: els.sharedKind.value,
+    offset: sharedMediaOffset,
+    limit: 20,
+  });
+  if (!resp || resp.type !== 'shared_media_page_response') return;
+  for (const item of resp.payload.entries || []) {
+    const row = document.createElement('div');
+    row.className = 'media-row';
+    row.textContent = (item.kind || els.sharedKind.value) + ' · ' +
+      (item.filename || item.text || item.url || item.message_id || 'item');
+    els.sharedMediaList.appendChild(row);
+  }
+  sharedMediaOffset = resp.payload.next_offset || 0;
+  appendRow('system', 'shared media loaded: ' + (resp.payload.entries || []).length);
+}
+
+async function toggleReaction(messageId, emoji) {
+  if (!selectedConversationId) return;
+  await send('message_reaction', {
+    conversation_id: selectedConversationId,
+    message_id: messageId,
+    emoji,
+  });
+}
+
+async function pinMessage(messageId, pinned) {
+  if (!selectedConversationId) return;
+  await send('message_pin', {
+    conversation_id: selectedConversationId,
+    message_id: messageId,
+    pinned,
+  });
+}
+
+async function editMessage(m) {
+  if (!selectedConversationId || m.deleted) return;
+  const next = prompt('Edit message', m.text || '');
+  if (next === null) return;
+  await send('message_edit', {
+    conversation_id: selectedConversationId,
+    message_id: m.message_id,
+    text: next,
+  });
+}
+
+async function deleteMessage(messageId) {
+  if (!selectedConversationId || !confirm('Delete this message?')) return;
+  await send('message_delete', {
+    conversation_id: selectedConversationId,
+    message_id: messageId,
+  });
+}
+
 els.connectBtn.addEventListener('click', async () => {
   if (ws && ws.readyState === WebSocket.OPEN) ws.close();
   const wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
@@ -219,6 +369,7 @@ els.connectBtn.addEventListener('click', async () => {
       els.who.textContent = session.user_id + ' · ' + session.device_id;
       els.loginBox.classList.add('connected');
       els.callBtn.disabled = false;
+      await loadAccountDomains();
       const sync = await send('conversation_sync', { cursors: [] });
       if (sync && sync.type === 'conversation_sync') {
         for (const conv of sync.payload.conversations || []) ingestConversation(conv);
@@ -255,6 +406,15 @@ els.fileInput.addEventListener('change', () => {
     els.fileInput.value = '';
   }
 });
+
+els.loadSharedMedia.addEventListener('click', loadSharedMedia);
+els.saveWebSettings.addEventListener('click', saveAccountSettings);
+els.saveEmojiStatus.addEventListener('click', () =>
+  updateAccountFeatures({ emoji_status: els.webEmojiStatus.value.trim() }));
+els.publishWebStory.addEventListener('click', () =>
+  updateAccountFeatures({ story_title: els.webStoryTitle.value.trim(), story_text: 'Published from browser' }));
+els.sendWebGift.addEventListener('click', () =>
+  updateAccountFeatures({ gift_title: 'Web Gift', gift_recipient_user_id: els.webGiftRecipient.value.trim() }));
 
 // ---- M124: call dialog ----
 els.callBtn.addEventListener('click', () => els.callDialog.showModal());

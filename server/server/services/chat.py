@@ -18,6 +18,7 @@ from ..protocol import (
     MessageReadUpdatePayload,
     MessageReactionUpdatedPayload,
     ServiceError,
+    SharedMediaEntryDescriptor,
 )
 from ..state import AttachmentRecord, ConversationRecord, InMemoryState
 from .attachment_store import AttachmentBlobStore
@@ -578,6 +579,35 @@ class ChatService:
         self._state.save_runtime_state()
         return self._descriptor(conversation)
 
+    def leave_conversation(
+        self, *, conversation_id: str, actor_user_id: str, confirmed: bool
+    ) -> ConversationDescriptor:
+        if not confirmed:
+            raise ServiceError(ErrorCode.LEAVE_CONFIRMATION_REQUIRED)
+        return self.remove_participant(
+            conversation_id=conversation_id,
+            actor_user_id=actor_user_id,
+            target_user_id=actor_user_id,
+        )
+
+    def report_conversation(
+        self, *, conversation_id: str, actor_user_id: str, reason: str, comment: str = ""
+    ) -> None:
+        self._require_participant(conversation_id, actor_user_id)
+        normalized_reason = reason.strip()
+        if not normalized_reason:
+            raise ServiceError(ErrorCode.REPORT_REASON_REQUIRED)
+        self._state.conversation_reports.append(
+            {
+                "conversation_id": conversation_id,
+                "reporter_user_id": actor_user_id,
+                "reason": normalized_reason,
+                "comment": comment.strip(),
+                "created_at_ms": self._now_ms(),
+            }
+        )
+        self._state.save_runtime_state()
+
     # ---- M103 role management ---------------------------------------
 
     _VALID_ROLES = ("admin", "member")
@@ -841,6 +871,53 @@ class ChatService:
         next_offset = offset + len(results)
         return results, next_offset, next_offset < len(matches)
 
+    def shared_media_page(
+        self,
+        *,
+        user_id: str,
+        conversation_id: str,
+        kind: str = "media",
+        offset: int = 0,
+        limit: int = 30,
+    ) -> tuple[list[SharedMediaEntryDescriptor], int, bool]:
+        conversation = self._require_participant(conversation_id, user_id)
+        normalized_kind = kind.strip().casefold() or "media"
+        offset = max(0, int(offset))
+        limit = max(1, min(int(limit), 100))
+        matches: list[SharedMediaEntryDescriptor] = []
+        for message in conversation.messages:
+            if message.get("deleted") or message.get("scheduled"):
+                continue
+            filename, mime_type, size_bytes = self._attachment_meta(message)
+            text = str(message.get("text", ""))
+            link = self._first_link(text)
+            attachment_id = str(message.get("attachment_id", ""))
+            if not self._shared_media_matches(
+                normalized_kind,
+                text=text,
+                attachment_id=attachment_id,
+                mime_type=mime_type,
+                link=link,
+            ):
+                continue
+            matches.append(
+                SharedMediaEntryDescriptor(
+                    conversation_id=conversation.conversation_id,
+                    message_id=str(message.get("message_id", "")),
+                    sender_user_id=str(message.get("sender_user_id", "")),
+                    text=text,
+                    created_at_ms=int(message.get("created_at_ms", 0)),
+                    attachment_id=attachment_id,
+                    filename=filename,
+                    mime_type=mime_type,
+                    size_bytes=size_bytes,
+                    link=link,
+                )
+            )
+        page = matches[offset: offset + limit]
+        next_offset = offset + len(page)
+        return page, next_offset, next_offset < len(matches)
+
     def _find_message(self, conversation: ConversationRecord, message_id: str) -> dict:
         for message in conversation.messages:
             if message.get("message_id") == message_id:
@@ -992,6 +1069,36 @@ class ChatService:
         if attachment is None:
             return "", "", 0
         return attachment.filename, attachment.mime_type, attachment.size_bytes
+
+    def _shared_media_matches(
+        self,
+        kind: str,
+        *,
+        text: str,
+        attachment_id: str,
+        mime_type: str,
+        link: str,
+    ) -> bool:
+        if kind in ("link", "links"):
+            return bool(link)
+        if kind in ("voice", "audio"):
+            return bool(attachment_id) and mime_type.startswith("audio/")
+        if kind in ("file", "files", "documents"):
+            return bool(attachment_id) and not (
+                mime_type.startswith("image/")
+                or mime_type.startswith("video/")
+                or mime_type.startswith("audio/")
+            )
+        return bool(attachment_id) and (
+            mime_type.startswith("image/") or mime_type.startswith("video/")
+        )
+
+    def _first_link(self, text: str) -> str:
+        for token in text.split():
+            stripped = token.strip("()[]{}<>.,;!?'\"")
+            if stripped.startswith(("http://", "https://", "t.me/")):
+                return stripped
+        return ""
 
     def _reaction_summary(self, message: dict) -> str:
         reactions = message.get("reactions", {})

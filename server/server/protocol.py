@@ -54,6 +54,8 @@ class ErrorCode(StrEnum):
     CONTACT_SELF_NOT_ALLOWED = "contact_self_not_allowed"
     CONTACT_ALREADY_ADDED = "contact_already_added"
     CONTACT_NOT_PRESENT = "contact_not_present"
+    REPORT_REASON_REQUIRED = "report_reason_required"
+    LEAVE_CONFIRMATION_REQUIRED = "leave_confirmation_required"
     ATTACHMENT_TOO_LARGE = "attachment_too_large"
     INVALID_ATTACHMENT_PAYLOAD = "invalid_attachment_payload"
     UNKNOWN_ATTACHMENT = "unknown_attachment"
@@ -140,6 +142,8 @@ _ERROR_MESSAGES: dict[ErrorCode, str] = {
     ErrorCode.CONTACT_SELF_NOT_ALLOWED: "A user cannot add themselves as a contact.",
     ErrorCode.CONTACT_ALREADY_ADDED: "That user is already in your contact list.",
     ErrorCode.CONTACT_NOT_PRESENT: "That user is not in your contact list.",
+    ErrorCode.REPORT_REASON_REQUIRED: "A report must include a reason.",
+    ErrorCode.LEAVE_CONFIRMATION_REQUIRED: "Leaving a conversation requires confirmation.",
     ErrorCode.ATTACHMENT_TOO_LARGE: "Attachment exceeds the maximum allowed size.",
     ErrorCode.INVALID_ATTACHMENT_PAYLOAD: "Attachment payload is missing fields or malformed.",
     ErrorCode.UNKNOWN_ATTACHMENT: "No attachment matches that id.",
@@ -248,8 +252,22 @@ class MessageType(StrEnum):
     DEVICE_TRUST_UPDATE_REQUEST = "device_trust_update_request"
     CONTACT_ADD = "contact_add"
     CONTACT_REMOVE = "contact_remove"
+    CONTACT_EDIT = "contact_edit"
+    CONTACT_SHARE_REQUEST = "contact_share_request"
+    CONTACT_SHARE_RESPONSE = "contact_share_response"
     CONTACT_LIST_REQUEST = "contact_list_request"
     CONTACT_LIST_RESPONSE = "contact_list_response"
+    ACCOUNT_SETTINGS_GET_REQUEST = "account_settings_get_request"
+    ACCOUNT_SETTINGS_UPDATE_REQUEST = "account_settings_update_request"
+    ACCOUNT_SETTINGS_RESPONSE = "account_settings_response"
+    ACCOUNT_FEATURES_GET_REQUEST = "account_features_get_request"
+    ACCOUNT_FEATURES_UPDATE_REQUEST = "account_features_update_request"
+    ACCOUNT_FEATURES_RESPONSE = "account_features_response"
+    REPORT_CONVERSATION_REQUEST = "report_conversation_request"
+    REPORT_CONVERSATION_RESPONSE = "report_conversation_response"
+    CONVERSATION_LEAVE_REQUEST = "conversation_leave_request"
+    SHARED_MEDIA_PAGE_REQUEST = "shared_media_page_request"
+    SHARED_MEDIA_PAGE_RESPONSE = "shared_media_page_response"
     REMOTE_INVITE = "remote_invite"
     REMOTE_APPROVE = "remote_approve"
     REMOTE_REJECT = "remote_reject"
@@ -566,8 +584,129 @@ class ContactTargetRequestPayload:
 
 
 @dataclass(slots=True)
+class ContactEditRequestPayload:
+    target_user_id: str
+    display_name: str
+
+
+@dataclass(slots=True)
+class ContactShareRequestPayload:
+    target_user_id: str
+
+
+@dataclass(slots=True)
+class ContactShareResponsePayload:
+    user_id: str
+    display_name: str
+    username: str
+    share_text: str
+
+
+@dataclass(slots=True)
 class ContactListResponsePayload:
     contacts: list[ContactDescriptor]
+
+
+@dataclass(slots=True)
+class AccountSettingsUpdateRequestPayload:
+    notifications_enabled: bool = True
+    message_preview_enabled: bool = True
+    who_can_add_to_groups: str = "everybody"
+    phone_number_visibility: str = "contacts"
+    two_step_verification_enabled: bool = False
+    passcode_lock_enabled: bool = False
+    proxy_mode: str = "system"
+    proxy_host: str = ""
+    proxy_port: int = 0
+    proxy_secret: str = ""
+
+
+@dataclass(slots=True)
+class AccountSettingsResponsePayload:
+    user_id: str
+    notifications_enabled: bool = True
+    message_preview_enabled: bool = True
+    who_can_add_to_groups: str = "everybody"
+    phone_number_visibility: str = "contacts"
+    two_step_verification_enabled: bool = False
+    passcode_lock_enabled: bool = False
+    proxy_mode: str = "system"
+    proxy_host: str = ""
+    proxy_port: int = 0
+    proxy_secret: str = ""
+
+
+@dataclass(slots=True)
+class AccountFeaturesUpdateRequestPayload:
+    emoji_status: str = ""
+    story_title: str = ""
+    story_text: str = ""
+    gift_title: str = ""
+    gift_recipient_user_id: str = ""
+
+
+@dataclass(slots=True)
+class AccountFeaturesResponsePayload:
+    user_id: str
+    premium: bool = False
+    stars_balance: int = 0
+    wallet_balance: int = 0
+    gifts_available: int = 0
+    stories_count: int = 0
+    emoji_status: str = ""
+    last_story_title: str = ""
+    last_gift_title: str = ""
+
+
+@dataclass(slots=True)
+class ReportConversationRequestPayload:
+    conversation_id: str
+    reason: str
+    comment: str = ""
+
+
+@dataclass(slots=True)
+class ReportConversationResponsePayload:
+    conversation_id: str
+    reason: str
+    accepted: bool = True
+
+
+@dataclass(slots=True)
+class ConversationLeaveRequestPayload:
+    conversation_id: str
+    confirmed: bool = False
+
+
+@dataclass(slots=True)
+class SharedMediaPageRequestPayload:
+    conversation_id: str
+    kind: str = "media"
+    offset: int = 0
+    limit: int = 30
+
+
+@dataclass(slots=True)
+class SharedMediaEntryDescriptor:
+    conversation_id: str
+    message_id: str
+    sender_user_id: str
+    text: str
+    created_at_ms: int = 0
+    attachment_id: str = ""
+    filename: str = ""
+    mime_type: str = ""
+    size_bytes: int = 0
+    link: str = ""
+
+
+@dataclass(slots=True)
+class SharedMediaPageResponsePayload:
+    conversation_id: str
+    kind: str
+    entries: list[SharedMediaEntryDescriptor]
+    next_offset: int = 0
+    has_more: bool = False
 
 
 @dataclass(slots=True)
@@ -1437,6 +1576,13 @@ def parse_request_payload(message_type: MessageType, payload: dict[str, Any]) ->
             limit=int(payload.get("limit", 50)),
             offset=int(payload.get("offset", 0)),
         )
+    if message_type == MessageType.SHARED_MEDIA_PAGE_REQUEST:
+        return SharedMediaPageRequestPayload(
+            conversation_id=payload["conversation_id"],
+            kind=payload.get("kind", "media"),
+            offset=int(payload.get("offset", 0)),
+            limit=int(payload.get("limit", 30)),
+        )
     if message_type == MessageType.MESSAGE_SEND_ATTACHMENT:
         return MessageSendAttachmentRequestPayload(
             conversation_id=payload["conversation_id"],
@@ -1493,10 +1639,51 @@ def parse_request_payload(message_type: MessageType, payload: dict[str, Any]) ->
         MessageType.DEVICE_LIST_REQUEST,
         MessageType.CONTACT_LIST_REQUEST,
         MessageType.PROFILE_GET_REQUEST,
+        MessageType.ACCOUNT_SETTINGS_GET_REQUEST,
+        MessageType.ACCOUNT_FEATURES_GET_REQUEST,
     ):
         return EmptyPayload()
+    if message_type == MessageType.ACCOUNT_SETTINGS_UPDATE_REQUEST:
+        return AccountSettingsUpdateRequestPayload(
+            notifications_enabled=bool(payload.get("notifications_enabled", True)),
+            message_preview_enabled=bool(payload.get("message_preview_enabled", True)),
+            who_can_add_to_groups=payload.get("who_can_add_to_groups", "everybody"),
+            phone_number_visibility=payload.get("phone_number_visibility", "contacts"),
+            two_step_verification_enabled=bool(payload.get("two_step_verification_enabled", False)),
+            passcode_lock_enabled=bool(payload.get("passcode_lock_enabled", False)),
+            proxy_mode=payload.get("proxy_mode", "system"),
+            proxy_host=payload.get("proxy_host", ""),
+            proxy_port=int(payload.get("proxy_port", 0) or 0),
+            proxy_secret=payload.get("proxy_secret", ""),
+        )
+    if message_type == MessageType.ACCOUNT_FEATURES_UPDATE_REQUEST:
+        return AccountFeaturesUpdateRequestPayload(
+            emoji_status=payload.get("emoji_status", ""),
+            story_title=payload.get("story_title", ""),
+            story_text=payload.get("story_text", ""),
+            gift_title=payload.get("gift_title", ""),
+            gift_recipient_user_id=payload.get("gift_recipient_user_id", ""),
+        )
     if message_type in (MessageType.CONTACT_ADD, MessageType.CONTACT_REMOVE):
         return ContactTargetRequestPayload(target_user_id=payload["target_user_id"])
+    if message_type == MessageType.CONTACT_EDIT:
+        return ContactEditRequestPayload(
+            target_user_id=payload["target_user_id"],
+            display_name=payload.get("display_name", ""),
+        )
+    if message_type == MessageType.CONTACT_SHARE_REQUEST:
+        return ContactShareRequestPayload(target_user_id=payload["target_user_id"])
+    if message_type == MessageType.REPORT_CONVERSATION_REQUEST:
+        return ReportConversationRequestPayload(
+            conversation_id=payload["conversation_id"],
+            reason=payload.get("reason", ""),
+            comment=payload.get("comment", ""),
+        )
+    if message_type == MessageType.CONVERSATION_LEAVE_REQUEST:
+        return ConversationLeaveRequestPayload(
+            conversation_id=payload["conversation_id"],
+            confirmed=bool(payload.get("confirmed", False)),
+        )
     if message_type == MessageType.DEVICE_REVOKE_REQUEST:
         return DeviceRevokeRequestPayload(device_id=payload["device_id"])
     if message_type == MessageType.DEVICE_TRUST_UPDATE_REQUEST:

@@ -4,14 +4,22 @@ import time
 from typing import Any, Callable
 
 from .protocol import (
+    AccountFeaturesResponsePayload,
+    AccountFeaturesUpdateRequestPayload,
     AttachmentFetchRequestPayload,
+    AccountSettingsResponsePayload,
+    AccountSettingsUpdateRequestPayload,
     CallActionRequestPayload,
     CallInviteRequestPayload,
     ContactListResponsePayload,
+    ContactEditRequestPayload,
+    ContactShareRequestPayload,
+    ContactShareResponsePayload,
     ContactTargetRequestPayload,
     ConversationCreateRequestPayload,
     ConversationDescriptor,
     ConversationParticipantRequestPayload,
+    ConversationLeaveRequestPayload,
     ConversationSyncRequestPayload,
     ConversationSyncResponsePayload,
     DeviceListResponsePayload,
@@ -38,6 +46,8 @@ from .protocol import (
     MessageSendAttachmentRequestPayload,
     MessageSendRequestPayload,
     MessageType,
+    ReportConversationRequestPayload,
+    ReportConversationResponsePayload,
     ServiceCommandRequestPayload,
     PresenceQueryRequestPayload,
     PresenceQueryResponsePayload,
@@ -98,6 +108,8 @@ from .protocol import (
     RemoteInviteRequestPayload,
     RemoteSessionActionRequestPayload,
     ServiceError,
+    SharedMediaPageRequestPayload,
+    SharedMediaPageResponsePayload,
     UserSearchRequestPayload,
     UserSearchResponsePayload,
     UserSearchResultDescriptor,
@@ -675,6 +687,56 @@ class ServerApplication:
                     message=exc,
                 )
 
+        if message_type == MessageType.CONTACT_EDIT:
+            try:
+                assert isinstance(payload, ContactEditRequestPayload)
+                contacts = self.contacts_service.edit(
+                    owner_user_id=session.user_id,
+                    target_user_id=payload.target_user_id,
+                    display_name=payload.display_name,
+                )
+                return make_response(
+                    MessageType.CONTACT_LIST_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=ContactListResponsePayload(contacts=contacts),
+                ).to_dict()
+            except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.CONTACT_SHARE_REQUEST:
+            try:
+                assert isinstance(payload, ContactShareRequestPayload)
+                display_name, username, share_text = self.contacts_service.share(
+                    owner_user_id=session.user_id,
+                    target_user_id=payload.target_user_id,
+                )
+                return make_response(
+                    MessageType.CONTACT_SHARE_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=ContactShareResponsePayload(
+                        user_id=payload.target_user_id,
+                        display_name=display_name,
+                        username=username,
+                        share_text=share_text,
+                    ),
+                ).to_dict()
+            except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
         if message_type == MessageType.CONTACT_LIST_REQUEST:
             contacts = self.contacts_service.list(session.user_id)
             return make_response(
@@ -683,6 +745,80 @@ class ServerApplication:
                 session_id=session_id,
                 actor_user_id=session.user_id,
                 payload=ContactListResponsePayload(contacts=contacts),
+            ).to_dict()
+
+        if message_type == MessageType.ACCOUNT_SETTINGS_GET_REQUEST:
+            return make_response(
+                MessageType.ACCOUNT_SETTINGS_RESPONSE,
+                correlation_id=correlation_id,
+                session_id=session_id,
+                actor_user_id=session.user_id,
+                payload=self._account_settings_payload(session.user_id),
+            ).to_dict()
+
+        if message_type == MessageType.ACCOUNT_SETTINGS_UPDATE_REQUEST:
+            assert isinstance(payload, AccountSettingsUpdateRequestPayload)
+            settings = {
+                "notifications_enabled": bool(payload.notifications_enabled),
+                "message_preview_enabled": bool(payload.message_preview_enabled),
+                "who_can_add_to_groups": payload.who_can_add_to_groups
+                if payload.who_can_add_to_groups in ("everybody", "contacts", "nobody")
+                else "everybody",
+                "phone_number_visibility": payload.phone_number_visibility
+                if payload.phone_number_visibility in ("everybody", "contacts", "nobody")
+                else "contacts",
+                "two_step_verification_enabled": bool(payload.two_step_verification_enabled),
+                "passcode_lock_enabled": bool(payload.passcode_lock_enabled),
+                "proxy_mode": payload.proxy_mode if payload.proxy_mode in ("system", "none", "custom") else "system",
+                "proxy_host": payload.proxy_host.strip()[:128],
+                "proxy_port": max(0, min(int(payload.proxy_port), 65535)),
+                "proxy_secret": payload.proxy_secret.strip()[:128],
+            }
+            self.state.account_settings[session.user_id] = settings
+            self.state.save_runtime_state()
+            return make_response(
+                MessageType.ACCOUNT_SETTINGS_RESPONSE,
+                correlation_id=correlation_id,
+                session_id=session_id,
+                actor_user_id=session.user_id,
+                payload=self._account_settings_payload(session.user_id),
+            ).to_dict()
+
+        if message_type == MessageType.ACCOUNT_FEATURES_GET_REQUEST:
+            return make_response(
+                MessageType.ACCOUNT_FEATURES_RESPONSE,
+                correlation_id=correlation_id,
+                session_id=session_id,
+                actor_user_id=session.user_id,
+                payload=self._account_features_payload(session.user_id),
+            ).to_dict()
+
+        if message_type == MessageType.ACCOUNT_FEATURES_UPDATE_REQUEST:
+            assert isinstance(payload, AccountFeaturesUpdateRequestPayload)
+            features = dict(self.state.account_features.get(session.user_id, {}))
+            emoji_status = payload.emoji_status.strip()
+            if emoji_status:
+                features["emoji_status"] = emoji_status[:32]
+            if payload.story_title.strip() or payload.story_text.strip():
+                features["stories_count"] = int(features.get("stories_count", 0)) + 1
+                features["last_story_title"] = payload.story_title.strip()[:80] or "Story"
+                features["last_story_text"] = payload.story_text.strip()[:280]
+            if payload.gift_title.strip():
+                features["gifts_available"] = max(0, int(features.get("gifts_available", 1)) - 1)
+                features["last_gift_title"] = payload.gift_title.strip()[:80]
+                features["last_gift_recipient_user_id"] = payload.gift_recipient_user_id.strip()[:64]
+            features.setdefault("premium", False)
+            features.setdefault("stars_balance", 0)
+            features.setdefault("wallet_balance", 0)
+            features.setdefault("gifts_available", 0)
+            self.state.account_features[session.user_id] = features
+            self.state.save_runtime_state()
+            return make_response(
+                MessageType.ACCOUNT_FEATURES_RESPONSE,
+                correlation_id=correlation_id,
+                session_id=session_id,
+                actor_user_id=session.user_id,
+                payload=self._account_features_payload(session.user_id),
             ).to_dict()
 
         if message_type == MessageType.DEVICE_LIST_REQUEST:
@@ -1061,6 +1197,37 @@ class ServerApplication:
                     message=exc,
                 )
 
+        if message_type == MessageType.SHARED_MEDIA_PAGE_REQUEST:
+            try:
+                assert isinstance(payload, SharedMediaPageRequestPayload)
+                entries, next_offset, has_more = self.chat_service.shared_media_page(
+                    user_id=session.user_id,
+                    conversation_id=payload.conversation_id,
+                    kind=payload.kind,
+                    offset=payload.offset,
+                    limit=payload.limit,
+                )
+                return make_response(
+                    MessageType.SHARED_MEDIA_PAGE_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=SharedMediaPageResponsePayload(
+                        conversation_id=payload.conversation_id,
+                        kind=payload.kind,
+                        entries=entries,
+                        next_offset=next_offset,
+                        has_more=has_more,
+                    ),
+                ).to_dict()
+            except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
         if message_type == MessageType.MESSAGE_EDIT:
             try:
                 assert isinstance(payload, MessageEditRequestPayload)
@@ -1287,6 +1454,67 @@ class ServerApplication:
                     session_id=session_id,
                     actor_user_id=session.user_id,
                     payload=descriptor,
+                ).to_dict()
+            except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.CONVERSATION_LEAVE_REQUEST:
+            try:
+                assert isinstance(payload, ConversationLeaveRequestPayload)
+                descriptor = self.chat_service.leave_conversation(
+                    conversation_id=payload.conversation_id,
+                    actor_user_id=session.user_id,
+                    confirmed=payload.confirmed,
+                )
+                notify_user_ids = list(descriptor.participant_user_ids)
+                if session.user_id not in notify_user_ids:
+                    notify_user_ids.append(session.user_id)
+                self._fanout_to_users(
+                    user_ids=notify_user_ids,
+                    origin_session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message_type=MessageType.CONVERSATION_UPDATED,
+                    payload=descriptor,
+                    correlation_id=f"push_leave_{descriptor.conversation_id}_{session.user_id}",
+                )
+                return make_response(
+                    MessageType.CONVERSATION_UPDATED,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=descriptor,
+                ).to_dict()
+            except ValueError as exc:
+                return self._error_response(
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    message=exc,
+                )
+
+        if message_type == MessageType.REPORT_CONVERSATION_REQUEST:
+            try:
+                assert isinstance(payload, ReportConversationRequestPayload)
+                self.chat_service.report_conversation(
+                    conversation_id=payload.conversation_id,
+                    actor_user_id=session.user_id,
+                    reason=payload.reason,
+                    comment=payload.comment,
+                )
+                return make_response(
+                    MessageType.REPORT_CONVERSATION_RESPONSE,
+                    correlation_id=correlation_id,
+                    session_id=session_id,
+                    actor_user_id=session.user_id,
+                    payload=ReportConversationResponsePayload(
+                        conversation_id=payload.conversation_id,
+                        reason=payload.reason.strip(),
+                    ),
                 ).to_dict()
             except ValueError as exc:
                 return self._error_response(
@@ -2243,6 +2471,36 @@ class ServerApplication:
             message_type=MessageType.PRESENCE_UPDATE,
             payload=payload,
             correlation_id=f"push_presence_{user_id}_{'on' if online else 'off'}",
+        )
+
+    def _account_settings_payload(self, user_id: str) -> AccountSettingsResponsePayload:
+        settings = self.state.account_settings.get(user_id, {})
+        return AccountSettingsResponsePayload(
+            user_id=user_id,
+            notifications_enabled=bool(settings.get("notifications_enabled", True)),
+            message_preview_enabled=bool(settings.get("message_preview_enabled", True)),
+            who_can_add_to_groups=str(settings.get("who_can_add_to_groups", "everybody")),
+            phone_number_visibility=str(settings.get("phone_number_visibility", "contacts")),
+            two_step_verification_enabled=bool(settings.get("two_step_verification_enabled", False)),
+            passcode_lock_enabled=bool(settings.get("passcode_lock_enabled", False)),
+            proxy_mode=str(settings.get("proxy_mode", "system")),
+            proxy_host=str(settings.get("proxy_host", "")),
+            proxy_port=int(settings.get("proxy_port", 0) or 0),
+            proxy_secret=str(settings.get("proxy_secret", "")),
+        )
+
+    def _account_features_payload(self, user_id: str) -> AccountFeaturesResponsePayload:
+        features = self.state.account_features.get(user_id, {})
+        return AccountFeaturesResponsePayload(
+            user_id=user_id,
+            premium=bool(features.get("premium", False)),
+            stars_balance=int(features.get("stars_balance", 0) or 0),
+            wallet_balance=int(features.get("wallet_balance", 0) or 0),
+            gifts_available=int(features.get("gifts_available", 0) or 0),
+            stories_count=int(features.get("stories_count", 0) or 0),
+            emoji_status=str(features.get("emoji_status", "")),
+            last_story_title=str(features.get("last_story_title", "")),
+            last_gift_title=str(features.get("last_gift_title", "")),
         )
 
     def _error_response(

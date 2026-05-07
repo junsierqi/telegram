@@ -23,7 +23,7 @@ def main() -> int:
         '"drawerWalletAction"',
         'child->setProperty("drawerWalletAction", true)',
         'open_settings_page_by_name(QStringLiteral("Account"))',
-        "Wallet is represented by account storage",
+        "open_account_features_surface(QStringLiteral(\"Wallet\"))",
         "show_account_export_summary",
         'prefs.setValue(QStringLiteral("appearance/interface_scale"), 100)',
     ):
@@ -84,11 +84,11 @@ def main() -> int:
     print("[scenario] right-panel danger and gift actions are routed")
     for token in (
         'leave_btn, &QPushButton::clicked',
-        "handle_detail_action(2)",
+        "client->leave_conversation(conversation, true)",
         'report_btn, &QPushButton::clicked',
-        "Report queued for selected chat",
+        "client->report_conversation(conversation, reason, comment)",
         'label == QStringLiteral("Gift")',
-        "Gift actions are represented by account storage",
+        "send_gift_to_selected_chat();",
     ):
         require(token in main_cpp, f"missing right-panel button response token: {token}")
     print("[ok ] leave/report/gift controls route to existing desktop behavior")

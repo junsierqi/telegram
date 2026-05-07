@@ -10,6 +10,7 @@ Page {
     signal backRequested()
 
     property var profile: ({ userId: "", username: "", displayName: "" })
+    property var accountFeatures: ({ storiesCount: 0, emojiStatus: "", lastStoryTitle: "", lastGiftTitle: "" })
 
     header: Rectangle {
         height: 56; color: "#3390ec"
@@ -34,9 +35,16 @@ Page {
             page.profile = p
             displayField.text = p.displayName
         }
+        function onAccountFeaturesReady(features) {
+            page.accountFeatures = features
+            emojiField.text = features.emojiStatus || ""
+        }
     }
 
-    Component.onCompleted: ChatBridge.refreshProfile()
+    Component.onCompleted: {
+        ChatBridge.refreshProfile()
+        ChatBridge.refreshAccountFeatures()
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -84,6 +92,43 @@ Page {
             Button {
                 text: qsTr("Reload")
                 onClicked: ChatBridge.refreshProfile()
+            }
+        }
+        Rectangle {
+            Layout.fillWidth: true
+            radius: 10
+            color: "white"
+            implicitHeight: accountFeatureBox.implicitHeight + 24
+            ColumnLayout {
+                id: accountFeatureBox
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 8
+                Label { text: qsTr("Stories and gifts"); font.bold: true; color: "#0f1419" }
+                Label {
+                    text: qsTr("Stories: %1 · Last story: %2 · Last gift: %3")
+                        .arg(page.accountFeatures.storiesCount)
+                        .arg(page.accountFeatures.lastStoryTitle || qsTr("none"))
+                        .arg(page.accountFeatures.lastGiftTitle || qsTr("none"))
+                    color: "#56616b"
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    TextField { id: emojiField; Layout.fillWidth: true; placeholderText: qsTr("Emoji status") }
+                    Button { text: qsTr("Set"); onClicked: ChatBridge.setEmojiStatus(emojiField.text.trim()) }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    TextField { id: storyTitleField; Layout.fillWidth: true; placeholderText: qsTr("Story title") }
+                    Button { text: qsTr("Publish"); onClicked: ChatBridge.publishStory(storyTitleField.text.trim(), qsTr("Published from mobile")) }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    TextField { id: giftRecipientField; Layout.fillWidth: true; placeholderText: qsTr("Gift recipient user_id") }
+                    Button { text: qsTr("Gift"); onClicked: ChatBridge.sendGift(qsTr("Mobile Gift"), giftRecipientField.text.trim()) }
+                }
             }
         }
         Item { Layout.fillHeight: true }

@@ -141,7 +141,7 @@ def main() -> int:
                 print("[FAIL] app_chat TLS run failed")
                 print(output)
                 return 1
-            if "logged in as u_alice" not in output or "conv_alice_bob" not in output:
+            if "logged in as " not in output or "conv_alice_bob" not in output or "[sync]" not in output:
                 print("[FAIL] app_chat TLS login/sync output missing expected markers")
                 print(output)
                 return 1

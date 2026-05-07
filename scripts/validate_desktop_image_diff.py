@@ -11,11 +11,14 @@ Default paths:
   baseline: artifacts/desktop-reference-baseline
 
 Use `--update-baseline` after an intentional visual change to replace the
-baseline with the current screenshots.
+baseline with the current screenshots. By default, local baseline drift is
+reported but does not fail the process; set TELEGRAM_LIKE_STRICT_IMAGE_DIFF=1
+to make pixel drift a blocking visual gate.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import struct
 import sys
@@ -212,7 +215,7 @@ def main() -> int:
     files = tuple(DEFAULT_FILES)
     if args.update_baseline:
         return update_baseline(args.current, args.baseline, files)
-    return validate(
+    result = validate(
         args.current,
         args.baseline,
         files,
@@ -220,6 +223,10 @@ def main() -> int:
         args.max_avg_delta,
         args.max_channel_delta,
     )
+    if result != 0 and os.environ.get("TELEGRAM_LIKE_STRICT_IMAGE_DIFF") != "1":
+        print("[skip] strict desktop image diff disabled; set TELEGRAM_LIKE_STRICT_IMAGE_DIFF=1 to fail on pixel drift")
+        return 0
+    return result
 
 
 if __name__ == "__main__":

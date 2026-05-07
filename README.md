@@ -59,8 +59,8 @@ in-process validators that GitHub Actions runs across 7 jobs on every push.
 | Python server (chat + remote-control protocol + UDP media plane + voice/video signaling + WebSocket bridge + observability sidecar) | ✅ | `python -m server.main` |
 | C++ chat CLI | ✅ Win, Linux, macOS, **Android NDK** | `app_chat` |
 | Qt Widgets desktop (Telegram Desktop reference shell, full settings + Remote + Call pages, rich bubble delegate, real image preview, byte-level upload progress) | ✅ Win, **Linux**, **macOS** | `app_desktop` |
-| Qt Quick mobile UI (full settings hub: Profile / Contacts / Devices / Search / Attachments / Remote / Call) | ✅ Win preview + **Android arm64 APK** | `app_mobile` |
-| Browser client (3-pane WebSocket bridge + chat list + attachment up/download + call dialog + PWA service worker) | ✅ any modern browser | `python -m server.main --web-port 8080` |
+| Qt Quick mobile UI (full settings hub: Profile / Contacts / Devices / Search / Attachments / Remote / Call + account settings/features bridge) | ✅ Win preview + **Android arm64 APK** | `app_mobile` |
+| Browser client (3-pane WebSocket bridge + right info/settings panel + shared media + message actions + attachment up/download + call dialog + PWA service worker) | ✅ any modern browser | `python -m server.main --web-port 8080` |
 | Native TLS (Schannel direct + nginx stream proxy + nginx HTTP+WS reverse proxy) | ✅ Live PostgreSQL + SQLite | M67/M68/M82/M115 |
 | AEAD media plane (AES-256-GCM per-call/session key, ReliableChannel over RELAY) | ✅ | M105/M106/M127 |
 | Voice/video call signaling FSM + audio frame transport over relay | ✅ skeleton (PassThroughCodec; OpusCodec stub gated on PA-012) | M109/M127/M128 |
@@ -125,6 +125,12 @@ wsl bash -lc "docker compose -f deploy/docker/docker-compose.yml --env-file depl
 - Desktop service/bot chats have Telegram-style right-column command rows,
   slash-command suggestions, and backend `service_command` handling for
   `/start`, `/help`, `/security` and unknown-command guidance.
+- Desktop tdesktop-parity flows now include Profile modal form fields,
+  peer-list Contacts edit/share/delete actions, right-panel report/leave
+  confirmation, and server-backed shared media/files/links pagination.
+- Account-domain settings now have server-backed state for notification,
+  privacy, security and proxy fields; Wallet/Premium/Stories/Emoji Status/Gift
+  desktop entries call account feature RPCs instead of local placeholders.
 - conversations: create / add / remove participants; per-message read markers
 - **incremental sync** with cursors + version vectors + bounded older-history pagination
 - **conversation_updated** push so being added to a group lands without manual sync
@@ -134,7 +140,11 @@ wsl bash -lc "docker compose -f deploy/docker/docker-compose.yml --env-file depl
 - **profile + group avatars** (M101) via attachment_id pointers
 - **polls** (M102) — create / vote / close, single + multi-choice, POLL_UPDATED fanout
 - **per-conversation owner / admin / member roles** (M103) — gated add/remove, legacy 1:1 backwards compat
-- contacts (directed), user search, message search across accessible conversations
+- contacts (directed), local contact aliases/edit/share/delete, user search,
+  message search across accessible conversations, shared-media provider pagination
+- account settings/features: notification/privacy/security/proxy preferences,
+  premium/wallet/stars/gifts/stories/emoji-status state; desktop, mobile and
+  browser now share the same server-backed contracts
 - attachments: small inline (≤1 MB) + **chunked upload up to 64 MB** with **byte-level progress** in app_desktop (M88 / M126)
 - **CJK / emoji / surrogate-pair UTF-8** round-trips on the C++ client (M72)
 
@@ -237,9 +247,12 @@ wsl bash -lc "docker compose -f deploy/docker/docker-compose.yml --env-file depl
   every text frame is a JSON envelope dispatched through the same path as
   the TCP control plane
 - 3-pane single-page UI (`server/web/index.html`, `app.js`): sidebar with
-  chat list + selectable conversations, center pane with selected chat,
-  composer with **attachment upload + per-bubble download** (`atob` /
-  `Blob` round-trip via `attachment_fetch_request`)
+  chat list + selectable conversations, center pane with selected chat, and
+  a right panel for conversation info, shared-media paging and account
+  settings/features. The composer supports **attachment upload + per-bubble
+  download** (`atob` / `Blob` round-trip via `attachment_fetch_request`), and
+  message rows expose reaction / pin / edit / delete actions over the same
+  RPCs as desktop/mobile.
 - Voice/video call dialog (invite/accept/decline/end) backed by the same
   CALL_* RPCs the desktop and mobile clients use
 - PWA service worker (`/sw.js`) + manifest (`/manifest.webmanifest`) — push
@@ -290,6 +303,10 @@ CI runs the same sweep + 6 build/verify jobs on every push.
 python scripts/_sweep_validators.py             # full local sweep
 python scripts/validate_desktop_smoke.py        # Qt desktop smoke (Windows)
 python scripts/validate_desktop_button_responses.py  # visible desktop button responses
+python scripts/validate_desktop_tdesktop_parity_functions.py  # Profile/Contacts/right-panel parity wiring
+python scripts/validate_tdesktop_parity_backend.py  # report/leave/contact/shared-media backend contracts
+python scripts/validate_tdesktop_account_domains.py  # account settings/features backend contracts
+python scripts/validate_desktop_account_domain_wiring.py  # desktop account-domain RPC wiring
 python scripts/validate_desktop_service_interactions.py  # service/bot desktop UI wiring
 python scripts/validate_service_commands.py     # service/bot command RPC behavior
 python scripts/validate_call_session.py         # voice/video FSM + AEAD audio frames
@@ -299,11 +316,18 @@ python scripts/validate_reliable_relay.py       # ReliableChannel over RELAY
 python scripts/validate_presence_cache.py       # PresenceService Redis fast path
 python scripts/validate_auth_cache.py           # AuthService Redis fast path
 python scripts/validate_web_bridge.py           # WS handshake + PWA assets
+python scripts/validate_cross_client_account_parity.py  # mobile/browser account-domain parity
 python scripts/validate_production_compose.py   # docker-compose production profile shape
 python scripts/validate_chunked_upload.py       # 5 MB chunked upload byte-exact
 python scripts/validate_postgres_repository.py --pg-dsn postgresql://...
 python scripts/validate_tls_proxy_smoke.py --port 8444 --device dev_pg_smoke
 ```
+
+Desktop screenshot diff validators are intentionally non-blocking in normal
+CI/sweep runs when local visual artifacts are present. Use
+`TELEGRAM_LIKE_STRICT_IMAGE_DIFF=1` or
+`TELEGRAM_LIKE_STRICT_REFERENCE_MAP=1` when calibrating 1:1 visual baselines
+and you want pixel/reference drift to fail the command.
 
 `build-verify/client/src/Debug/json_parser_test.exe` (9/9) and
 `app_desktop_store_test.exe` (20/20) are the native C++ test binaries; they

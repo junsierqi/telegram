@@ -125,7 +125,7 @@ def main() -> int:
     print("[scenario] screenshot #5 centered settings modal")
     require("void show_settings_dialog()" in main_cpp, "settings modal function missing")
     require('setObjectName("settingsModal")' in main_cpp, "settings modal object name missing")
-    for label in ("Language", "Connection type", "Default (TCP used)", "Show tray icon",
+    for label in ("Language", "Connection type", "Default (TCP)", "Show tray icon",
                   "Use monochrome icon", "Show taskbar icon", "Use system window frame",
                   "Default interface scale", "Classic", "Day", "Tinted", "Night",
                   "Telegram FAQ"):

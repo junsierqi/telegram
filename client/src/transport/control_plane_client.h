@@ -248,6 +248,72 @@ struct ContactListResult {
     std::string error_message;
 };
 
+struct ContactShareResult {
+    bool ok {false};
+    std::string user_id;
+    std::string display_name;
+    std::string username;
+    std::string share_text;
+    std::string error_code;
+    std::string error_message;
+};
+
+struct SharedMediaEntry {
+    std::string conversation_id;
+    std::string message_id;
+    std::string sender_user_id;
+    std::string text;
+    long long created_at_ms {0};
+    std::string attachment_id;
+    std::string filename;
+    std::string mime_type;
+    long long size_bytes {0};
+    std::string link;
+};
+
+struct SharedMediaPageResult {
+    bool ok {false};
+    std::string conversation_id;
+    std::string kind;
+    std::vector<SharedMediaEntry> entries;
+    int next_offset {0};
+    bool has_more {false};
+    std::string error_code;
+    std::string error_message;
+};
+
+struct AccountSettingsResult {
+    bool ok {false};
+    std::string user_id;
+    bool notifications_enabled {true};
+    bool message_preview_enabled {true};
+    std::string who_can_add_to_groups {"everybody"};
+    std::string phone_number_visibility {"contacts"};
+    bool two_step_verification_enabled {false};
+    bool passcode_lock_enabled {false};
+    std::string proxy_mode {"system"};
+    std::string proxy_host;
+    int proxy_port {0};
+    std::string proxy_secret;
+    std::string error_code;
+    std::string error_message;
+};
+
+struct AccountFeaturesResult {
+    bool ok {false};
+    std::string user_id;
+    bool premium {false};
+    int stars_balance {0};
+    int wallet_balance {0};
+    int gifts_available {0};
+    int stories_count {0};
+    std::string emoji_status;
+    std::string last_story_title;
+    std::string last_gift_title;
+    std::string error_code;
+    std::string error_message;
+};
+
 struct PresenceUser {
     std::string user_id;
     bool online {false};
@@ -472,6 +538,28 @@ public:
     [[nodiscard]] ContactListResult list_contacts();
     [[nodiscard]] ContactListResult add_contact(const std::string& target_user_id);
     [[nodiscard]] ContactListResult remove_contact(const std::string& target_user_id);
+    [[nodiscard]] ContactListResult edit_contact(const std::string& target_user_id,
+                                                 const std::string& display_name);
+    [[nodiscard]] ContactShareResult share_contact(const std::string& target_user_id);
+    [[nodiscard]] AccountSettingsResult account_settings_get();
+    [[nodiscard]] AccountSettingsResult account_settings_update(
+        bool notifications_enabled,
+        bool message_preview_enabled,
+        const std::string& who_can_add_to_groups,
+        const std::string& phone_number_visibility,
+        bool two_step_verification_enabled,
+        bool passcode_lock_enabled,
+        const std::string& proxy_mode,
+        const std::string& proxy_host,
+        int proxy_port,
+        const std::string& proxy_secret);
+    [[nodiscard]] AccountFeaturesResult account_features_get();
+    [[nodiscard]] AccountFeaturesResult account_features_update(
+        const std::string& emoji_status,
+        const std::string& story_title,
+        const std::string& story_text,
+        const std::string& gift_title,
+        const std::string& gift_recipient_user_id);
     [[nodiscard]] ConversationActionResult create_conversation(
         const std::vector<std::string>& participant_user_ids,
         const std::string& title);
@@ -481,6 +569,15 @@ public:
     [[nodiscard]] ConversationActionResult remove_conversation_participant(
         const std::string& conversation_id,
         const std::string& user_id);
+    [[nodiscard]] ConversationActionResult leave_conversation(const std::string& conversation_id,
+                                                              bool confirmed);
+    [[nodiscard]] AckResult report_conversation(const std::string& conversation_id,
+                                                const std::string& reason,
+                                                const std::string& comment = {});
+    [[nodiscard]] SharedMediaPageResult shared_media_page(const std::string& conversation_id,
+                                                          const std::string& kind,
+                                                          int offset = 0,
+                                                          int limit = 30);
     [[nodiscard]] DeviceListResult list_devices();
     [[nodiscard]] DeviceListResult revoke_device(const std::string& device_id);
     [[nodiscard]] DeviceListResult update_device_trust(const std::string& device_id, bool trusted);
