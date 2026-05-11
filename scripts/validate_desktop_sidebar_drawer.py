@@ -57,13 +57,15 @@ def main() -> int:
     print("[scenario] drawer archive/night/account entries are wired")
     for token in (
         'setObjectName("drawerArchiveRow")',
-        "archive_row->setVisible(!args_.gui_smoke)",
+        "archive_row->setVisible(!args_.gui_smoke && folder_counts.archived > 0)",
         "set_sidebar_folder(SidebarFolder::Archived)",
         "show_account_export_summary",
         'prefs.setValue(QStringLiteral("appearance/interface_scale"), 100)',
+        'setObjectName("drawerResetScaleButton")',
         'open_settings_page_by_name(QStringLiteral("Calls"))',
         'open_settings_page_by_name(QStringLiteral("Account"))',
-        'setObjectName("drawerNightSwitch")',
+        'setObjectName("drawerNightAnimatedToggle")',
+        "&QPushButton::toggled",
         'QSettings prefs',
         "show_profile_reference_dialog();",
         "show_login_dialog();",

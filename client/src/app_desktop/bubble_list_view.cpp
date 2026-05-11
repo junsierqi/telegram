@@ -7,6 +7,7 @@
 #include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPaintEvent>
 #include <QPen>
 
@@ -308,10 +309,16 @@ QRect BubbleDelegate::actionButtonRect(const QStyleOptionViewItem& option,
 
     const int actionSize = 28;
     const int actionGap = 8;
-    const int actionX = outgoing
+    int actionX = outgoing
         ? bubbleRect.left() - actionGap - actionSize
         : bubbleRect.right() + actionGap;
-    return QRect(actionX, bubbleRect.top() + 4, actionSize, actionSize);
+    actionX = std::clamp(actionX,
+                         option.rect.left() + 4,
+                         option.rect.right() - actionSize - 4);
+    const int actionY = std::clamp(bubbleRect.center().y() - actionSize / 2,
+                                   option.rect.top() + 4,
+                                   option.rect.bottom() - actionSize - 4);
+    return QRect(actionX, actionY, actionSize, actionSize);
 }
 
 int BubbleDelegate::maxBubbleContentWidth(int viewportWidth) const {
@@ -567,16 +574,33 @@ void BubbleDelegate::paint(QPainter* painter,
         QRect actionRect = actionButtonRect(option, index);
         if (option.rect.intersects(actionRect)) {
             QColor actionBg(palette_.peer_bubble);
-            actionBg.setAlpha(210);
+            actionBg.setAlpha(pressed ? 235 : 210);
             painter->setPen(Qt::NoPen);
             painter->setBrush(actionBg);
             painter->drawEllipse(actionRect);
-            QColor dots(palette_.text_muted);
-            painter->setBrush(dots);
-            const int cy = actionRect.center().y();
-            for (int i = 0; i < 3; ++i) {
-                painter->drawEllipse(QRect(actionRect.left() + 8 + i * 5, cy - 2, 4, 4));
+            QPen arrowPen(QColor(palette_.text_muted), 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+            painter->setPen(arrowPen);
+            painter->setBrush(Qt::NoBrush);
+            QPainterPath arrow;
+            const QPoint c = actionRect.center();
+            if (outgoing) {
+                arrow.moveTo(c.x() + 6, c.y() - 7);
+                arrow.lineTo(c.x() - 4, c.y() - 7);
+                arrow.cubicTo(c.x() - 10, c.y() - 7, c.x() - 10, c.y() + 3, c.x() - 3, c.y() + 5);
+                arrow.moveTo(c.x() - 4, c.y() - 7);
+                arrow.lineTo(c.x() + 1, c.y() - 12);
+                arrow.moveTo(c.x() - 4, c.y() - 7);
+                arrow.lineTo(c.x() + 1, c.y() - 2);
+            } else {
+                arrow.moveTo(c.x() - 6, c.y() - 7);
+                arrow.lineTo(c.x() + 4, c.y() - 7);
+                arrow.cubicTo(c.x() + 10, c.y() - 7, c.x() + 10, c.y() + 3, c.x() + 3, c.y() + 5);
+                arrow.moveTo(c.x() + 4, c.y() - 7);
+                arrow.lineTo(c.x() - 1, c.y() - 12);
+                arrow.moveTo(c.x() + 4, c.y() - 7);
+                arrow.lineTo(c.x() - 1, c.y() - 2);
             }
+            painter->drawPath(arrow);
         }
     }
 

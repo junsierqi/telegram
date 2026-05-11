@@ -128,6 +128,18 @@ wsl bash -lc "docker compose -f deploy/docker/docker-compose.yml --env-file depl
 - Desktop tdesktop-parity flows now include Profile modal form fields,
   peer-list Contacts edit/share/delete actions, right-panel report/leave
   confirmation, and server-backed shared media/files/links pagination.
+- Desktop right info now follows the tdesktop section shape more closely:
+  a clean Profile surface with row navigation into Media/Members sections,
+  user contact actions, group member search/add/manage/leave/report surfaces,
+  and channel subscriber/link/discussion/similar-channel rows. The right panel
+  uses an explicit user/bot/service/basic-group/megagroup/broadcast-channel
+  peer-kind guard so channel/group danger actions do not leak into one-to-one
+  user or bot profiles. One-to-one user info stays as a direct tdesktop-style
+  profile surface instead of adding extra Media/Contact navigation rows.
+- Desktop sidebar/drawer polish follows tdesktop more closely: folder chips keep
+  fixed readable widths, Archived Chats is a conditional independent drawer
+  entry, Reset Scale lives in the account cover instead of the menu list, and
+  Night Mode uses the custom drawer toggle with immediate theme application.
 - Account-domain settings now have server-backed state for notification,
   privacy, security and proxy fields; Wallet/Premium/Stories/Emoji Status/Gift
   desktop entries call account feature RPCs instead of local placeholders.

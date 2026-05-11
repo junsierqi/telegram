@@ -146,6 +146,36 @@ protected:
     }
 };
 
+class NightModeToggle final : public QPushButton {
+public:
+    explicit NightModeToggle(QWidget* parent = nullptr,
+                             const QSize& size = QSize(44, 24)) : QPushButton(parent) {
+        setObjectName("drawerNightAnimatedToggle");
+        setCheckable(true);
+        setCursor(Qt::PointingHandCursor);
+        setFixedSize(size);
+        setText(QString());
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        const QRectF track = rect().adjusted(1, 1, -1, -1);
+        const qreal radius = track.height() / 2.0;
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(isChecked() ? QColor("#3390ec") : QColor("#b6bcc2"));
+        painter.drawRoundedRect(track, radius, radius);
+
+        const qreal knob = std::max<qreal>(14.0, track.height() - 6.0);
+        const qreal edge = 4.0;
+        const qreal x = isChecked() ? width() - knob - edge : edge;
+        const qreal y = (height() - knob) / 2.0;
+        painter.setBrush(QColor("#ffffff"));
+        painter.drawEllipse(QRectF(x, y, knob, knob));
+    }
+};
+
 bool parse_args(int argc, char** argv, Args& out) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
@@ -597,6 +627,19 @@ QIcon line_icon(const QString& key, int side = 28, QColor color = QColor("#20212
         painter.drawLine(QPointF(side * 0.54, cy), QPointF(side * 0.82, cy));
         painter.drawLine(QPointF(side * 0.70, side * 0.38), QPointF(side * 0.82, cy));
         painter.drawLine(QPointF(side * 0.70, side * 0.62), QPointF(side * 0.82, cy));
+    } else if (key == "edit") {
+        painter.drawLine(QPointF(side * 0.28, side * 0.72), QPointF(side * 0.70, side * 0.30));
+        painter.drawLine(QPointF(side * 0.62, side * 0.22), QPointF(side * 0.78, side * 0.38));
+        painter.drawLine(QPointF(side * 0.24, side * 0.76), QPointF(side * 0.42, side * 0.70));
+    } else if (key == "delete") {
+        painter.drawLine(QPointF(side * 0.30, side * 0.34), QPointF(side * 0.70, side * 0.34));
+        painter.drawLine(QPointF(side * 0.42, side * 0.24), QPointF(side * 0.58, side * 0.24));
+        painter.drawLine(QPointF(side * 0.36, side * 0.40), QPointF(side * 0.40, side * 0.76));
+        painter.drawLine(QPointF(side * 0.64, side * 0.40), QPointF(side * 0.60, side * 0.76));
+        painter.drawLine(QPointF(side * 0.40, side * 0.76), QPointF(side * 0.60, side * 0.76));
+    } else if (key == "block") {
+        painter.drawEllipse(QPointF(cx, cy), side * 0.28, side * 0.28);
+        painter.drawLine(QPointF(side * 0.32, side * 0.68), QPointF(side * 0.68, side * 0.32));
     } else if (key == "moon") {
         painter.drawArc(QRectF(side * 0.26, side * 0.20, side * 0.52, side * 0.58), 70 * 16, 250 * 16);
     } else if (key == "scale") {
@@ -1190,6 +1233,8 @@ int run_smoke(const Args& args) {
 
 class DesktopWindow final : public QMainWindow {
     enum class DeviceAction { Revoke, Trust, Untrust };
+    enum class RightInfoMode { Profile = 0, Media = 1, Members = 2 };
+    enum class DetailPeerKind { User, Bot, Service, BasicGroup, MegaGroup, BroadcastChannel };
 
 public:
     explicit DesktopWindow(const Args& args, QWidget* parent = nullptr)
@@ -1512,6 +1557,7 @@ public:
             tab->setObjectName(active ? "sidebarFolderTabActive" : "sidebarFolderTab");
             tab->setCursor(Qt::PointingHandCursor);
             tab->setMinimumHeight(28);
+            tab->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
             folders_layout->addWidget(tab);
             QObject::connect(tab, &QPushButton::clicked, this, [this, folder] {
                 set_sidebar_folder(folder);
@@ -1523,7 +1569,7 @@ public:
         sidebar_pinned_tab_ = add_folder_tab("Pinned", SidebarFolder::Pinned);
         sidebar_archived_tab_ = add_folder_tab("Archived", SidebarFolder::Archived);
         folders_layout->addStretch(1);
-        folders_tabs->setVisible(!args_.gui_smoke);
+        folders_tabs->setVisible(false);
         sidebar_layout->addWidget(folders_tabs);
         auto* birthday_banner = new QWidget();
         birthday_banner->setObjectName("birthdayBanner");
@@ -1775,10 +1821,20 @@ public:
         auto* detail_header = new QWidget();
         detail_header->setObjectName("profileDetailsHeader");
         auto* detail_header_layout = new QVBoxLayout(detail_header);
-        detail_header_layout->setContentsMargins(18, 10, 18, 16);
-        detail_header_layout->setSpacing(10);
+        detail_header_layout->setContentsMargins(18, 12, 18, 18);
+        detail_header_layout->setSpacing(8);
         auto* detail_close_row = new QHBoxLayout();
-        detail_close_row->addStretch(1);
+        auto* detail_back = new QToolButton();
+        detail_back_button_ = detail_back;
+        detail_back->setObjectName("detailBackButton");
+        detail_back->setText(QString::fromUtf8("\xe2\x80\xb9"));
+        detail_back->setToolTip("Back");
+        detail_back->setCursor(Qt::PointingHandCursor);
+        detail_close_row->addWidget(detail_back);
+        detail_section_title_ = new QLabel("Info");
+        detail_section_title_->setObjectName("detailSectionTitle");
+        detail_section_title_->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
+        detail_close_row->addWidget(detail_section_title_, 1);
         auto* detail_close = new QToolButton();
         detail_close->setObjectName("settingsClose");
         detail_close->setText(QString::fromUtf8("\xe2\x9c\x95"));
@@ -1793,15 +1849,27 @@ public:
         detail_avatar_label_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
         detail_avatar_label_->setScaledContents(false);
         detail_avatar_label_->setAlignment(Qt::AlignCenter);
-        detail_header_layout->addWidget(detail_avatar_label_, 0, Qt::AlignHCenter);
         detail_title_label_ = new QLabel("No chat selected");
         detail_title_label_->setObjectName("detailTitle");
-        detail_title_label_->setAlignment(Qt::AlignCenter);
-        detail_header_layout->addWidget(detail_title_label_);
+        detail_title_label_->setAlignment(Qt::AlignLeft | Qt::AlignBottom);
         detail_subtitle_label_ = new QLabel("Pick a chat");
         detail_subtitle_label_->setObjectName("detailSubtitle");
-        detail_subtitle_label_->setAlignment(Qt::AlignCenter);
-        detail_header_layout->addWidget(detail_subtitle_label_);
+        detail_subtitle_label_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        auto* detail_profile_row = new QWidget();
+        detail_profile_row->setObjectName("detailProfileRow");
+        auto* detail_profile_layout = new QHBoxLayout(detail_profile_row);
+        detail_profile_layout->setContentsMargins(0, 12, 0, 14);
+        detail_profile_layout->setSpacing(18);
+        detail_profile_layout->addWidget(detail_avatar_label_, 0, Qt::AlignVCenter);
+        auto* detail_name_stack = new QVBoxLayout();
+        detail_name_stack->setContentsMargins(0, 0, 0, 0);
+        detail_name_stack->setSpacing(5);
+        detail_name_stack->addStretch(1);
+        detail_name_stack->addWidget(detail_title_label_);
+        detail_name_stack->addWidget(detail_subtitle_label_);
+        detail_name_stack->addStretch(1);
+        detail_profile_layout->addLayout(detail_name_stack, 1);
+        detail_header_layout->addWidget(detail_profile_row);
         auto* detail_actions = new QHBoxLayout();
         detail_actions->setSpacing(6);
         for (const char* text : {"Mute", "Manage", "Leave"}) {
@@ -1919,16 +1987,26 @@ public:
         auto* danger_layout = new QVBoxLayout(detail_danger);
         danger_layout->setContentsMargins(22, 16, 22, 18);
         auto* leave_btn = new QPushButton("Leave channel");
+        detail_leave_button_ = leave_btn;
         leave_btn->setObjectName("detailFlatAction");
         auto* report_btn = new QPushButton("Report");
+        detail_report_button_ = report_btn;
         report_btn->setObjectName("dangerAction");
         danger_layout->addWidget(leave_btn);
         danger_layout->addWidget(report_btn);
         QObject::connect(leave_btn, &QPushButton::clicked, this, [this] {
             const auto conversation = store_.selected_conversation_id();
             if (conversation.empty()) return;
-            if (QMessageBox::question(this, "Leave Channel",
-                                      "Leave this chat? You will need to be invited again to rejoin.")
+            const auto* selected = store_.selected_conversation();
+            const auto kind = selected == nullptr
+                ? DetailPeerKind::User
+                : detail_peer_kind_for(*selected, reference_title_for(selected->conversation_id, selected->title));
+            const bool channel = kind == DetailPeerKind::BroadcastChannel;
+            const QString title = channel ? QStringLiteral("Leave Channel") : QStringLiteral("Leave Group");
+            const QString body = channel
+                ? QStringLiteral("Leave this channel? You will need to join again to see new posts.")
+                : QStringLiteral("Leave this group? You will need to be invited again to rejoin.");
+            if (QMessageBox::question(this, title, body)
                 != QMessageBox::Yes) {
                 return;
             }
@@ -2559,6 +2637,9 @@ public:
                          [this] { if (details_stack_ != nullptr) details_stack_->setCurrentIndex(0); });
         QObject::connect(detail_close, &QToolButton::clicked,
                          [this] { set_details_panel_visible(false); });
+        QObject::connect(detail_back_button_, &QToolButton::clicked, this, [this] {
+            set_right_info_mode(RightInfoMode::Profile);
+        });
         settings_nav_->setCurrentRow(0);
 
         details_stack_->addWidget(details_inner);
@@ -3053,20 +3134,27 @@ private:
             QScrollArea#detailsPanel > QWidget > QWidget { background:{surface}; }
             QStackedWidget#detailsStack { background:{surface}; }
             QWidget#profileDetailsPage { background:{surface}; }
-            QWidget#profileDetailsHeader { background:{app_background}; border-bottom:1px solid {border}; }
-            QLabel#detailTitle { font-weight:700; font-size:20px; color:{text_primary}; }
-            QLabel#detailSubtitle { font-size:17px; color:{text_muted}; }
+            QWidget#profileDetailsHeader { background:{surface}; border-bottom:8px solid {app_background}; }
+            QWidget#detailProfileRow { background:{surface}; }
+            QToolButton#detailBackButton { background:transparent; border:none; border-radius:7px; color:{text_muted}; font-size:28px; padding:0 8px 2px 8px; min-width:32px; min-height:32px; }
+            QToolButton#detailBackButton:hover { background:{hover}; color:{text_primary}; }
+            QLabel#detailSectionTitle { color:{text_primary}; font-size:16px; font-weight:600; background:transparent; }
+            QLabel#detailTitle { font-weight:700; font-size:19px; color:{text_primary}; background:transparent; }
+            QLabel#detailSubtitle { font-size:15px; color:{text_muted}; background:transparent; }
             QWidget#detailSection { background:{surface}; border-bottom:8px solid {app_background}; }
             QWidget#detailServiceInfoSection, QWidget#detailServiceMediaSection { background:{surface}; border-bottom:8px solid {app_background}; }
-            QLabel#detailLink { color:{primary}; font-size:13px; }
-            QLabel#detailDescription { color:{text_secondary}; font-size:13px; }
+            QLabel#detailLink { color:{primary}; font-size:13px; background:transparent; }
+            QLabel#detailDescription { color:{text_secondary}; font-size:13px; background:transparent; }
             QListWidget#detailMembers { background:{surface}; border:none; outline:0; }
-            QListWidget#detailMembers::item { padding:8px 2px; color:{text_primary}; }
-            QListWidget#detailMediaRows { background:{surface}; border:none; outline:0; color:{text_primary}; font-size:15px; }
+            QListWidget#detailMembers::item { min-height:46px; padding:9px 2px; color:{text_primary}; }
+            QListWidget#detailMediaRows { background:{surface}; border:none; outline:0; color:{text_primary}; font-size:14px; }
             QTabWidget#detailMediaTabs::pane { border:none; }
             QTabWidget#detailMediaTabs QTabBar::tab { padding:6px 10px; color:{text_secondary}; border-radius:8px; }
             QTabWidget#detailMediaTabs QTabBar::tab:selected { background:{selection_tint}; color:{text_primary}; font-weight:600; }
-            QListWidget#detailMediaRows::item { min-height:38px; padding:5px 2px; color:{text_primary}; }
+            QListWidget#detailMediaRows::item { min-height:48px; padding:6px 2px; color:{text_primary}; }
+            QWidget#detailToggleRow { background:{surface}; }
+            QLabel#detailToggleText { color:{text_primary}; font-size:14px; background:transparent; }
+            QPushButton#detailNotificationToggle { border:none; background:transparent; min-width:44px; min-height:24px; max-width:44px; max-height:24px; }
             QListWidget#detailFilesRows, QListWidget#detailLinksRows, QListWidget#detailVoiceRows { background:{surface}; border:none; outline:0; color:{text_primary}; }
             QToolButton#detailAction { background:{surface}; border:none; border-radius:8px; color:{primary}; padding:7px 4px 6px 4px; font-size:13px; }
             QToolButton#detailAction:hover { background:{hover}; }
@@ -3133,16 +3221,16 @@ private:
             QPushButton#drawerAccountCurrent:hover, QPushButton#drawerAccountRow:hover { background:{hover}; }
             QPushButton#drawerRow { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 20px; font-size:14px; font-weight:600; color:{text_primary}; }
             QPushButton#drawerRow:hover { background:{hover}; }
+            QPushButton#drawerResetScaleButton { background:rgba(255,255,255,0.82); border:none; border-radius:14px; color:{text_secondary}; font-size:12px; font-weight:700; padding:4px 9px; }
+            QPushButton#drawerResetScaleButton:hover { background:{hover}; color:{text_primary}; }
+            QFrame#drawerMenuSeparator { background:{border_subtle}; border:none; max-height:1px; margin-top:0; margin-bottom:0; }
             QPushButton#drawerAccountSwitchRow { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 20px; font-size:14px; font-weight:600; color:{text_primary}; min-height:48px; }
             QPushButton#drawerAccountSwitchRow:hover { background:{hover}; }
             QPushButton#drawerSettingsButton { background:{surface}; border:none; border-radius:0; text-align:left; padding:0 20px; font-size:14px; font-weight:600; color:{text_primary}; min-height:48px; }
             QPushButton#drawerSettingsButton:hover { background:{hover}; }
-            QWidget#drawerNightRow { background:{surface}; border-top:1px solid {border_subtle}; }
+            QWidget#drawerNightRow { background:{surface}; border-top:none; min-height:48px; }
             QLabel#drawerNightText { color:{text_primary}; font-size:14px; font-weight:600; background:transparent; }
-            QCheckBox#drawerNightSwitch { background:transparent; spacing:0; }
-            QCheckBox#drawerNightSwitch::indicator { width:58px; height:32px; border-radius:16px; background:{text_muted}; }
-            QCheckBox#drawerNightSwitch::indicator:checked { background:{primary}; }
-            QPushButton#drawerNightAnimatedToggle { border:none; border-radius:16px; background:transparent; }
+            QPushButton#drawerNightAnimatedToggle { border:none; background:transparent; min-width:44px; min-height:24px; max-width:44px; max-height:24px; }
             QLabel#drawerFooter { color:{text_muted}; font-size:12px; background:transparent; }
         )");
         css += QString::fromUtf8(R"(
@@ -3516,7 +3604,7 @@ private:
         header->setObjectName("drawerHeader");
         header->setFixedHeight(tdstyle::kMainMenuCoverHeight);
         auto* header_layout = new QVBoxLayout(header);
-        header_layout->setContentsMargins(24, 20, 24, 16);
+        header_layout->setContentsMargins(24, 16, 18, 16);
         header_layout->setSpacing(4);
         const QString drawer_display = display_name_->text().trimmed().isEmpty()
             ? (args_.gui_smoke ? QStringLiteral("XZMQ") : user_->text().trimmed())
@@ -3527,7 +3615,17 @@ private:
         auto* avatar = new QLabel();
         avatar->setFixedSize(tdstyle::kMainMenuUserpic, tdstyle::kMainMenuUserpic);
         avatar->setPixmap(avatar_pixmap_for(drawer_seed, drawer_display, tdstyle::kMainMenuUserpic));
-        header_layout->addWidget(avatar);
+        auto* cover_top = new QHBoxLayout();
+        cover_top->setContentsMargins(0, 0, 0, 0);
+        cover_top->addWidget(avatar);
+        cover_top->addStretch(1);
+        auto* reset_scale_top = new QPushButton("100%");
+        reset_scale_top->setObjectName("drawerResetScaleButton");
+        reset_scale_top->setToolTip("Reset Scale");
+        reset_scale_top->setCursor(Qt::PointingHandCursor);
+        reset_scale_top->setVisible(false);
+        cover_top->addWidget(reset_scale_top, 0, Qt::AlignTop);
+        header_layout->addLayout(cover_top);
         auto* name = new QLabel(drawer_display);
         name->setObjectName("drawerName");
         header_layout->addWidget(name);
@@ -3536,7 +3634,20 @@ private:
         status->setCursor(Qt::PointingHandCursor);
         status->setProperty("drawerEmojiStatusAction", true);
         status->installEventFilter(this);
-        header_layout->addWidget(status);
+        auto* status_row = new QHBoxLayout();
+        status_row->setContentsMargins(0, 0, 0, 0);
+        status_row->addWidget(status, 1);
+        auto* account_switch_row = new QPushButton(QString::fromUtf8("\xe2\x8c\x84"));
+        account_switch_row->setObjectName("drawerAccountSwitchRow");
+        account_switch_row->setToolTip("Switch Accounts");
+        account_switch_row->setCursor(Qt::PointingHandCursor);
+        account_switch_row->setFixedSize(28, 28);
+        account_switch_row->setStyleSheet(QStringLiteral(
+            "QPushButton#drawerAccountSwitchRow { background:transparent; border:none; color:#9b9b9b; "
+            "font-size:22px; font-weight:600; padding:0; min-height:0; }"
+            "QPushButton#drawerAccountSwitchRow:hover { background:transparent; color:#6f6f6f; }"));
+        status_row->addWidget(account_switch_row, 0, Qt::AlignRight | Qt::AlignVCenter);
+        header_layout->addLayout(status_row);
         content_layout->addWidget(header);
 
         auto* accounts = new QWidget();
@@ -3574,26 +3685,28 @@ private:
         accounts->setVisible(drawer_accounts_expanded_);
         content_layout->addWidget(accounts);
 
-        auto* account_switch_row = new QPushButton(drawer_accounts_expanded_
-            ? "Hide Accounts" : "Switch Accounts");
-        account_switch_row->setObjectName("drawerAccountSwitchRow");
-        account_switch_row->setIcon(line_icon("account", 24));
-        account_switch_row->setIconSize(QSize(24, 24));
-        account_switch_row->setMinimumHeight(48);
-        account_switch_row->setCursor(Qt::PointingHandCursor);
-        content_layout->addWidget(account_switch_row);
+        const auto reset_scale = [this, close_drawer] {
+            close_drawer();
+            QSettings prefs;
+            prefs.setValue(QStringLiteral("appearance/interface_scale"), 100);
+            open_settings_page_by_name(QStringLiteral("Appearance"));
+            statusBar()->showMessage("Interface scale reset to 100%", 2600);
+        };
+        QObject::connect(reset_scale_top, &QPushButton::clicked, drawer, reset_scale);
+
         QObject::connect(account_switch_row, &QPushButton::clicked, drawer,
                          [this, accounts, account_switch_row] {
             drawer_accounts_expanded_ = !drawer_accounts_expanded_;
             accounts->setVisible(drawer_accounts_expanded_);
             account_switch_row->setText(drawer_accounts_expanded_
-                ? "Hide Accounts" : "Switch Accounts");
+                ? QString::fromUtf8("\xe2\x8c\x83")
+                : QString::fromUtf8("\xe2\x8c\x84"));
             if (account_drawer_ != nullptr) sync_account_drawer_geometry();
         });
 
         auto add_row = [&](const QString& icon_key, const QString& text, QObject* receiver = nullptr,
                            const char* slot = nullptr) -> QPushButton* {
-            auto* btn = new QPushButton(text);
+            auto* btn = new QPushButton(QStringLiteral("    ") + text);
             btn->setObjectName("drawerRow");
             btn->setIcon(line_icon(icon_key, 24));
             btn->setIconSize(QSize(24, 24));
@@ -3608,6 +3721,24 @@ private:
             }
             return btn;
         };
+        const auto folder_counts = sidebar_folder_counts();
+        auto* archive_row = add_row(
+            "folder",
+            folder_counts.archived > 0
+                ? QStringLiteral("Archived Chats  %1").arg(folder_counts.archived)
+                : QStringLiteral("Archived Chats"));
+        archive_row->setObjectName("drawerArchiveRow");
+        archive_row->setVisible(!args_.gui_smoke && folder_counts.archived > 0);
+        QObject::connect(archive_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            set_sidebar_folder(SidebarFolder::Archived);
+        });
+        auto* archive_separator = new QFrame();
+        archive_separator->setObjectName("drawerMenuSeparator");
+        archive_separator->setFrameShape(QFrame::NoFrame);
+        archive_separator->setVisible(archive_row->isVisible());
+        content_layout->addWidget(archive_separator);
+
         auto* profile_row = add_row("profile", "My Profile");
         QObject::connect(profile_row, &QPushButton::clicked, drawer, [this, close_drawer] {
             close_drawer();
@@ -3642,6 +3773,18 @@ private:
             child->setProperty("drawerWalletAction", true);
             child->installEventFilter(this);
         }
+        auto* cloud_row = add_row("saved", "Cloud Storage");
+        cloud_row->setObjectName("drawerCloudRow");
+        cloud_row->setVisible(false);
+        QObject::connect(cloud_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            show_account_export_summary();
+        });
+        auto* feature_separator = new QFrame();
+        feature_separator->setObjectName("drawerMenuSeparator");
+        feature_separator->setFrameShape(QFrame::NoFrame);
+        feature_separator->setVisible(true);
+        content_layout->addWidget(feature_separator);
         auto* group_row = add_row("group", "New Group");
         QObject::connect(group_row, &QPushButton::clicked, drawer, [this, close_drawer] {
             close_drawer();
@@ -3668,35 +3811,6 @@ private:
             open_settings_page_by_name(QStringLiteral("Account"));
             statusBar()->showMessage("Saved Messages uses the current account storage in this build", 2600);
         });
-        const auto folder_counts = sidebar_folder_counts();
-        auto* archive_row = add_row(
-            "folder",
-            folder_counts.archived > 0
-                ? QStringLiteral("Archived Chats  %1").arg(folder_counts.archived)
-                : QStringLiteral("Archived Chats"));
-        archive_row->setObjectName("drawerArchiveRow");
-        auto* cloud_row = add_row("saved", "Cloud Storage");
-        cloud_row->setObjectName("drawerCloudRow");
-        auto* reset_scale_row = add_row("settings", "Reset Scale");
-        reset_scale_row->setObjectName("drawerResetScaleRow");
-        archive_row->setVisible(!args_.gui_smoke);
-        cloud_row->setVisible(!args_.gui_smoke);
-        reset_scale_row->setVisible(!args_.gui_smoke);
-        QObject::connect(archive_row, &QPushButton::clicked, drawer, [this, close_drawer] {
-            close_drawer();
-            set_sidebar_folder(SidebarFolder::Archived);
-        });
-        QObject::connect(cloud_row, &QPushButton::clicked, drawer, [this, close_drawer] {
-            close_drawer();
-            show_account_export_summary();
-        });
-        QObject::connect(reset_scale_row, &QPushButton::clicked, drawer, [this, close_drawer] {
-            close_drawer();
-            QSettings prefs;
-            prefs.setValue(QStringLiteral("appearance/interface_scale"), 100);
-            open_settings_page_by_name(QStringLiteral("Appearance"));
-            statusBar()->showMessage("Interface scale reset to 100%", 2600);
-        });
         auto* settings = add_row("settings", "Settings");
         settings->setObjectName("drawerSettingsButton");
         QObject::connect(settings, &QPushButton::clicked, drawer, [this, close_drawer] {
@@ -3707,7 +3821,8 @@ private:
         auto* night_wrap = new QWidget();
         night_wrap->setObjectName("drawerNightRow");
         auto* night_layout = new QHBoxLayout(night_wrap);
-        night_layout->setContentsMargins(21, 6, 18, 6);
+        night_layout->setContentsMargins(21, 0, 18, 0);
+        night_layout->setSpacing(16);
         auto* night_icon = new QLabel();
         night_icon->setStyleSheet(QStringLiteral("background:transparent;"));
         night_icon->setPixmap(line_icon("moon", 24).pixmap(24, 24));
@@ -3715,48 +3830,23 @@ private:
         auto* night_text = new QLabel("Night Mode");
         night_text->setObjectName("drawerNightText");
         night_layout->addWidget(night_text, 1);
-        auto* animated_night = new QPushButton();
-        animated_night->setObjectName("drawerNightAnimatedToggle");
-        animated_night->setCheckable(true);
+        auto* animated_night = new NightModeToggle();
         animated_night->setChecked(telegram_like::client::app_desktop::design::is_dark_theme());
-        animated_night->setText(QString());
-        animated_night->setFixedSize(58, 32);
-        animated_night->setCursor(Qt::PointingHandCursor);
-        auto* night = new QCheckBox();
-        night->setObjectName("drawerNightSwitch");
-        night->setCursor(Qt::PointingHandCursor);
-        const auto& drawer_theme = telegram_like::client::app_desktop::design::active_theme();
-        night->setStyleSheet(QStringLiteral(
-            "QCheckBox::indicator { width:58px; height:32px; border-radius:16px; background:%1; }"
-            "QCheckBox::indicator:checked { background:%2; }")
-            .arg(QString::fromUtf8(drawer_theme.text_muted),
-                 QString::fromUtf8(drawer_theme.primary)));
-        night->setChecked(telegram_like::client::app_desktop::design::is_dark_theme());
-        animated_night->setVisible(false);
-        night_layout->addWidget(night);
+        night_layout->addWidget(animated_night);
         content_layout->addWidget(night_wrap);
-        QObject::connect(animated_night, &QPushButton::clicked, night, [night, animated_night] {
-            const bool next = !night->isChecked();
-            animated_night->setChecked(next);
-            animated_night->setText(QString());
-            night->setChecked(next);
-        });
-        QObject::connect(night, &QCheckBox::toggled, [this, animated_night](bool dark) {
-            auto* anim = new QPropertyAnimation(animated_night, "maximumWidth", animated_night);
-            anim->setDuration(150);
-            anim->setStartValue(54);
-            anim->setEndValue(58);
-            anim->start(QAbstractAnimation::DeleteWhenStopped);
-            animated_night->setChecked(dark);
-            animated_night->setText(QString());
-            telegram_like::client::app_desktop::design::set_active_theme(dark);
+        QObject::connect(animated_night, &QPushButton::toggled, drawer, [this, animated_night](bool dark) {
             QSettings prefs;
             prefs.setValue(QStringLiteral("appearance/dark_theme"), dark);
+            telegram_like::client::app_desktop::design::set_active_theme(dark);
+            const QString style = telegram_stylesheet();
             if (auto* app = qobject_cast<QApplication*>(QApplication::instance())) {
-                app->setStyleSheet(telegram_stylesheet());
+                app->setStyleSheet(style);
+            } else {
+                setStyleSheet(style);
             }
-            setStyleSheet(telegram_stylesheet());
+            animated_night->update();
             render_store();
+            update();
         });
 
         content_layout->addStretch(1);
@@ -3782,9 +3872,13 @@ private:
     }
 
     QRect account_drawer_geometry(bool offscreen) const {
-        const int panelW = sidebar_panel_ != nullptr && sidebar_panel_->width() > 0
-            ? sidebar_panel_->width()
-            : tdstyle::kMainMenuWidth;
+        const int panelW = std::min(
+            width(),
+            std::max(
+                tdstyle::kMainMenuWidth,
+                sidebar_panel_ != nullptr && sidebar_panel_->width() > 0
+                    ? sidebar_panel_->width()
+                    : tdstyle::kMainMenuWidth));
         const int panelH = height();
         const int x = offscreen ? -panelW : 0;
         return QRect(x, 0, panelW, panelH);
@@ -6029,6 +6123,8 @@ protected:
             if (detail_media_section_ != nullptr) detail_media_section_->setVisible(false);
             if (detail_members_section_ != nullptr) detail_members_section_->setVisible(false);
             if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
+            if (detail_back_button_ != nullptr) detail_back_button_->setVisible(false);
+            if (detail_section_title_ != nullptr) detail_section_title_->setText(QStringLiteral("Info"));
             detail_avatar_label_->setPixmap(avatar_pixmap_for(
                 "empty", "?", tdstyle::kInfoProfilePhotoSize));
             detail_title_label_->setText("No chat selected");
@@ -6047,83 +6143,170 @@ protected:
             return;
         }
         for (auto* button : detail_action_buttons_) button->setVisible(true);
+        if (detail_back_button_ != nullptr) detail_back_button_->setVisible(false);
+        if (detail_section_title_ != nullptr) detail_section_title_->setText(QStringLiteral("Info"));
         if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(true);
         if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
         if (detail_members_section_ != nullptr) detail_members_section_->setVisible(true);
         if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(true);
         const QString title = reference_title_for(conv->conversation_id, conv->title);
         const std::size_t members = conv->participant_user_ids.size();
-        const bool is_group = members > 2
-            || title.contains(QString::fromUtf8("三叉戟"))
-            || conv->conversation_id.find("group") != std::string::npos;
-        const bool is_channel = !is_group && (title.contains("channel", Qt::CaseInsensitive)
-            || title.contains("team", Qt::CaseInsensitive)
-            || title.contains("proxy", Qt::CaseInsensitive));
-        const bool is_service = is_service_conversation(*conv, title);
+        const DetailPeerKind peer_kind = detail_peer_kind_for(*conv, title);
+        const bool is_service = peer_kind == DetailPeerKind::Service;
+        const bool is_bot = peer_kind == DetailPeerKind::Bot;
+        const bool is_group = is_group_detail_kind(peer_kind);
+        const bool is_channel = peer_kind == DetailPeerKind::BroadcastChannel;
+        if (detail_leave_button_ != nullptr) {
+            detail_leave_button_->setText(is_channel
+                ? QStringLiteral("Leave channel")
+                : QStringLiteral("Leave group"));
+        }
+        if (detail_report_button_ != nullptr) {
+            detail_report_button_->setText(is_channel
+                ? QStringLiteral("Report channel")
+                : QStringLiteral("Report group"));
+        }
         detail_avatar_label_->setPixmap(avatar_pixmap_for(
             conv->conversation_id, title, tdstyle::kInfoProfilePhotoSize));
         detail_title_label_->setText(title);
         detail_subtitle_label_->setText(reference_subtitle_for(*conv));
-        set_detail_action_texts(is_channel, is_group, is_service);
+        set_detail_action_texts(peer_kind);
         if (detail_member_search_ != nullptr) detail_member_search_->setVisible(false);
 
         if (is_service) {
+            configure_right_info_sections(QStringLiteral("Service Info"), QStringLiteral("Media"), QStringLiteral("Commands"));
             set_service_detail_panel(*conv);
+            apply_right_info_mode_visibility();
+            return;
+        }
+
+        if (is_bot) {
+            configure_right_info_sections(QStringLiteral("Bot Info"), QStringLiteral("Media"), QStringLiteral("Commands"));
+            set_bot_detail_panel(*conv);
+            apply_right_info_mode_visibility();
             return;
         }
 
         if (is_channel) {
             set_detail_service_mode(false);
+            configure_right_info_sections(QStringLiteral("Channel Info"), QStringLiteral("Shared Media"), QStringLiteral("Subscribers"));
             if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(true);
             if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
-            if (detail_members_section_ != nullptr) detail_members_section_->setVisible(false);
+            if (detail_members_section_ != nullptr) detail_members_section_->setVisible(true);
             if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(true);
-            detail_link_label_->setText(QStringLiteral("t.me/M_Team\nLink"));
+            detail_link_label_->setText(QStringLiteral("t.me/M_Team\nPublic link"));
             detail_description_label_->setText(QStringLiteral(
                 "M-Team is a private tracker community channel with release news, "
-                "announcements and discussion updates."));
+                "announcements and discussion updates.\n\nLinked discussion: General Chat"));
             set_detail_media_rows(*conv, is_channel, is_group);
+            populate_channel_subscribers(*conv);
+            if (detail_members_title_ != nullptr) {
+                detail_members_title_->setVisible(true);
+                detail_members_title_->setText(QStringLiteral("%1 SUBSCRIBERS")
+                    .arg(static_cast<int>(std::max<std::size_t>(members, 21474))));
+            }
+            if (detail_member_search_ != nullptr) detail_member_search_->setVisible(false);
+            apply_right_info_mode_visibility();
             return;
         }
 
         if (is_group) {
             set_detail_service_mode(false);
-            if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(false);
-            if (detail_media_section_ != nullptr) detail_media_section_->setVisible(false);
-            if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
-            detail_link_label_->clear();
-            detail_description_label_->clear();
+            configure_right_info_sections(QStringLiteral("Group Info"), QStringLiteral("Shared Media"), QStringLiteral("Members"));
+            if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(true);
+            if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
+            if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(true);
+            detail_link_label_->setText(QStringLiteral("Private group\nInvite link hidden"));
+            detail_description_label_->setText(QStringLiteral(
+                "Group profile, members and shared media are kept in separate sections like Telegram Desktop."));
+            set_detail_media_rows(*conv, is_channel, is_group);
             populate_detail_members(*conv);
             if (detail_member_search_ != nullptr) detail_member_search_->setVisible(true);
             if (detail_members_title_ != nullptr) {
+                detail_members_title_->setVisible(true);
                 detail_members_title_->setText(QStringLiteral("%1 MEMBERS")
                     .arg(static_cast<int>(conv->participant_user_ids.size())));
             }
+            apply_right_info_mode_visibility();
             return;
         }
 
         set_detail_service_mode(false);
+        configure_right_info_sections(QStringLiteral("User Info"), QStringLiteral("Shared Media"), QStringLiteral("Contact"));
         if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(true);
         if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
         if (detail_members_section_ != nullptr) detail_members_section_->setVisible(true);
         if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
         detail_link_label_->setText(QStringLiteral("+44 74 8035 6438\nPhone"));
         detail_description_label_->setText(QStringLiteral("@heyblake\nUsername"));
-        set_detail_media_rows(*conv, is_channel, is_group);
+        for (auto* button : detail_action_buttons_) button->setVisible(false);
+        set_detail_media_rows(*conv, is_channel, is_group, false);
         detail_members_list_->clear();
-        if (detail_members_title_ != nullptr) detail_members_title_->setText(QStringLiteral("CONTACT ACTIONS"));
+        if (detail_members_title_ != nullptr) {
+            detail_members_title_->clear();
+            detail_members_title_->setVisible(false);
+        }
+        if (detail_member_search_ != nullptr) detail_member_search_->setVisible(false);
         const std::vector<std::pair<QString, QString>> contact_actions {
             {QStringLiteral("contact"), QStringLiteral("Share this contact")},
             {QStringLiteral("edit"), QStringLiteral("Edit contact")},
             {QStringLiteral("delete"), QStringLiteral("Delete contact")},
+            {QStringLiteral("block"), QStringLiteral("Block user")},
         };
         for (const auto& [icon, label] : contact_actions) {
             auto* item = new QListWidgetItem(line_icon(icon, 24, QColor("#7d8790")), label);
-            item->setSizeHint(QSize(0, 42));
+            item->setSizeHint(QSize(0, 56));
             detail_members_list_->addItem(item);
         }
         detail_members_list_->setFixedHeight(detail_members_list_->sizeHintForRow(0)
             * detail_members_list_->count() + 8);
+        apply_right_info_mode_visibility();
+    }
+
+    void configure_right_info_sections(const QString& profile,
+                                       const QString& media,
+                                       const QString& members) {
+        right_profile_label_ = profile;
+        right_media_label_ = media;
+        right_members_label_ = members;
+    }
+
+    void set_right_info_mode(RightInfoMode mode) {
+        right_info_mode_ = mode;
+        apply_right_info_mode_visibility();
+    }
+
+    void apply_right_info_mode_visibility() {
+        if (detail_identity_section_ == nullptr
+            || detail_media_section_ == nullptr
+            || detail_members_section_ == nullptr) {
+            return;
+        }
+        const bool profile = right_info_mode_ == RightInfoMode::Profile;
+        const bool media = right_info_mode_ == RightInfoMode::Media;
+        const bool members = right_info_mode_ == RightInfoMode::Members;
+        const auto* conversation = store_.selected_conversation();
+        const DetailPeerKind peer_kind = conversation == nullptr
+            ? DetailPeerKind::User
+            : detail_peer_kind_for(*conversation, reference_title_for(conversation->conversation_id, conversation->title));
+        const bool service = peer_kind == DetailPeerKind::Service;
+        const bool bot = peer_kind == DetailPeerKind::Bot;
+        const bool group_or_channel = is_group_detail_kind(peer_kind)
+            || peer_kind == DetailPeerKind::BroadcastChannel;
+        if (detail_back_button_ != nullptr) {
+            detail_back_button_->setVisible(!profile);
+        }
+        if (detail_section_title_ != nullptr) {
+            detail_section_title_->setText(profile
+                ? right_profile_label_
+                : (media ? right_media_label_ : right_members_label_));
+        }
+        detail_identity_section_->setVisible(profile);
+        detail_media_section_->setVisible(profile || media);
+        detail_members_section_->setVisible(!service && !bot && (profile || members));
+        if (detail_danger_section_ != nullptr) {
+            detail_danger_section_->setVisible(group_or_channel && profile);
+        }
     }
 
     static bool is_service_conversation(
@@ -6131,13 +6314,51 @@ protected:
         const QString& title) {
         return title == QStringLiteral("Telegram")
             || conversation.conversation_id.find("service") != std::string::npos
-            || conversation.conversation_id.find("bot") != std::string::npos;
+            || conversation.conversation_id.find("official") != std::string::npos;
+    }
+
+    static bool is_bot_conversation(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation,
+        const QString& title) {
+        if (is_service_conversation(conversation, title)) return false;
+        const QString id = qstr(conversation.conversation_id).toLower();
+        return id.contains(QStringLiteral("bot"))
+            || title.contains(QStringLiteral("bot"), Qt::CaseInsensitive);
+    }
+
+    static bool is_group_detail_kind(DetailPeerKind kind) {
+        return kind == DetailPeerKind::BasicGroup
+            || kind == DetailPeerKind::MegaGroup;
+    }
+
+    static DetailPeerKind detail_peer_kind_for(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation,
+        const QString& title) {
+        if (is_service_conversation(conversation, title)) return DetailPeerKind::Service;
+        if (is_bot_conversation(conversation, title)) return DetailPeerKind::Bot;
+        const QString id = qstr(conversation.conversation_id).toLower();
+        const bool explicit_megagroup = id.contains(QStringLiteral("megagroup"))
+            || title.contains(QStringLiteral("chat"), Qt::CaseInsensitive);
+        if (explicit_megagroup) return DetailPeerKind::MegaGroup;
+        const bool explicit_group = id.contains(QStringLiteral("group"))
+            || conversation.participant_user_ids.size() > 2
+            || title.contains(QString::fromUtf8("三叉戟"));
+        if (explicit_group) return DetailPeerKind::BasicGroup;
+        const bool explicit_channel = id.contains(QStringLiteral("channel"))
+            || id.contains(QStringLiteral("broadcast"))
+            || id.startsWith(QStringLiteral("ref_channel"))
+            || title.contains(QStringLiteral("channel"), Qt::CaseInsensitive)
+            || title.contains(QStringLiteral("M-Team"), Qt::CaseInsensitive)
+            || title.contains(QStringLiteral("proxy"), Qt::CaseInsensitive);
+        if (explicit_channel) return DetailPeerKind::BroadcastChannel;
+        return DetailPeerKind::User;
     }
 
     bool current_conversation_is_service() const {
         if (const auto* conv = store_.selected_conversation()) {
             const QString title = reference_title_for(conv->conversation_id, conv->title);
-            return is_service_conversation(*conv, title);
+            const auto kind = detail_peer_kind_for(*conv, title);
+            return kind == DetailPeerKind::Service || kind == DetailPeerKind::Bot;
         }
         const auto current_id = str(conversation_->text().trimmed());
         return current_id.find("service") != std::string::npos
@@ -6186,12 +6407,43 @@ protected:
         fit_detail_list(detail_links_list_);
     }
 
-    void set_detail_action_texts(bool is_channel, bool is_group, bool is_service = false) {
+    void set_bot_detail_panel(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation) {
+        set_detail_service_mode(true);
+        if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(true);
+        if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
+        if (detail_members_section_ != nullptr) detail_members_section_->setVisible(false);
+        if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
+        if (detail_member_search_ != nullptr) detail_member_search_->setVisible(false);
+        detail_link_label_->setText(QStringLiteral("bot@telegram.local\nBot profile"));
+        detail_description_label_->setText(QStringLiteral(
+            "Bot commands and app actions are grouped separately from user, group and channel controls."));
+        set_detail_media_rows(conversation, false, false);
+        clear_detail_list(detail_files_list_);
+        clear_detail_list(detail_voice_list_);
+        add_detail_row(detail_links_list_, QStringLiteral("message"), QStringLiteral("Start bot"),
+                       QStringLiteral("command"), {}, {}, {}, QStringLiteral("/start"));
+        add_detail_row(detail_links_list_, QStringLiteral("search"), QStringLiteral("Help"),
+                       QStringLiteral("command"), {}, {}, {}, QStringLiteral("/help"));
+        add_detail_row(detail_links_list_, QStringLiteral("group"), QStringLiteral("Add bot to group"));
+        add_detail_row(detail_links_list_, QStringLiteral("settings"), QStringLiteral("Bot settings"));
+        fit_detail_list(detail_links_list_);
+    }
+
+    void set_detail_action_texts(DetailPeerKind peer_kind) {
         if (detail_action_buttons_.size() < 3) return;
+        const bool is_service = peer_kind == DetailPeerKind::Service;
+        const bool is_bot = peer_kind == DetailPeerKind::Bot;
+        const bool is_group = is_group_detail_kind(peer_kind);
+        const bool is_channel = peer_kind == DetailPeerKind::BroadcastChannel;
         const QStringList labels = is_service
             ? QStringList{QStringLiteral("Notifications"),
                           QStringLiteral("Search"),
                           QStringLiteral("Settings")}
+            : (is_bot
+            ? QStringList{QStringLiteral("Message"),
+                          QStringLiteral("Commands"),
+                          QStringLiteral("Add")}
             : (is_group
             ? QStringList{QStringLiteral("Mute"),
                           QStringLiteral("Manage"),
@@ -6202,14 +6454,16 @@ protected:
                               QStringLiteral("Gift")}
                 : QStringList{QStringLiteral("Message"),
                               QStringLiteral("Mute"),
-                              QStringLiteral("Gift")}));
+                              QStringLiteral("Gift")})));
         const QStringList icons = is_service
             ? QStringList{QStringLiteral("bell"), QStringLiteral("search"), QStringLiteral("settings")}
+            : (is_bot
+            ? QStringList{QStringLiteral("message"), QStringLiteral("search"), QStringLiteral("group")}
             : (is_group
             ? QStringList{QStringLiteral("mute"), QStringLiteral("settings"), QStringLiteral("leave")}
             : (is_channel
                 ? QStringList{QStringLiteral("mute"), QStringLiteral("discuss"), QStringLiteral("gift")}
-                : QStringList{QStringLiteral("message"), QStringLiteral("mute"), QStringLiteral("gift")}));
+                : QStringList{QStringLiteral("message"), QStringLiteral("mute"), QStringLiteral("gift")})));
         for (int i = 0; i < 3; ++i) {
             auto* button = detail_action_buttons_[static_cast<std::size_t>(i)];
             button->setText(labels.at(i));
@@ -6241,6 +6495,15 @@ protected:
         }
         if (label == QStringLiteral("Manage") || label == QStringLiteral("Discuss")) {
             show_chat_info_dialog();
+            return;
+        }
+        if (label == QStringLiteral("Commands")) {
+            show_service_command_suggestions(QStringLiteral("/"));
+            return;
+        }
+        if (label == QStringLiteral("Add")) {
+            open_settings_page_by_name(QStringLiteral("Groups"));
+            statusBar()->showMessage("Choose a group to add this bot", 2200);
             return;
         }
         if (label == QStringLiteral("Search")) {
@@ -6319,13 +6582,64 @@ protected:
                         const QString& command = {}) {
         if (list == nullptr) return;
         auto* item = new QListWidgetItem(line_icon(icon_key, 24, QColor("#7d8790")), label);
-        item->setSizeHint(QSize(0, 38));
+        item->setSizeHint(QSize(0, 48));
         item->setData(DetailRowKindRole, kind);
         item->setData(DetailRowMessageIdRole, message_id);
         item->setData(DetailRowAttachmentIdRole, attachment_id);
         item->setData(DetailRowLinkRole, link);
         item->setData(DetailRowCommandRole, command);
         list->addItem(item);
+    }
+
+    void add_detail_notification_row(QListWidget* list, bool notifications_enabled) {
+        if (list == nullptr) return;
+        auto* item = new QListWidgetItem();
+        item->setSizeHint(QSize(0, 52));
+        item->setData(DetailRowKindRole, QStringLiteral("notifications"));
+        list->addItem(item);
+
+        auto* row = new QWidget(list);
+        row->setObjectName("detailToggleRow");
+        auto* layout = new QHBoxLayout(row);
+        layout->setContentsMargins(2, 0, 2, 0);
+        layout->setSpacing(14);
+
+        auto* icon = new QLabel(row);
+        icon->setStyleSheet(QStringLiteral("background:transparent;"));
+        icon->setPixmap(line_icon("bell", 24, QColor("#7d8790")).pixmap(24, 24));
+        layout->addWidget(icon, 0, Qt::AlignVCenter);
+
+        auto* text = new QLabel(QStringLiteral("Notifications"), row);
+        text->setObjectName("detailToggleText");
+        layout->addWidget(text, 1, Qt::AlignVCenter);
+
+        auto* toggle = new NightModeToggle(row);
+        toggle->setObjectName("detailNotificationToggle");
+        toggle->setChecked(notifications_enabled);
+        layout->addWidget(toggle, 0, Qt::AlignVCenter);
+
+        QObject::connect(toggle, &QPushButton::toggled, this,
+                         [this](bool enabled) { set_selected_conversation_notifications(enabled); });
+        list->setItemWidget(item, row);
+    }
+
+    void set_selected_conversation_notifications(bool enabled) {
+        const auto conversation = store_.selected_conversation_id();
+        if (conversation.empty()) return;
+        bool pinned = false;
+        bool archived = false;
+        long long muted_until_ms = 0;
+        conversation_flag_snapshot(conversation, pinned, archived, muted_until_ms);
+        if (!client_) {
+            statusBar()->showMessage(enabled ? "Notifications enabled" : "Notifications muted", 1600);
+            return;
+        }
+        run_conversation_flag_action(
+            conversation,
+            ConversationFlagOp::Mute,
+            pinned,
+            archived,
+            enabled ? 0 : -1);
     }
 
     void handle_detail_row_activated(QListWidgetItem* item) {
@@ -6337,6 +6651,10 @@ protected:
         const QString command = item->data(DetailRowCommandRole).toString();
         if (kind == QLatin1String("shared_media_more")) {
             load_shared_media_page(command.isEmpty() ? QStringLiteral("media") : command, 0);
+            return;
+        }
+        if (kind == QLatin1String("right_info_mode_media")) {
+            set_right_info_mode(RightInfoMode::Media);
             return;
         }
         if (kind == QLatin1String("command") && !command.isEmpty()) {
@@ -6493,17 +6811,35 @@ protected:
     void set_detail_media_rows(
         const telegram_like::client::app_desktop::DesktopConversation& conversation,
         bool is_channel,
-        bool is_group) {
+        bool is_group,
+        bool include_summary_row = true) {
         clear_detail_list(detail_media_list_);
         clear_detail_list(detail_files_list_);
         clear_detail_list(detail_links_list_);
         clear_detail_list(detail_voice_list_);
+        const QString media_label = is_channel
+            ? QStringLiteral("Shared Media, Gifts and Links")
+            : (is_group ? QStringLiteral("Shared Media") : QStringLiteral("Shared Media"));
+        if (include_summary_row) {
+            add_detail_row(detail_media_list_, QStringLiteral("photo"), media_label,
+                           QStringLiteral("right_info_mode_media"));
+        } else {
+            bool pinned = false;
+            bool archived = false;
+            long long muted_until_ms = 0;
+            conversation_flag_snapshot(
+                conversation.conversation_id, pinned, archived, muted_until_ms);
+            add_detail_notification_row(detail_media_list_, muted_until_ms == 0);
+        }
 
         if (args_.gui_smoke) {
             auto add_smoke_row = [this](const QString& icon_key, const QString& label) {
                 add_detail_row(detail_media_list_, icon_key, label);
             };
             if (is_group) {
+                add_smoke_row(QStringLiteral("photo"), QStringLiteral("3 photos"));
+                add_smoke_row(QStringLiteral("files"), QStringLiteral("2 files"));
+                add_smoke_row(QStringLiteral("link"), QStringLiteral("5 shared links"));
                 fit_detail_list(detail_media_list_);
                 return;
             }
@@ -6661,6 +6997,16 @@ protected:
         }).detach();
     }
 
+    void add_detail_members_navigation_row(const QString& title, const QString& subtitle) {
+        if (detail_members_list_ == nullptr) return;
+        auto* item = new QListWidgetItem(
+            line_icon(QStringLiteral("group"), 24, QColor("#7d8790")),
+            QStringLiteral("%1\n%2").arg(title, subtitle));
+        item->setData(Qt::UserRole, QStringLiteral("__right_info_members__"));
+        item->setSizeHint(QSize(0, 54));
+        detail_members_list_->addItem(item);
+    }
+
     void populate_detail_members(
         const telegram_like::client::app_desktop::DesktopConversation& conversation) {
         if (detail_members_list_ == nullptr) return;
@@ -6668,6 +7014,8 @@ protected:
             ? detail_member_search_->text().trimmed()
             : QString();
         detail_members_list_->clear();
+        add_detail_members_navigation_row(QStringLiteral("Members"),
+                                          QStringLiteral("View all members and admins"));
         int index = 0;
         for (const auto& uid : conversation.participant_user_ids) {
             const QString name = qstr(uid);
@@ -6694,10 +7042,44 @@ protected:
         fit_detail_list(detail_members_list_);
     }
 
+    void populate_channel_subscribers(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation) {
+        if (detail_members_list_ == nullptr) return;
+        detail_members_list_->clear();
+        add_detail_members_navigation_row(QStringLiteral("Subscribers"),
+                                          QStringLiteral("View subscriber section"));
+        std::vector<std::pair<QString, QString>> rows {
+            {QStringLiteral("M-Team"), QStringLiteral("channel owner")},
+            {QStringLiteral("Admins"), QStringLiteral("12 administrators")},
+            {QStringLiteral("Discussion"), QStringLiteral("General Chat linked")},
+            {QStringLiteral("Similar channels"), QStringLiteral("40 channels")},
+        };
+        int fallback_index = 0;
+        for (const auto& uid : conversation.participant_user_ids) {
+            if (rows.size() >= 7) break;
+            rows.push_back({qstr(uid), fallback_index++ == 0
+                ? QStringLiteral("subscriber  online")
+                : QStringLiteral("subscriber")});
+        }
+        for (const auto& [name, status] : rows) {
+            auto* item = new QListWidgetItem(
+                QIcon(avatar_pixmap_for(str(name), name, 36)),
+                QStringLiteral("%1\n%2").arg(name, status));
+            item->setData(Qt::UserRole, name);
+            item->setSizeHint(QSize(0, 54));
+            detail_members_list_->addItem(item);
+        }
+        fit_detail_list(detail_members_list_);
+    }
+
     void handle_detail_member_activated(QListWidgetItem* item) {
         if (item == nullptr) return;
         const QString user_id = item->data(Qt::UserRole).toString().trimmed();
         if (user_id.isEmpty()) return;
+        if (user_id == QLatin1String("__right_info_members__")) {
+            set_right_info_mode(RightInfoMode::Members);
+            return;
+        }
         contact_user_id_->setText(user_id);
         open_settings_page_by_name(QStringLiteral("Contacts"));
         statusBar()->showMessage("Opened contact actions for " + user_id, 2200);
@@ -6739,7 +7121,10 @@ protected:
         if (details_panel_ == nullptr) return;
         const bool was_visible = details_panel_->isVisible();
         if (was_visible == visible) {
-            if (visible && details_stack_ != nullptr) details_stack_->setCurrentIndex(0);
+            if (visible && details_stack_ != nullptr) {
+                details_stack_->setCurrentIndex(0);
+                set_right_info_mode(RightInfoMode::Profile);
+            }
             return;
         }
         const int column_width = std::clamp(
@@ -6747,7 +7132,10 @@ protected:
             tdstyle::kColumnMinimalWidthThird,
             tdstyle::kColumnMaximalWidthThird);
         details_panel_->setVisible(visible);
-        if (visible && details_stack_ != nullptr) details_stack_->setCurrentIndex(0);
+        if (visible && details_stack_ != nullptr) {
+            details_stack_->setCurrentIndex(0);
+            set_right_info_mode(RightInfoMode::Profile);
+        }
         adjust_window_for_details_panel(visible ? column_width : -column_width);
         if (toggle_details_ != nullptr) {
             toggle_details_->setText(visible ? QStringLiteral("Info ▾") : QStringLiteral("Info ▸"));
@@ -7103,6 +7491,10 @@ protected:
         button->setText(count > 0 || show_zero
             ? QStringLiteral("%1 %2").arg(label).arg(count)
             : label);
+        const int text_width = button->fontMetrics().horizontalAdvance(button->text());
+        const int minimum_width = label == QLatin1String("All") ? 48
+            : (label == QLatin1String("Archived") ? 92 : 76);
+        button->setFixedWidth(std::max(minimum_width, text_width + 26));
     }
 
     std::string focused_search_message_id() const {
@@ -9102,6 +9494,12 @@ protected:
     QPointer<QWidget> account_drawer_;
     QScrollArea* details_panel_ {nullptr};
     QStackedWidget* details_stack_ {nullptr};
+    QToolButton* detail_back_button_ {nullptr};
+    QLabel* detail_section_title_ {nullptr};
+    RightInfoMode right_info_mode_ {RightInfoMode::Profile};
+    QString right_profile_label_ {QStringLiteral("Info")};
+    QString right_media_label_ {QStringLiteral("Shared Media")};
+    QString right_members_label_ {QStringLiteral("Members")};
     QLabel* detail_avatar_label_ {nullptr};
     QLabel* detail_title_label_ {nullptr};
     QLabel* detail_subtitle_label_ {nullptr};
@@ -9119,6 +9517,8 @@ protected:
     QLineEdit* detail_member_search_ {nullptr};
     QListWidget* detail_members_list_ {nullptr};
     QWidget* detail_danger_section_ {nullptr};
+    QPushButton* detail_leave_button_ {nullptr};
+    QPushButton* detail_report_button_ {nullptr};
     std::vector<QToolButton*> detail_action_buttons_;
     QPushButton* toggle_details_ {nullptr};
     QListWidget* settings_nav_ {nullptr};
@@ -9208,7 +9608,9 @@ int main(int argc, char** argv) {
     // absent — see active_theme()'s lazy init).
     {
         QSettings prefs;
-        if (prefs.contains(QStringLiteral("appearance/dark_theme"))) {
+        if (args.gui_smoke) {
+            telegram_like::client::app_desktop::design::set_active_theme(false);
+        } else if (prefs.contains(QStringLiteral("appearance/dark_theme"))) {
             telegram_like::client::app_desktop::design::set_active_theme(
                 prefs.value(QStringLiteral("appearance/dark_theme")).toBool());
         }

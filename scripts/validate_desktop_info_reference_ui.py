@@ -47,6 +47,11 @@ def main() -> int:
         "t.me/M_Team",
         "set_detail_media_rows(*conv, is_channel, is_group)",
         'setObjectName("detailMediaTabBar")',
+        'setObjectName("detailBackButton")',
+        'setObjectName("detailSectionTitle")',
+        "populate_channel_subscribers(*conv)",
+        "Linked discussion: General Chat",
+        "Similar channels",
         "poll_count",
         "Leave channel",
         "detail_links_list_",
@@ -86,6 +91,8 @@ def main() -> int:
         "last seen a long time ago",
         "detail_member_search_",
         "populate_detail_members(*conv)",
+        "Private group\\nInvite link hidden",
+        "Group profile, members and shared media are kept in separate sections",
     ):
         require(token in main_cpp or token in gui_smoke, f"missing group info token: {token}")
     print("[ok ] Group info panel state is wired through DesktopChatStore")

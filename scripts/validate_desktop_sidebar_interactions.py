@@ -66,11 +66,14 @@ def main() -> int:
         "accounts->setVisible(drawer_accounts_expanded_)",
         "folder_counts.archived",
         'setObjectName("drawerNightAnimatedToggle")',
-        "animated_night->setCheckable(true)",
-        "night->setVisible(false)",
+        "class NightModeToggle final",
+        "&QPushButton::toggled",
+        "set_active_theme(dark)",
         "QSettings prefs",
     ):
         require(token in main_cpp, f"missing drawer interaction token: {token}")
+    require("night->setVisible(false)" not in main_cpp,
+            "drawer night toggle must not use the old hidden checkbox bridge")
     print("[ok ] drawer exposes account switch, archive count and animated night toggle")
 
     print("\nAll 4/4 desktop sidebar interaction scenarios passed.")

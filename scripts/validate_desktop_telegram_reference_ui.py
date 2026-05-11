@@ -92,9 +92,11 @@ def main() -> int:
             "right panel action buttons should use Telegram-like icon-over-text layout")
     require("set_detail_media_rows" in main_cpp and "QListWidgetItem(line_icon(icon_key" in main_cpp,
             "right panel media rows must use drawn line icons instead of rich-text glyph rows")
-    for token in ("set_detail_action_texts", "CONTACT ACTIONS", "Share this contact", "MEMBERS",
-                  "Leave channel", "Report"):
+    for token in ("set_detail_action_texts", "add_detail_notification_row", "Share this contact",
+                  "MEMBERS", "Leave channel", "Report"):
         require(token in main_cpp, f"typed right info panel content missing: {token}")
+    require("CONTACT ACTIONS" not in main_cpp,
+            "one-to-one user info should keep contact actions as direct rows, not a legacy section title")
     print("[ok ] right panel has live chat/contact/channel summary content")
 
     print("[scenario] screenshot #4 hamburger account drawer")

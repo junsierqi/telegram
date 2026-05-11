@@ -34,8 +34,8 @@ def main() -> int:
     for token in (
         "footer->setMinimumHeight(std::max(76, docked.height() - 810))",
         "content_layout->addWidget(footer)",
-        "animated_night->setText(QString())",
-        "QCheckBox#drawerNightSwitch::indicator:checked",
+        "class NightModeToggle final",
+        "void paintEvent(QPaintEvent*) override",
         "QEvent::MouseButtonRelease",
     ):
         require(token in main_cpp, f"missing drawer layout token: {token}")
