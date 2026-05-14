@@ -53,6 +53,7 @@
 #include <QScrollArea>
 #include <QScreen>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QSizePolicy>
 #include <QSlider>
 #include <QSpinBox>
@@ -279,6 +280,8 @@ enum DetailRowRole {
     DetailRowAttachmentIdRole,
     DetailRowLinkRole,
     DetailRowCommandRole,
+    DetailMemberActionRole,
+    DetailMemberTargetRole,
 };
 
 enum class SidebarFolder {
@@ -492,11 +495,8 @@ QString reference_subtitle_for(
         title.contains("M-Team", Qt::CaseInsensitive)
         || title.contains("channel", Qt::CaseInsensitive)
         || title.contains("proxy", Qt::CaseInsensitive));
-    if (title.contains(QString::fromUtf8("三叉戟"))) return QStringLiteral("3 members");
-    if (title == QStringLiteral("M-Team")) return QStringLiteral("21,474 subscribers");
-    if (conversation.conversation_id == "ref_user_hello_blake") return QStringLiteral("last seen Nov 3 at 8:02 PM");
-    if (is_group) return QString("%1 members").arg(std::max<std::size_t>(members, 3));
     if (is_channel) return QString("%1 subscribers").arg(members);
+    if (is_group) return QString("%1 members").arg(members);
     if (title == QStringLiteral("Telegram")) return QStringLiteral("service notifications");
     return members > 0 ? QString("%1 participants").arg(members) : QString();
 }
@@ -1916,7 +1916,9 @@ public:
         detail_media_tabs_ = new QTabWidget();
         detail_media_tabs_->setObjectName("detailMediaTabs");
         detail_media_tabs_->tabBar()->setObjectName("detailMediaTabBar");
-        detail_media_tabs_->tabBar()->setVisible(!args_.gui_smoke);
+        // Telegram Desktop's profile column presents media as list rows and
+        // drill-in surfaces; it does not expose Qt-style tabs in the profile.
+        detail_media_tabs_->tabBar()->setVisible(false);
         detail_media_list_ = new QListWidget();
         detail_media_list_->setObjectName("detailMediaRows");
         detail_media_list_->setFrameShape(QFrame::NoFrame);
@@ -1945,7 +1947,7 @@ public:
         info_layout->addWidget(detail_media);
         for (auto* list : {detail_media_list_, detail_files_list_, detail_links_list_, detail_voice_list_}) {
             list->setContextMenuPolicy(Qt::CustomContextMenu);
-            QObject::connect(list, &QListWidget::itemDoubleClicked,
+            QObject::connect(list, &QListWidget::itemClicked,
                              [this](QListWidgetItem* item) { handle_detail_row_activated(item); });
             QObject::connect(list, &QListWidget::customContextMenuRequested,
                              [this, list](const QPoint& pos) {
@@ -1975,7 +1977,7 @@ public:
         detail_members_list_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         members_layout->addWidget(detail_members_list_);
         info_layout->addWidget(members_section);
-        QObject::connect(detail_members_list_, &QListWidget::itemDoubleClicked,
+        QObject::connect(detail_members_list_, &QListWidget::itemClicked,
                          [this](QListWidgetItem* item) { handle_detail_member_activated(item); });
         QObject::connect(member_search, &QLineEdit::textChanged, this, [this] {
             update_details_profile_panel();
@@ -2010,23 +2012,7 @@ public:
                 != QMessageBox::Yes) {
                 return;
             }
-            if (!client_) {
-                statusBar()->showMessage("Connect before leaving a chat", 2400);
-                return;
-            }
-            auto client = client_;
-            std::thread([this, client, conversation] {
-                const auto result = client->leave_conversation(conversation, true);
-                QMetaObject::invokeMethod(this, [this, result] {
-                    if (!result.ok) {
-                        statusBar()->showMessage(
-                            "Leave failed: " + qstr(result.error_code + " " + result.error_message), 3200);
-                        return;
-                    }
-                    statusBar()->showMessage("Left chat", 2200);
-                    sync_after_server_mutation();
-                }, Qt::QueuedConnection);
-            }).detach();
+            perform_leave_selected_conversation();
         });
         QObject::connect(report_btn, &QPushButton::clicked, this, [this] {
             const auto conversation = store_.selected_conversation_id();
@@ -2663,7 +2649,11 @@ public:
         resize(1492, 1009);
         setWindowTitle("Telegram-like Desktop");
         setAcceptDrops(true);
-        setStyleSheet(telegram_stylesheet());
+        stylesheet_dark_theme_ = telegram_like::client::app_desktop::design::is_dark_theme();
+        setStyleSheet(cached_theme_stylesheet(stylesheet_dark_theme_));
+        QTimer::singleShot(0, this, [this] {
+            cached_theme_stylesheet(!stylesheet_dark_theme_);
+        });
         statusBar()->showMessage("Disconnected");
         QObject::connect(menu_btn, &QToolButton::clicked,
                          [this] { show_account_drawer(); });
@@ -2704,17 +2694,11 @@ public:
             }
         }
 
-        // M139: appearance toggle — flip the active theme, repaint every
-        // surface (QSS for widgets + bubble palette for the message view)
-        // and persist the choice so the next launch picks the same mode.
+        // M139: appearance toggle — persist immediately, then coalesce the
+        // expensive QApplication stylesheet repolish so animated switches do
+        // not block on a full widget-tree refresh for every click.
         auto apply_theme = [this](bool dark) {
-            namespace dt = telegram_like::client::app_desktop::design;
-            dt::set_active_theme(dark);
-            if (auto* app = qobject_cast<QApplication*>(QCoreApplication::instance())) {
-                app->setStyleSheet(telegram_stylesheet());
-            }
-            QSettings().setValue(QStringLiteral("appearance/dark_theme"), dark);
-            render_store();
+            schedule_theme_apply(dark);
         };
         QObject::connect(appearance_light_, &QRadioButton::toggled,
             [this, apply_theme](bool checked) { if (checked) apply_theme(false); });
@@ -3729,9 +3713,27 @@ private:
                 : QStringLiteral("Archived Chats"));
         archive_row->setObjectName("drawerArchiveRow");
         archive_row->setVisible(!args_.gui_smoke && folder_counts.archived > 0);
+        archive_row->setContextMenuPolicy(Qt::CustomContextMenu);
         QObject::connect(archive_row, &QPushButton::clicked, drawer, [this, close_drawer] {
             close_drawer();
             set_sidebar_folder(SidebarFolder::Archived);
+        });
+        QObject::connect(archive_row, &QPushButton::customContextMenuRequested, drawer,
+                         [this, archive_row, close_drawer](const QPoint& pos) {
+            QMenu menu;
+            menu.setObjectName("drawerArchiveContextMenu");
+            menu.addAction(line_icon("folder", 22, QColor("#7d8790")), "Open Archived Chats",
+                           [this, close_drawer] {
+                               close_drawer();
+                               set_sidebar_folder(SidebarFolder::Archived);
+                           });
+            menu.addAction(line_icon("settings", 22, QColor("#7d8790")), "Archive Settings",
+                           [this, close_drawer] {
+                               close_drawer();
+                               open_settings_page_by_name(QStringLiteral("Chat Tools"));
+                               statusBar()->showMessage("Archive settings are in Chat Tools", 2200);
+                           });
+            menu.exec(archive_row->mapToGlobal(pos));
         });
         auto* archive_separator = new QFrame();
         archive_separator->setObjectName("drawerMenuSeparator");
@@ -3773,6 +3775,18 @@ private:
             child->setProperty("drawerWalletAction", true);
             child->installEventFilter(this);
         }
+        auto* premium_row = add_row("premium", "Telegram Premium");
+        premium_row->setObjectName("drawerPremiumRow");
+        QObject::connect(premium_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            open_account_features_surface(QStringLiteral("Premium"));
+        });
+        auto* stories_row = add_row("profile", "My Stories");
+        stories_row->setObjectName("drawerStoriesRow");
+        QObject::connect(stories_row, &QPushButton::clicked, drawer, [this, close_drawer] {
+            close_drawer();
+            open_account_features_surface(QStringLiteral("Stories"));
+        });
         auto* cloud_row = add_row("saved", "Cloud Storage");
         cloud_row->setObjectName("drawerCloudRow");
         cloud_row->setVisible(false);
@@ -3808,8 +3822,7 @@ private:
         auto* saved_row = add_row("saved", "Saved Messages");
         QObject::connect(saved_row, &QPushButton::clicked, drawer, [this, close_drawer] {
             close_drawer();
-            open_settings_page_by_name(QStringLiteral("Account"));
-            statusBar()->showMessage("Saved Messages uses the current account storage in this build", 2600);
+            open_saved_messages_peer();
         });
         auto* settings = add_row("settings", "Settings");
         settings->setObjectName("drawerSettingsButton");
@@ -3835,18 +3848,8 @@ private:
         night_layout->addWidget(animated_night);
         content_layout->addWidget(night_wrap);
         QObject::connect(animated_night, &QPushButton::toggled, drawer, [this, animated_night](bool dark) {
-            QSettings prefs;
-            prefs.setValue(QStringLiteral("appearance/dark_theme"), dark);
-            telegram_like::client::app_desktop::design::set_active_theme(dark);
-            const QString style = telegram_stylesheet();
-            if (auto* app = qobject_cast<QApplication*>(QApplication::instance())) {
-                app->setStyleSheet(style);
-            } else {
-                setStyleSheet(style);
-            }
+            schedule_theme_apply(dark);
             animated_night->update();
-            render_store();
-            update();
         });
 
         content_layout->addStretch(1);
@@ -5257,6 +5260,26 @@ protected:
         }).detach();
     }
 
+    void open_saved_messages_peer() {
+        const QString current = qstr(store_.current_user_id()).trimmed();
+        const QString fallback = user_ != nullptr ? user_->text().trimmed() : QString();
+        const QString user_id = !current.isEmpty()
+            ? current
+            : (!fallback.isEmpty() ? fallback : QStringLiteral("saved_messages"));
+        const std::string conversation_id = str(user_id);
+        store_.ensure_local_conversation(
+            conversation_id,
+            std::string("Saved Messages"),
+            { conversation_id });
+        store_.set_selected_conversation(conversation_id);
+        conversation_->setText(qstr(conversation_id));
+        attachment_id_->setText(qstr(store_.latest_attachment_id(conversation_id)));
+        message_action_id_->setText(qstr(store_.last_message_id(conversation_id)));
+        set_details_panel_visible(false);
+        render_store();
+        statusBar()->showMessage("Saved Messages", 2200);
+    }
+
     void update_emoji_status_from_dialog() {
         if (!client_) {
             statusBar()->showMessage("Emoji Status requires login", 2200);
@@ -6194,16 +6217,14 @@ protected:
             if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
             if (detail_members_section_ != nullptr) detail_members_section_->setVisible(true);
             if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(true);
-            detail_link_label_->setText(QStringLiteral("t.me/M_Team\nPublic link"));
-            detail_description_label_->setText(QStringLiteral(
-                "M-Team is a private tracker community channel with release news, "
-                "announcements and discussion updates.\n\nLinked discussion: General Chat"));
+            detail_link_label_->setText(channel_profile_link_text(*conv, title));
+            detail_description_label_->setText(conversation_profile_summary(*conv, peer_kind));
             set_detail_media_rows(*conv, is_channel, is_group);
             populate_channel_subscribers(*conv);
             if (detail_members_title_ != nullptr) {
                 detail_members_title_->setVisible(true);
                 detail_members_title_->setText(QStringLiteral("%1 SUBSCRIBERS")
-                    .arg(static_cast<int>(std::max<std::size_t>(members, 21474))));
+                    .arg(static_cast<int>(members)));
             }
             if (detail_member_search_ != nullptr) detail_member_search_->setVisible(false);
             apply_right_info_mode_visibility();
@@ -6216,9 +6237,8 @@ protected:
             if (detail_identity_section_ != nullptr) detail_identity_section_->setVisible(true);
             if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
             if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(true);
-            detail_link_label_->setText(QStringLiteral("Private group\nInvite link hidden"));
-            detail_description_label_->setText(QStringLiteral(
-                "Group profile, members and shared media are kept in separate sections like Telegram Desktop."));
+            detail_link_label_->setText(group_profile_link_text(*conv));
+            detail_description_label_->setText(conversation_profile_summary(*conv, peer_kind));
             set_detail_media_rows(*conv, is_channel, is_group);
             populate_detail_members(*conv);
             if (detail_member_search_ != nullptr) detail_member_search_->setVisible(true);
@@ -6237,9 +6257,10 @@ protected:
         if (detail_media_section_ != nullptr) detail_media_section_->setVisible(true);
         if (detail_members_section_ != nullptr) detail_members_section_->setVisible(true);
         if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
-        detail_link_label_->setText(QStringLiteral("+44 74 8035 6438\nPhone"));
-        detail_description_label_->setText(QStringLiteral("@heyblake\nUsername"));
-        for (auto* button : detail_action_buttons_) button->setVisible(false);
+        const QString target_user_id = peer_user_id_for(*conv);
+        detail_link_label_->setText(user_profile_link_text(*conv, title, target_user_id));
+        detail_description_label_->setText(conversation_profile_summary(*conv, peer_kind));
+        for (auto* button : detail_action_buttons_) button->setVisible(true);
         set_detail_media_rows(*conv, is_channel, is_group, false);
         detail_members_list_->clear();
         if (detail_members_title_ != nullptr) {
@@ -6247,20 +6268,149 @@ protected:
             detail_members_title_->setVisible(false);
         }
         if (detail_member_search_ != nullptr) detail_member_search_->setVisible(false);
-        const std::vector<std::pair<QString, QString>> contact_actions {
-            {QStringLiteral("contact"), QStringLiteral("Share this contact")},
-            {QStringLiteral("edit"), QStringLiteral("Edit contact")},
-            {QStringLiteral("delete"), QStringLiteral("Delete contact")},
-            {QStringLiteral("block"), QStringLiteral("Block user")},
-        };
-        for (const auto& [icon, label] : contact_actions) {
-            auto* item = new QListWidgetItem(line_icon(icon, 24, QColor("#7d8790")), label);
-            item->setSizeHint(QSize(0, 56));
-            detail_members_list_->addItem(item);
-        }
+        add_user_contact_action_row(QStringLiteral("contact"), QStringLiteral("Share this contact"),
+                                    QStringLiteral("share_contact"), target_user_id);
+        add_user_contact_action_row(QStringLiteral("edit"), QStringLiteral("Edit contact"),
+                                    QStringLiteral("edit_contact"), target_user_id);
+        add_user_contact_action_row(QStringLiteral("delete"), QStringLiteral("Delete contact"),
+                                    QStringLiteral("delete_contact"), target_user_id);
+        add_user_contact_action_row(QStringLiteral("block"), QStringLiteral("Block user"),
+                                    QStringLiteral("block_user"), target_user_id);
         detail_members_list_->setFixedHeight(detail_members_list_->sizeHintForRow(0)
             * detail_members_list_->count() + 8);
         apply_right_info_mode_visibility();
+    }
+
+    struct DetailMediaCounts {
+        int messages {0};
+        int media {0};
+        int files {0};
+        int links {0};
+        int voice {0};
+        int polls {0};
+    };
+
+    DetailMediaCounts detail_media_counts_for(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation) const {
+        DetailMediaCounts counts;
+        for (const auto& message : conversation.messages) {
+            if (message.deleted) continue;
+            ++counts.messages;
+            if (message.text.rfind("[poll]", 0) == 0) ++counts.polls;
+            if (text_has_link(message.text)) ++counts.links;
+            if (message.attachment_id.empty()) continue;
+            if (mime_starts_with(message.mime_type, "image/")
+                || mime_starts_with(message.mime_type, "video/")) {
+                ++counts.media;
+            } else if (mime_starts_with(message.mime_type, "audio/")) {
+                ++counts.voice;
+            } else {
+                ++counts.files;
+            }
+        }
+        return counts;
+    }
+
+    QString peer_user_id_for(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation) const {
+        const std::string current = store_.current_user_id();
+        for (const auto& user_id : conversation.participant_user_ids) {
+            if (!current.empty() && user_id == current) continue;
+            return qstr(user_id);
+        }
+        if (!conversation.participant_user_ids.empty()) {
+            return qstr(conversation.participant_user_ids.front());
+        }
+        return qstr(conversation.conversation_id);
+    }
+
+    static QString public_slug_for(const QString& title, const std::string& fallback_id) {
+        QString source = title.trimmed();
+        if (source.isEmpty()) source = qstr(fallback_id);
+        QString slug;
+        for (const QChar ch : source) {
+            if (ch.isLetterOrNumber()) {
+                slug.append(ch.toLower());
+            } else if ((ch == QLatin1Char('_') || ch == QLatin1Char('-')) && !slug.endsWith(QLatin1Char('_'))) {
+                slug.append(QLatin1Char('_'));
+            } else if (ch.isSpace() && !slug.endsWith(QLatin1Char('_'))) {
+                slug.append(QLatin1Char('_'));
+            }
+        }
+        while (slug.endsWith(QLatin1Char('_'))) slug.chop(1);
+        return slug.isEmpty() ? QStringLiteral("chat") : slug.left(32);
+    }
+
+    QString user_profile_link_text(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation,
+        const QString& title,
+        const QString& target_user_id) const {
+        QStringList rows;
+        if (!target_user_id.isEmpty()) {
+            rows << target_user_id << QStringLiteral("User ID");
+        }
+        if (!title.trimmed().isEmpty()) {
+            rows << title.trimmed() << QStringLiteral("Display name");
+        }
+        if (rows.isEmpty()) rows << qstr(conversation.conversation_id) << QStringLiteral("Conversation");
+        return rows.join(QLatin1Char('\n'));
+    }
+
+    QString channel_profile_link_text(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation,
+        const QString& title) const {
+        return QStringLiteral("t.me/%1\nPublic link").arg(public_slug_for(title, conversation.conversation_id));
+    }
+
+    QString group_profile_link_text(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation) const {
+        return QStringLiteral("%1\nPrivate group").arg(qstr(conversation.conversation_id));
+    }
+
+    QString conversation_profile_summary(
+        const telegram_like::client::app_desktop::DesktopConversation& conversation,
+        DetailPeerKind peer_kind) const {
+        const DetailMediaCounts counts = detail_media_counts_for(conversation);
+        const int participants = static_cast<int>(conversation.participant_user_ids.size());
+        const bool channel = peer_kind == DetailPeerKind::BroadcastChannel;
+        const bool group = is_group_detail_kind(peer_kind);
+        const bool service = peer_kind == DetailPeerKind::Service;
+        const bool bot = peer_kind == DetailPeerKind::Bot;
+        QStringList lines;
+        if (channel) {
+            lines << QStringLiteral("%1 subscribers").arg(participants);
+        } else if (group) {
+            lines << QStringLiteral("%1 members").arg(participants);
+        } else if (service) {
+            lines << QStringLiteral("Official service conversation");
+        } else if (bot) {
+            lines << QStringLiteral("Bot conversation");
+        } else {
+            lines << QStringLiteral("One-to-one conversation");
+        }
+        lines << QStringLiteral("%1 messages").arg(counts.messages);
+        QStringList shared;
+        if (counts.media > 0) shared << QStringLiteral("%1 media").arg(counts.media);
+        if (counts.files > 0) shared << QStringLiteral("%1 files").arg(counts.files);
+        if (counts.links > 0) shared << QStringLiteral("%1 links").arg(counts.links);
+        if (counts.voice > 0) shared << QStringLiteral("%1 voice").arg(counts.voice);
+        if (counts.polls > 0) shared << QStringLiteral("%1 polls").arg(counts.polls);
+        lines << (shared.isEmpty()
+            ? QStringLiteral("No shared media loaded")
+            : shared.join(QStringLiteral(" · ")));
+        return lines.join(QLatin1Char('\n'));
+    }
+
+    void add_user_contact_action_row(const QString& icon,
+                                     const QString& label,
+                                     const QString& action,
+                                     const QString& target_user_id) {
+        if (detail_members_list_ == nullptr) return;
+        auto* item = new QListWidgetItem(line_icon(icon, 24, QColor("#7d8790")), label);
+        item->setSizeHint(QSize(0, 56));
+        item->setData(DetailMemberActionRole, action);
+        item->setData(DetailMemberTargetRole, target_user_id);
+        detail_members_list_->addItem(item);
     }
 
     void configure_right_info_sections(const QString& profile,
@@ -6273,7 +6423,7 @@ protected:
 
     void set_right_info_mode(RightInfoMode mode) {
         right_info_mode_ = mode;
-        apply_right_info_mode_visibility();
+        update_details_profile_panel();
     }
 
     void apply_right_info_mode_visibility() {
@@ -6390,14 +6540,15 @@ protected:
         if (detail_members_section_ != nullptr) detail_members_section_->setVisible(false);
         if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
         if (detail_member_search_ != nullptr) detail_member_search_->setVisible(false);
-        detail_link_label_->setText(QStringLiteral("service@telegram.local\nOfficial service"));
-        detail_description_label_->setText(QStringLiteral(
-            "Official service notifications, login codes and security alerts for this account."));
+        detail_link_label_->setText(QStringLiteral("%1\nOfficial service").arg(qstr(conversation.conversation_id)));
+        detail_description_label_->setText(conversation_profile_summary(conversation, DetailPeerKind::Service));
         set_detail_media_rows(conversation, false, false);
         clear_detail_list(detail_files_list_);
         clear_detail_list(detail_voice_list_);
-        add_detail_row(detail_links_list_, QStringLiteral("lock"), QStringLiteral("Security alerts"));
-        add_detail_row(detail_links_list_, QStringLiteral("settings"), QStringLiteral("Notification settings"));
+        add_detail_row(detail_links_list_, QStringLiteral("lock"), QStringLiteral("Security alerts"),
+                       QStringLiteral("right_info_security"));
+        add_detail_row(detail_links_list_, QStringLiteral("settings"), QStringLiteral("Notification settings"),
+                       QStringLiteral("right_info_notification_settings"));
         add_detail_row(detail_links_list_, QStringLiteral("message"), QStringLiteral("Start service"),
                        QStringLiteral("command"), {}, {}, {}, QStringLiteral("/start"));
         add_detail_row(detail_links_list_, QStringLiteral("search"), QStringLiteral("Help"),
@@ -6415,9 +6566,8 @@ protected:
         if (detail_members_section_ != nullptr) detail_members_section_->setVisible(false);
         if (detail_danger_section_ != nullptr) detail_danger_section_->setVisible(false);
         if (detail_member_search_ != nullptr) detail_member_search_->setVisible(false);
-        detail_link_label_->setText(QStringLiteral("bot@telegram.local\nBot profile"));
-        detail_description_label_->setText(QStringLiteral(
-            "Bot commands and app actions are grouped separately from user, group and channel controls."));
+        detail_link_label_->setText(QStringLiteral("%1\nBot profile").arg(qstr(conversation.conversation_id)));
+        detail_description_label_->setText(conversation_profile_summary(conversation, DetailPeerKind::Bot));
         set_detail_media_rows(conversation, false, false);
         clear_detail_list(detail_files_list_);
         clear_detail_list(detail_voice_list_);
@@ -6425,8 +6575,10 @@ protected:
                        QStringLiteral("command"), {}, {}, {}, QStringLiteral("/start"));
         add_detail_row(detail_links_list_, QStringLiteral("search"), QStringLiteral("Help"),
                        QStringLiteral("command"), {}, {}, {}, QStringLiteral("/help"));
-        add_detail_row(detail_links_list_, QStringLiteral("group"), QStringLiteral("Add bot to group"));
-        add_detail_row(detail_links_list_, QStringLiteral("settings"), QStringLiteral("Bot settings"));
+        add_detail_row(detail_links_list_, QStringLiteral("group"), QStringLiteral("Add bot to group"),
+                       QStringLiteral("right_info_add_bot"));
+        add_detail_row(detail_links_list_, QStringLiteral("settings"), QStringLiteral("Bot settings"),
+                       QStringLiteral("right_info_bot_settings"));
         fit_detail_list(detail_links_list_);
     }
 
@@ -6515,12 +6667,7 @@ protected:
             return;
         }
         if (label == QStringLiteral("Leave")) {
-            run_conversation_flag_action(
-                conversation,
-                ConversationFlagOp::Archive,
-                pinned,
-                true,
-                muted_until_ms);
+            confirm_and_leave_selected_conversation();
             return;
         }
         if (label == QStringLiteral("Message")) {
@@ -6532,6 +6679,44 @@ protected:
             return;
         }
         statusBar()->showMessage(label + QStringLiteral(" is available from chat settings"), 2200);
+    }
+
+    void confirm_and_leave_selected_conversation() {
+        const auto conversation = store_.selected_conversation_id();
+        if (conversation.empty()) return;
+        const auto* selected = store_.selected_conversation();
+        const auto kind = selected == nullptr
+            ? DetailPeerKind::User
+            : detail_peer_kind_for(*selected, reference_title_for(selected->conversation_id, selected->title));
+        const bool channel = kind == DetailPeerKind::BroadcastChannel;
+        const QString title = channel ? QStringLiteral("Leave Channel") : QStringLiteral("Leave Group");
+        const QString body = channel
+            ? QStringLiteral("Leave this channel? You will need to join again to see new posts.")
+            : QStringLiteral("Leave this group? You will need to be invited again to rejoin.");
+        if (QMessageBox::question(this, title, body) != QMessageBox::Yes) return;
+        perform_leave_selected_conversation();
+    }
+
+    void perform_leave_selected_conversation() {
+        const auto conversation = store_.selected_conversation_id();
+        if (conversation.empty()) return;
+        if (!client_) {
+            statusBar()->showMessage("Connect before leaving a chat", 2400);
+            return;
+        }
+        auto client = client_;
+        std::thread([this, client, conversation] {
+            const auto result = client->leave_conversation(conversation, true);
+            QMetaObject::invokeMethod(this, [this, result] {
+                if (!result.ok) {
+                    statusBar()->showMessage(
+                        "Leave failed: " + qstr(result.error_code + " " + result.error_message), 3200);
+                    return;
+                }
+                statusBar()->showMessage("Left chat", 2200);
+                sync_after_server_mutation();
+            }, Qt::QueuedConnection);
+        }).detach();
     }
 
     static bool mime_starts_with(const std::string& mime_type, const char* prefix) {
@@ -6655,6 +6840,25 @@ protected:
         }
         if (kind == QLatin1String("right_info_mode_media")) {
             set_right_info_mode(RightInfoMode::Media);
+            return;
+        }
+        if (kind == QLatin1String("right_info_security")) {
+            open_settings_page_by_name(QStringLiteral("Privacy"));
+            statusBar()->showMessage("Opened security and privacy settings", 1800);
+            return;
+        }
+        if (kind == QLatin1String("right_info_notification_settings")) {
+            set_selected_conversation_notifications(false);
+            open_settings_page_by_name(QStringLiteral("Privacy"));
+            return;
+        }
+        if (kind == QLatin1String("right_info_add_bot")) {
+            open_settings_page_by_name(QStringLiteral("Groups"));
+            statusBar()->showMessage("Choose a group to add this bot", 2200);
+            return;
+        }
+        if (kind == QLatin1String("right_info_bot_settings")) {
+            open_settings_page_by_name(QStringLiteral("Chat Tools"));
             return;
         }
         if (kind == QLatin1String("command") && !command.isEmpty()) {
@@ -6832,38 +7036,7 @@ protected:
             add_detail_notification_row(detail_media_list_, muted_until_ms == 0);
         }
 
-        if (args_.gui_smoke) {
-            auto add_smoke_row = [this](const QString& icon_key, const QString& label) {
-                add_detail_row(detail_media_list_, icon_key, label);
-            };
-            if (is_group) {
-                add_smoke_row(QStringLiteral("photo"), QStringLiteral("3 photos"));
-                add_smoke_row(QStringLiteral("files"), QStringLiteral("2 files"));
-                add_smoke_row(QStringLiteral("link"), QStringLiteral("5 shared links"));
-                fit_detail_list(detail_media_list_);
-                return;
-            }
-            if (is_channel) {
-                add_smoke_row(QStringLiteral("gift"), QStringLiteral("8 gifts"));
-                add_smoke_row(QStringLiteral("photo"), QStringLiteral("12 photos"));
-                add_smoke_row(QStringLiteral("link"), QStringLiteral("56 shared links"));
-                add_smoke_row(QStringLiteral("poll"), QStringLiteral("1 poll"));
-                add_smoke_row(QStringLiteral("channel"),
-                              QString::number(40) + QStringLiteral(" similar channels"));
-            } else {
-                add_smoke_row(QStringLiteral("photo"), QStringLiteral("1 photo"));
-                add_smoke_row(QStringLiteral("files"),
-                              QString::number(4) + QStringLiteral(" files"));
-                add_smoke_row(QStringLiteral("link"), QStringLiteral("8 shared links"));
-                add_smoke_row(QStringLiteral("voice"),
-                              QString::number(4) + QStringLiteral(" voice messages"));
-                add_smoke_row(QStringLiteral("group"),
-                              QString::number(1) + QStringLiteral(" group in common"));
-            }
-            fit_detail_list(detail_media_list_);
-            return;
-        }
-
+        const bool detail_mode = right_info_mode_ == RightInfoMode::Media;
         int media_count = 0;
         int file_count = 0;
         int link_count = 0;
@@ -6874,37 +7047,75 @@ protected:
             if (message.text.rfind("[poll]", 0) == 0) ++poll_count;
             if (text_has_link(message.text)) {
                 ++link_count;
-                add_detail_row(detail_links_list_, QStringLiteral("link"),
-                               message_row_label(message, QStringLiteral("Link")),
-                               QStringLiteral("link"),
-                               qstr(message.message_id),
-                               {},
-                               first_link_in_text(message.text));
+                if (detail_mode) {
+                    add_detail_row(detail_links_list_, QStringLiteral("link"),
+                                   message_row_label(message, QStringLiteral("Link")),
+                                   QStringLiteral("link"),
+                                   qstr(message.message_id),
+                                   {},
+                                   first_link_in_text(message.text));
+                }
             }
             if (message.attachment_id.empty()) continue;
             if (mime_starts_with(message.mime_type, "image/")
                 || mime_starts_with(message.mime_type, "video/")) {
                 ++media_count;
-                add_detail_row(detail_media_list_, QStringLiteral("photo"),
-                               message_row_label(message, QStringLiteral("Media")),
-                               QStringLiteral("media"),
-                               qstr(message.message_id),
-                               qstr(message.attachment_id));
+                if (detail_mode) {
+                    add_detail_row(detail_media_list_, QStringLiteral("photo"),
+                                   message_row_label(message, QStringLiteral("Media")),
+                                   QStringLiteral("media"),
+                                   qstr(message.message_id),
+                                   qstr(message.attachment_id));
+                }
             } else if (mime_starts_with(message.mime_type, "audio/")) {
                 ++voice_count;
-                add_detail_row(detail_voice_list_, QStringLiteral("voice"),
-                               message_row_label(message, QStringLiteral("Voice")),
-                               QStringLiteral("voice"),
-                               qstr(message.message_id),
-                               qstr(message.attachment_id));
+                if (detail_mode) {
+                    add_detail_row(detail_voice_list_, QStringLiteral("voice"),
+                                   message_row_label(message, QStringLiteral("Voice")),
+                                   QStringLiteral("voice"),
+                                   qstr(message.message_id),
+                                   qstr(message.attachment_id));
+                }
             } else {
                 ++file_count;
-                add_detail_row(detail_files_list_, QStringLiteral("files"),
-                               message_row_label(message, QStringLiteral("File")),
-                               QStringLiteral("file"),
-                               qstr(message.message_id),
-                               qstr(message.attachment_id));
+                if (detail_mode) {
+                    add_detail_row(detail_files_list_, QStringLiteral("files"),
+                                   message_row_label(message, QStringLiteral("File")),
+                                   QStringLiteral("file"),
+                                   qstr(message.message_id),
+                                   qstr(message.attachment_id));
+                }
             }
+        }
+        if (!detail_mode) {
+            auto add_count_row = [this](const QString& icon_key,
+                                        int count,
+                                        const QString& singular,
+                                        const QString& plural) {
+                if (count <= 0) return;
+                add_detail_row(detail_media_list_, icon_key,
+                               QStringLiteral("%1 %2").arg(count).arg(count == 1 ? singular : plural),
+                               QStringLiteral("right_info_mode_media"));
+            };
+            add_count_row(QStringLiteral("photo"), media_count,
+                          QStringLiteral("photo"), QStringLiteral("photos"));
+            add_count_row(QStringLiteral("files"), file_count,
+                          QStringLiteral("file"), QStringLiteral("files"));
+            add_count_row(QStringLiteral("link"), link_count,
+                          QStringLiteral("shared link"), QStringLiteral("shared links"));
+            add_count_row(QStringLiteral("voice"), voice_count,
+                          QStringLiteral("voice message"), QStringLiteral("voice messages"));
+            add_count_row(QStringLiteral("poll"), poll_count,
+                          QStringLiteral("poll"), QStringLiteral("polls"));
+            if (media_count + file_count + link_count + voice_count + poll_count == 0) {
+                add_detail_row(detail_media_list_, QStringLiteral("photo"), QStringLiteral("No media yet"),
+                               QStringLiteral("right_info_mode_media"));
+            }
+            fit_detail_list(detail_media_list_);
+            fit_detail_list(detail_files_list_);
+            fit_detail_list(detail_links_list_);
+            fit_detail_list(detail_voice_list_);
+            return;
         }
         if (media_count == 0) add_detail_row(detail_media_list_, QStringLiteral("photo"), QStringLiteral("No media yet"));
         if (file_count == 0) add_detail_row(detail_files_list_, QStringLiteral("files"), QStringLiteral("No files yet"));
@@ -7017,6 +7228,7 @@ protected:
         add_detail_members_navigation_row(QStringLiteral("Members"),
                                           QStringLiteral("View all members and admins"));
         int index = 0;
+        int matched = 0;
         for (const auto& uid : conversation.participant_user_ids) {
             const QString name = qstr(uid);
             if (!query.isEmpty() && !name.contains(query, Qt::CaseInsensitive)) {
@@ -7024,19 +7236,20 @@ protected:
                 continue;
             }
             const QString status = index == 0
-                ? QStringLiteral("online  owner")
+                ? QStringLiteral("owner")
                 : (index == 1
-                    ? QStringLiteral("last seen Nov 3 at 8:02 PM")
-                    : QStringLiteral("last seen a long time ago"));
+                    ? QStringLiteral("member")
+                    : QStringLiteral("member"));
             auto* item = new QListWidgetItem(
                 QIcon(avatar_pixmap_for(uid, name, 36)),
                 QStringLiteral("%1\n%2").arg(name, status));
             item->setData(Qt::UserRole, name);
             item->setSizeHint(QSize(0, 54));
             detail_members_list_->addItem(item);
+            ++matched;
             ++index;
         }
-        if (detail_members_list_->count() == 0) {
+        if (matched == 0) {
             detail_members_list_->addItem(QStringLiteral("No members match"));
         }
         fit_detail_list(detail_members_list_);
@@ -7048,18 +7261,17 @@ protected:
         detail_members_list_->clear();
         add_detail_members_navigation_row(QStringLiteral("Subscribers"),
                                           QStringLiteral("View subscriber section"));
-        std::vector<std::pair<QString, QString>> rows {
-            {QStringLiteral("M-Team"), QStringLiteral("channel owner")},
-            {QStringLiteral("Admins"), QStringLiteral("12 administrators")},
-            {QStringLiteral("Discussion"), QStringLiteral("General Chat linked")},
-            {QStringLiteral("Similar channels"), QStringLiteral("40 channels")},
-        };
-        int fallback_index = 0;
+        std::vector<std::pair<QString, QString>> rows;
+        int index = 0;
         for (const auto& uid : conversation.participant_user_ids) {
             if (rows.size() >= 7) break;
-            rows.push_back({qstr(uid), fallback_index++ == 0
-                ? QStringLiteral("subscriber  online")
+            rows.push_back({qstr(uid), index++ == 0
+                ? QStringLiteral("owner")
                 : QStringLiteral("subscriber")});
+        }
+        if (rows.empty()) {
+            rows.push_back({QStringLiteral("No subscribers loaded"),
+                            QStringLiteral("Sync the channel to load participants")});
         }
         for (const auto& [name, status] : rows) {
             auto* item = new QListWidgetItem(
@@ -7074,6 +7286,11 @@ protected:
 
     void handle_detail_member_activated(QListWidgetItem* item) {
         if (item == nullptr) return;
+        const QString action = item->data(DetailMemberActionRole).toString().trimmed();
+        if (!action.isEmpty()) {
+            run_detail_contact_action(action, item->data(DetailMemberTargetRole).toString().trimmed());
+            return;
+        }
         const QString user_id = item->data(Qt::UserRole).toString().trimmed();
         if (user_id.isEmpty()) return;
         if (user_id == QLatin1String("__right_info_members__")) {
@@ -7083,6 +7300,121 @@ protected:
         contact_user_id_->setText(user_id);
         open_settings_page_by_name(QStringLiteral("Contacts"));
         statusBar()->showMessage("Opened contact actions for " + user_id, 2200);
+    }
+
+    void run_detail_contact_action(const QString& action, const QString& target_user_id) {
+        if (target_user_id.isEmpty()) {
+            statusBar()->showMessage("No user is available for this action", 2200);
+            return;
+        }
+        if (!client_) {
+            contact_user_id_->setText(target_user_id);
+            open_settings_page_by_name(QStringLiteral("Contacts"));
+            statusBar()->showMessage("Connect before changing contacts", 2200);
+            return;
+        }
+        if (action == QLatin1String("edit_contact")) {
+            bool ok = false;
+            const QString alias = QInputDialog::getText(
+                this, "Edit Contact", "Name", QLineEdit::Normal, target_user_id, &ok);
+            if (!ok || alias.trimmed().isEmpty()) return;
+            run_detail_contact_list_action(
+                QStringLiteral("Saving contact name..."),
+                [target = str(target_user_id), display = str(alias.trimmed())](auto* client) {
+                    return client->edit_contact(target, display);
+                });
+            return;
+        }
+        if (action == QLatin1String("delete_contact")) {
+            if (QMessageBox::question(this, "Delete Contact",
+                                      "Delete this contact from your list?")
+                != QMessageBox::Yes) {
+                return;
+            }
+            run_detail_contact_list_action(
+                QStringLiteral("Deleting contact..."),
+                [target = str(target_user_id)](auto* client) {
+                    return client->remove_contact(target);
+                });
+            return;
+        }
+        if (action == QLatin1String("share_contact")) {
+            statusBar()->showMessage("Preparing shared contact...");
+            auto client = client_;
+            const std::string target = str(target_user_id);
+            std::thread([this, client, target] {
+                const auto result = client->share_contact(target);
+                QMetaObject::invokeMethod(this, [this, result] {
+                    if (shutting_down_) return;
+                    if (!result.ok) {
+                        QMessageBox::warning(this, "Share Contact",
+                                             "Share failed: "
+                                             + qstr(result.error_code + " " + result.error_message));
+                        return;
+                    }
+                    QApplication::clipboard()->setText(qstr(result.share_text));
+                    statusBar()->showMessage("Contact share text copied", 2200);
+                }, Qt::QueuedConnection);
+            }).detach();
+            return;
+        }
+        if (action == QLatin1String("block_user")) {
+            if (QMessageBox::question(this, "Block User",
+                                      "Block this user? They will not be able to deliver direct messages to you.")
+                != QMessageBox::Yes) {
+                return;
+            }
+            run_detail_ack_action(
+                QStringLiteral("Blocking user..."),
+                [target = str(target_user_id)](auto* client) {
+                    return client->block_user(target);
+                });
+            return;
+        }
+    }
+
+    void run_detail_contact_list_action(
+        const QString& status,
+        std::function<telegram_like::client::transport::ContactListResult(
+            telegram_like::client::transport::ControlPlaneClient*)> action) {
+        if (!client_) return;
+        statusBar()->showMessage(status);
+        auto client = client_;
+        std::thread([this, client, action = std::move(action)] {
+            const auto result = action(client.get());
+            QMetaObject::invokeMethod(this, [this, result] {
+                if (shutting_down_) return;
+                if (!result.ok) {
+                    QMessageBox::warning(this, "Contact Action",
+                                         "Contact action failed: "
+                                         + qstr(result.error_code + " " + result.error_message));
+                    return;
+                }
+                statusBar()->showMessage("Contact updated", 2200);
+            }, Qt::QueuedConnection);
+        }).detach();
+    }
+
+    void run_detail_ack_action(
+        const QString& status,
+        std::function<telegram_like::client::transport::AckResult(
+            telegram_like::client::transport::ControlPlaneClient*)> action) {
+        if (!client_) return;
+        statusBar()->showMessage(status);
+        auto client = client_;
+        std::thread([this, client, action = std::move(action)] {
+            const auto result = action(client.get());
+            QMetaObject::invokeMethod(this, [this, result] {
+                if (shutting_down_) return;
+                if (!result.ok) {
+                    QMessageBox::warning(this, "Chat Action",
+                                         "Action failed: "
+                                         + qstr(result.error_code + " " + result.error_message));
+                    return;
+                }
+                statusBar()->showMessage("Action completed", 2200);
+            }, Qt::QueuedConnection);
+        }).detach();
     }
 
     void update_chat_header() {
@@ -7223,13 +7555,7 @@ protected:
         profile_identity_label_->setText(html);
     }
 
-    void render_store() {
-        const auto focused_id = focused_search_message_id();
-        // M138: drive the BubbleListView from the store + theme palette.
-        // The previous setHtml(render_selected_timeline_html(...)) path is
-        // kept on DesktopChatStore for store_test (which still verifies the
-        // HTML renderer) but app_desktop no longer points its main view at
-        // it — the bubble delegate paints directly.
+    telegram_like::client::app_desktop::DesktopBubblePalette bubble_palette_from_theme() const {
         namespace dt = telegram_like::client::app_desktop::design;
         const auto& t = dt::active_theme();
         telegram_like::client::app_desktop::DesktopBubblePalette palette;
@@ -7242,6 +7568,91 @@ protected:
         palette.text_muted       = t.text_muted;
         palette.tick_sent        = t.tick_unread;
         palette.tick_read        = t.tick_read;
+        return palette;
+    }
+
+    void schedule_theme_apply(bool dark) {
+        namespace dt = telegram_like::client::app_desktop::design;
+        QSettings prefs;
+        prefs.setValue(QStringLiteral("appearance/dark_theme"), dark);
+        pending_dark_theme_ = dark;
+        dt::set_active_theme(dark);
+        sync_appearance_radios(dark);
+        update();
+        if (theme_apply_timer_ == nullptr) {
+            theme_apply_timer_ = new QTimer(this);
+            theme_apply_timer_->setSingleShot(true);
+            theme_apply_timer_->setInterval(0);
+            QObject::connect(theme_apply_timer_, &QTimer::timeout, this, [this] {
+                apply_pending_theme();
+            });
+        }
+        theme_apply_timer_->start();
+    }
+
+    void sync_appearance_radios(bool dark) {
+        if (appearance_light_ != nullptr) {
+            const QSignalBlocker blocker(appearance_light_);
+            appearance_light_->setChecked(!dark);
+        }
+        if (appearance_dark_ != nullptr) {
+            const QSignalBlocker blocker(appearance_dark_);
+            appearance_dark_->setChecked(dark);
+        }
+    }
+
+    void update_lightweight_theme_surfaces() {
+        namespace dt = telegram_like::client::app_desktop::design;
+        const auto& t = dt::active_theme();
+        if (messages_ != nullptr) {
+            messages_->setBubblePalette(bubble_palette_from_theme());
+            messages_->refresh();
+        }
+        if (typing_indicator_ != nullptr) {
+            typing_indicator_->setDotColor(QColor(t.text_muted));
+            typing_indicator_->setLabelColor(QColor(t.text_muted));
+        }
+        if (conversations_ != nullptr && conversations_->viewport() != nullptr) {
+            conversations_->viewport()->update();
+        }
+        if (details_panel_ != nullptr && details_panel_->viewport() != nullptr) {
+            details_panel_->viewport()->update();
+        }
+        update();
+    }
+
+    void apply_pending_theme() {
+        namespace dt = telegram_like::client::app_desktop::design;
+        dt::set_active_theme(pending_dark_theme_);
+        if (stylesheet_dark_theme_ != pending_dark_theme_) {
+            stylesheet_dark_theme_ = pending_dark_theme_;
+            setStyleSheet(cached_theme_stylesheet(pending_dark_theme_));
+        }
+        update_lightweight_theme_surfaces();
+    }
+
+    const QString& cached_theme_stylesheet(bool dark) {
+        namespace dt = telegram_like::client::app_desktop::design;
+        QString& cached = dark ? dark_theme_stylesheet_ : light_theme_stylesheet_;
+        if (cached.isEmpty()) {
+            const bool restore_dark = dt::is_dark_theme();
+            dt::set_active_theme(dark);
+            cached = telegram_stylesheet();
+            dt::set_active_theme(restore_dark);
+        }
+        return cached;
+    }
+
+    void render_store() {
+        const auto focused_id = focused_search_message_id();
+        // M138: drive the BubbleListView from the store + theme palette.
+        // The previous setHtml(render_selected_timeline_html(...)) path is
+        // kept on DesktopChatStore for store_test (which still verifies the
+        // HTML renderer) but app_desktop no longer points its main view at
+        // it — the bubble delegate paints directly.
+        namespace dt = telegram_like::client::app_desktop::design;
+        const auto& t = dt::active_theme();
+        const auto palette = bubble_palette_from_theme();
         // failed_bubble stays at the default `#ffd7cf` — it's a neutral
         // alarm signal independent of theme so the red shows in both modes.
         messages_->setBubblePalette(palette);
@@ -9386,6 +9797,11 @@ protected:
     // choice in QSettings.
     QRadioButton* appearance_light_ {nullptr};
     QRadioButton* appearance_dark_ {nullptr};
+    QTimer* theme_apply_timer_ {nullptr};
+    bool pending_dark_theme_ {false};
+    bool stylesheet_dark_theme_ {false};
+    QString light_theme_stylesheet_;
+    QString dark_theme_stylesheet_;
     QLineEdit* chat_filter_ {nullptr};
     SidebarFolder sidebar_folder_ {SidebarFolder::All};
     QPushButton* sidebar_all_tab_ {nullptr};

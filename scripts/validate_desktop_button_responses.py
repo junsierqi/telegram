@@ -24,6 +24,10 @@ def main() -> int:
         'child->setProperty("drawerWalletAction", true)',
         'open_settings_page_by_name(QStringLiteral("Account"))',
         "open_account_features_surface(QStringLiteral(\"Wallet\"))",
+        "open_account_features_surface(QStringLiteral(\"Premium\"))",
+        "open_account_features_surface(QStringLiteral(\"Stories\"))",
+        "open_saved_messages_peer",
+        'setObjectName("drawerArchiveContextMenu")',
         "show_account_export_summary",
         'prefs.setValue(QStringLiteral("appearance/interface_scale"), 100)',
     ):

@@ -80,12 +80,23 @@ def main() -> int:
     print(f"[ok ] renderer references {len(distinct)} palette fields + 4 tick glyphs")
 
     print("[scenario] desktop main.cpp builds a palette from active_theme()")
+    helper_match = re.search(
+        r"DesktopBubblePalette\s+bubble_palette_from_theme\s*\(\s*\)\s*const\s*\{(?P<body>.*?)\n\s{4}\}",
+        desktop,
+        re.DOTALL,
+    )
     rs_match = re.search(r"void\s+render_store\s*\(\s*\)\s*\{(?P<body>.*?)\n\s{4}\}", desktop, re.DOTALL)
     assert rs_match, "could not locate render_store() in app_desktop main.cpp"
     rs_body = rs_match.group("body")
-    assert "active_theme()" in rs_body, "render_store must consult active_theme()"
-    assert "DesktopBubblePalette" in rs_body, "render_store must construct a DesktopBubblePalette"
-    assert "palette.own_bubble" in rs_body, "render_store must set palette.own_bubble"
+    palette_source = rs_body
+    if "bubble_palette_from_theme()" in rs_body:
+        assert helper_match, "render_store delegates palette creation but helper is missing"
+        palette_source = helper_match.group("body")
+    assert "active_theme()" in palette_source, "render_store palette path must consult active_theme()"
+    assert "DesktopBubblePalette" in palette_source, \
+        "render_store palette path must construct a DesktopBubblePalette"
+    assert "palette.own_bubble" in palette_source, \
+        "render_store palette path must set palette.own_bubble"
     # M138 redirected the desktop view from QTextBrowser+setHtml to
     # BubbleListView+setBubblePalette. Either path is acceptable as long
     # as the palette flows from active_theme into a renderer.

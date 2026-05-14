@@ -7,8 +7,8 @@ Static analysis on:
     - settings nav has icon-prefixed entries including the new
       "Appearance" category.
     - Appearance page wires QRadioButton{Light,Dark} to a lambda that
-      flips `set_active_theme(...)`, re-applies `telegram_stylesheet()`,
-      saves to QSettings, and re-renders the bubble view.
+      flips `set_active_theme(...)`, applies the cached main-window
+      Telegram stylesheet, saves to QSettings, and re-renders the bubble view.
     - main() reads the persisted preference from QSettings BEFORE
       constructing the window so the first paint matches the saved
       mode (and falls through to active_theme()'s env-var seed when
@@ -63,15 +63,19 @@ def main() -> int:
     assert "QRadioButton(\"Dark\")" in m, "Appearance page missing Dark radio"
     assert "appearance_light_" in m and "appearance_dark_" in m, \
         "appearance_light_ / appearance_dark_ members must be wired"
-    # The toggle lambda must call set_active_theme + re-apply stylesheet
-    # + save to QSettings + re-render.
+    # The toggle lambda must call set_active_theme + re-apply a cached,
+    # window-scoped stylesheet + save to QSettings + re-render. Applying
+    # QApplication::setStyleSheet(...) directly from the switch path made
+    # the Night Mode drawer toggle visibly stall.
     assert "set_active_theme" in m, "main.cpp must call design::set_active_theme"
-    assert "setStyleSheet(telegram_stylesheet" in m, \
-        "toggle must re-apply telegram_stylesheet() to QApplication"
+    assert "setStyleSheet(cached_theme_stylesheet" in m, \
+        "toggle must re-apply the cached Telegram stylesheet to the main window"
+    assert "theme_apply_timer_" in m and "setInterval(0)" in m, \
+        "theme apply should be coalesced to the next event-loop pass"
     assert "appearance/dark_theme" in m, \
         "toggle must persist preference under QSettings key 'appearance/dark_theme'"
     assert "render_store()" in m, "toggle must re-render the bubble view via render_store()"
-    print("[ok ] Light/Dark toggle invokes set_active_theme + re-stylesheet + persist + render")
+    print("[ok ] Light/Dark toggle invokes set_active_theme + cached window stylesheet + persist + render")
 
     print("[scenario] main() seeds active_theme from QSettings before window construction")
     main_func_match = re.search(

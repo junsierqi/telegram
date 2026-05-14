@@ -59,6 +59,19 @@ def main() -> int:
         require(token in store_cpp, f"store implementation missing {token}")
     print("[ok ] store clears unread and updates the local read marker")
 
+    print("[scenario] saved messages opens a self peer like tdesktop")
+    require("ensure_local_conversation" in store_h, "store header missing ensure_local_conversation")
+    require("void DesktopChatStore::ensure_local_conversation" in store_cpp,
+            "store implementation missing ensure_local_conversation")
+    for token in (
+        "void open_saved_messages_peer()",
+        'std::string("Saved Messages")',
+        "store_.set_selected_conversation(conversation_id)",
+        "set_details_panel_visible(false)",
+    ):
+        require(token in main_cpp, f"missing saved messages token: {token}")
+    print("[ok ] Saved Messages creates/selects the current user's local peer")
+
     print("[scenario] drawer account/archive/night details are wired")
     for token in (
         'setObjectName("drawerAccountSwitchRow")',
@@ -70,13 +83,16 @@ def main() -> int:
         "&QPushButton::toggled",
         "set_active_theme(dark)",
         "QSettings prefs",
+        'setObjectName("drawerArchiveContextMenu")',
+        'open_account_features_surface(QStringLiteral("Premium"))',
+        'open_account_features_surface(QStringLiteral("Stories"))',
     ):
         require(token in main_cpp, f"missing drawer interaction token: {token}")
     require("night->setVisible(false)" not in main_cpp,
             "drawer night toggle must not use the old hidden checkbox bridge")
     print("[ok ] drawer exposes account switch, archive count and animated night toggle")
 
-    print("\nAll 4/4 desktop sidebar interaction scenarios passed.")
+    print("\nAll 5/5 desktop sidebar interaction scenarios passed.")
     return 0
 
 

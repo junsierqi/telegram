@@ -135,10 +135,18 @@ wsl bash -lc "docker compose -f deploy/docker/docker-compose.yml --env-file depl
   uses an explicit user/bot/service/basic-group/megagroup/broadcast-channel
   peer-kind guard so channel/group danger actions do not leak into one-to-one
   user or bot profiles. One-to-one user info stays as a direct tdesktop-style
-  profile surface instead of adding extra Media/Contact navigation rows.
+  profile surface instead of adding extra Media/Contact navigation rows, and
+  profile fields/actions now derive from the selected conversation, participants,
+  message/media counts and contact/block RPCs rather than fixed screenshot text.
+  The right info column hides Qt tab controls and exposes media/files/links/voice
+  as Telegram-style rows or drill-in surfaces. Visible right-column rows respond
+  on click: media rows drill in, service/bot rows route to commands/settings,
+  member rows open contact actions, and group/channel leave/report use the real
+  confirmation/RPC paths.
 - Desktop sidebar/drawer polish follows tdesktop more closely: folder chips keep
   fixed readable widths, Archived Chats is a conditional independent drawer
-  entry, Reset Scale lives in the account cover instead of the menu list, and
+  entry with a context menu, Reset Scale lives in the account cover instead of
+  the menu list, Saved Messages opens the current user's local self-peer, and
   Night Mode uses the custom drawer toggle with immediate theme application.
 - Account-domain settings now have server-backed state for notification,
   privacy, security and proxy fields; Wallet/Premium/Stories/Emoji Status/Gift

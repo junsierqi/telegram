@@ -64,6 +64,12 @@ def main() -> int:
         'setObjectName("drawerResetScaleButton")',
         'open_settings_page_by_name(QStringLiteral("Calls"))',
         'open_settings_page_by_name(QStringLiteral("Account"))',
+        "open_saved_messages_peer",
+        'setObjectName("drawerPremiumRow")',
+        'setObjectName("drawerStoriesRow")',
+        'open_account_features_surface(QStringLiteral("Premium"))',
+        'open_account_features_surface(QStringLiteral("Stories"))',
+        'setObjectName("drawerArchiveContextMenu")',
         'setObjectName("drawerNightAnimatedToggle")',
         "&QPushButton::toggled",
         'QSettings prefs',
@@ -92,6 +98,7 @@ def main() -> int:
         "bool archived",
         "long long muted_until_ms",
         "apply_conversation_flags",
+        "ensure_local_conversation",
     ):
         require(token in store_h, f"store header missing {token}")
     for token in (
@@ -99,6 +106,7 @@ def main() -> int:
         "conversation.archived = source.archived",
         "conversation.muted_until_ms = source.muted_until_ms",
         '"muted_until_ms"',
+        "void DesktopChatStore::ensure_local_conversation",
     ):
         require(token in store_cpp, f"store implementation missing {token}")
     print("[ok ] conversation flags parse, cache and update local state")

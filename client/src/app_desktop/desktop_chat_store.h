@@ -82,6 +82,9 @@ public:
     void set_current_user(std::string user_id);
     [[nodiscard]] const std::string& current_user_id() const { return current_user_id_; }
     void set_selected_conversation(std::string conversation_id);
+    void ensure_local_conversation(std::string conversation_id,
+                                   std::string title,
+                                   std::vector<std::string> participants);
 
     void apply_sync(const transport::SyncResult& sync);
     void apply_incremental_sync(const transport::SyncResult& sync);

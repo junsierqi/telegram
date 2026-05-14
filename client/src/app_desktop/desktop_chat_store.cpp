@@ -336,6 +336,15 @@ void DesktopChatStore::set_selected_conversation(std::string conversation_id) {
     }
 }
 
+void DesktopChatStore::ensure_local_conversation(
+    std::string conversation_id,
+    std::string title,
+    std::vector<std::string> participants) {
+    auto& conversation = ensure_conversation(conversation_id);
+    if (!title.empty()) conversation.title = std::move(title);
+    if (!participants.empty()) conversation.participant_user_ids = std::move(participants);
+}
+
 void DesktopChatStore::apply_sync(const transport::SyncResult& sync) {
     conversations_.clear();
     for (const auto& source : sync.conversations) {
