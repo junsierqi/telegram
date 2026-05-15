@@ -1,0 +1,80 @@
+{
+  "schema_version": 4,
+  "title": "Desktop UI tool mouse response parity",
+  "slug": "20260515-0425-desktop-ui-tool-mouse-response-parity",
+  "created_at_utc": "2026-05-15T10:25:40+00:00",
+  "updated_at_utc": "2026-05-15T10:38:29+00:00",
+  "state": "completed",
+  "phase": "accepted",
+  "implementation_ready": true,
+  "current_focus": "Commit-ready mouse-response parity change",
+  "next_gate": "Build, validators, GUI smoke, bundle verify",
+  "finalized_at_utc": "2026-05-15T10:38:29+00:00",
+  "milestones": [
+    {
+      "name": "Desktop tool mouse-response parity implemented",
+      "timestamp_utc": "2026-05-15T10:37:16+00:00",
+      "delivered": "Audited desktop tool surfaces against tdesktop reference files; added shared press/release-inside/leave cleanup feedback for drawer/settings tool rows; extended desktop button-response validator.",
+      "verified": "build-codex-verify app_desktop passed; app_desktop_store_test passed 20/20; targeted desktop validators and GUI smoke completed.",
+      "next": "Review diff and commit after final bundle verification.",
+      "gate_status": "pass",
+      "covers": [
+        "REQ-1",
+        "REQ-2",
+        "REQ-3",
+        "REQ-4",
+        "REQ-5"
+      ]
+    }
+  ],
+  "blocks": [],
+  "requirements": [
+    {
+      "id": "REQ-1",
+      "description": "Inventory visible desktop tool surfaces against tdesktop mouse-response references",
+      "type": "functional",
+      "created_at_utc": "2026-05-15T10:37:06+00:00",
+      "state": "closed",
+      "closed_at_utc": "2026-05-15T10:37:23+00:00",
+      "closed_note": "Delivered and verified in checkpoint: Desktop tool mouse-response parity implemented."
+    },
+    {
+      "id": "REQ-2",
+      "description": "Standardize tool-like mouse semantics: left press starts state, release-inside activates, leave/release clears feedback",
+      "type": "functional",
+      "created_at_utc": "2026-05-15T10:37:06+00:00",
+      "state": "closed",
+      "closed_at_utc": "2026-05-15T10:37:24+00:00",
+      "closed_note": "Delivered and verified in checkpoint: Desktop tool mouse-response parity implemented."
+    },
+    {
+      "id": "REQ-3",
+      "description": "Complete in-scope drawer/settings visible tool behavior without backend protocol expansion",
+      "type": "functional",
+      "created_at_utc": "2026-05-15T10:37:06+00:00",
+      "state": "closed",
+      "closed_at_utc": "2026-05-15T10:37:24+00:00",
+      "closed_note": "Delivered and verified in checkpoint: Desktop tool mouse-response parity implemented."
+    },
+    {
+      "id": "REQ-4",
+      "description": "Add durable validator coverage for new mouse-response primitives",
+      "type": "nonfunctional",
+      "created_at_utc": "2026-05-15T10:37:06+00:00",
+      "state": "closed",
+      "closed_at_utc": "2026-05-15T10:37:24+00:00",
+      "closed_note": "Delivered and verified in checkpoint: Desktop tool mouse-response parity implemented."
+    },
+    {
+      "id": "REQ-5",
+      "description": "Build, test, verify, and record acceptance evidence",
+      "type": "constraint",
+      "created_at_utc": "2026-05-15T10:37:07+00:00",
+      "state": "closed",
+      "closed_at_utc": "2026-05-15T10:37:24+00:00",
+      "closed_note": "Delivered and verified in checkpoint: Desktop tool mouse-response parity implemented."
+    }
+  ],
+  "gate_status": "pass",
+  "decision": "accepted"
+}

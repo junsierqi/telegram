@@ -26,6 +26,8 @@ def main() -> int:
         "open_account_features_surface(QStringLiteral(\"Wallet\"))",
         "open_account_features_surface(QStringLiteral(\"Premium\"))",
         "open_account_features_surface(QStringLiteral(\"Stories\"))",
+        "premium_row->setVisible(false)",
+        "stories_row->setVisible(false)",
         "open_saved_messages_peer",
         'setObjectName("drawerArchiveContextMenu")',
         "show_account_export_summary",
@@ -40,10 +42,28 @@ def main() -> int:
         "content_layout->addWidget(footer)",
         "class NightModeToggle final",
         "void paintEvent(QPaintEvent*) override",
-        "QEvent::MouseButtonRelease",
+        "handle_desktop_tool_mouse_response",
     ):
         require(token in main_cpp, f"missing drawer layout token: {token}")
     print("[ok ] drawer footer/toggle/click surface match the tdesktop-inspired model")
+
+    print("[scenario] tool-like rows use press-inside mouse semantics")
+    for token in (
+        "pressed_desktop_tool_action_",
+        "QEvent::MouseButtonPress",
+        "QEvent::MouseButtonRelease",
+        "QEvent::Leave",
+        "desktop_tool_contains_mouse",
+        '"desktopToolHover"',
+        '"desktopToolPressed"',
+        'QWidget#drawerWalletRow[desktopToolHover="true"]',
+        'QWidget#settingsGeneralRow[desktopToolPressed="true"]',
+        "settingsThemeCardAction",
+        "settingsAccentColorAction",
+        "click->installEventFilter(this)",
+    ):
+        require(token in main_cpp, f"missing shared mouse response token: {token}")
+    print("[ok ] drawer/settings tool rows clear state on leave and activate on release inside")
 
     print("[scenario] modal tool buttons have explicit actions")
     for token in (
@@ -102,7 +122,7 @@ def main() -> int:
             "current-state must describe visible button response coverage")
     print("[ok ] docs describe the button response surface")
 
-    print("\nAll 7/7 desktop button response scenarios passed.")
+    print("\nAll 8/8 desktop button response scenarios passed.")
     return 0
 
 

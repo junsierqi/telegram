@@ -22,6 +22,7 @@
 #include <QAbstractItemView>
 #include <QCheckBox>
 #include <QClipboard>
+#include <QCursor>
 #include <QFile>
 #include <QComboBox>
 #include <QDialog>
@@ -3216,6 +3217,14 @@ private:
             QLabel#drawerNightText { color:{text_primary}; font-size:14px; font-weight:600; background:transparent; }
             QPushButton#drawerNightAnimatedToggle { border:none; background:transparent; min-width:44px; min-height:24px; max-width:44px; max-height:24px; }
             QLabel#drawerFooter { color:{text_muted}; font-size:12px; background:transparent; }
+            QWidget#drawerWalletRow[desktopToolHover="true"],
+            QWidget#settingsGeneralRow[desktopToolHover="true"],
+            QWidget#settingsThemeCard[desktopToolHover="true"],
+            QWidget#settingsAccentColor[desktopToolHover="true"] { background:{hover}; }
+            QWidget#drawerWalletRow[desktopToolPressed="true"],
+            QWidget#settingsGeneralRow[desktopToolPressed="true"] { background:{selection_tint}; }
+            QWidget#settingsThemeCard[desktopToolPressed="true"],
+            QWidget#settingsAccentColor[desktopToolPressed="true"] { background:{selection_tint}; }
         )");
         css += QString::fromUtf8(R"(
             QWidget#loginChrome { background:{login_chrome_bg}; border-bottom:1px solid {login_chrome_border}; }
@@ -3765,6 +3774,7 @@ private:
         wallet_badge->setStyleSheet(QStringLiteral(
             "background:#48aee6; color:#ffffff; border-radius:5px; font-size:10px; font-weight:700;"));
         wallet_layout->addWidget(wallet_badge);
+        wallet_row->setObjectName("drawerWalletRow");
         wallet_row->setMinimumHeight(48);
         wallet_row->setCursor(Qt::PointingHandCursor);
         content_layout->addWidget(wallet_row);
@@ -3777,12 +3787,14 @@ private:
         }
         auto* premium_row = add_row("premium", "Telegram Premium");
         premium_row->setObjectName("drawerPremiumRow");
+        premium_row->setVisible(false);
         QObject::connect(premium_row, &QPushButton::clicked, drawer, [this, close_drawer] {
             close_drawer();
             open_account_features_surface(QStringLiteral("Premium"));
         });
         auto* stories_row = add_row("profile", "My Stories");
         stories_row->setObjectName("drawerStoriesRow");
+        stories_row->setVisible(false);
         QObject::connect(stories_row, &QPushButton::clicked, drawer, [this, close_drawer] {
             close_drawer();
             open_account_features_surface(QStringLiteral("Stories"));
@@ -3910,6 +3922,119 @@ private:
         if (visible) attachment_drop_overlay_->raise();
     }
 
+    static bool is_desktop_tool_action(QObject* object) {
+        if (object == nullptr) return false;
+        if (object->property("drawerWalletAction").toBool()
+            || object->property("drawerEmojiStatusAction").toBool()
+            || !object->property("settingsActionName").toString().isEmpty()) {
+            return true;
+        }
+        const QString name = object->objectName();
+        return name == QStringLiteral("settingsGeneralRowAction")
+            || name == QStringLiteral("settingsThemeCardAction")
+            || name == QStringLiteral("settingsAccentColorAction");
+    }
+
+    static QWidget* desktop_tool_feedback_widget(QObject* watched) {
+        auto* widget = qobject_cast<QWidget*>(watched);
+        if (widget == nullptr) return nullptr;
+        const QString name = widget->objectName();
+        if (name == QStringLiteral("settingsGeneralRowAction")
+            || name == QStringLiteral("settingsThemeCardAction")
+            || name == QStringLiteral("settingsAccentColorAction")) {
+            return widget->parentWidget() != nullptr ? widget->parentWidget() : widget;
+        }
+        if (widget->property("drawerWalletAction").toBool()
+            && widget->parentWidget() != nullptr
+            && widget->parentWidget()->property("drawerWalletAction").toBool()) {
+            return widget->parentWidget();
+        }
+        if (widget->property("drawerEmojiStatusAction").toBool()
+            && widget->parentWidget() != nullptr
+            && widget->parentWidget()->property("drawerEmojiStatusAction").toBool()) {
+            return widget->parentWidget();
+        }
+        return widget;
+    }
+
+    static bool desktop_tool_contains_mouse(QObject* watched, QWidget* target, QMouseEvent* mouse) {
+        if (watched == nullptr || target == nullptr || mouse == nullptr) return false;
+        auto* event_widget = qobject_cast<QWidget*>(watched);
+        if (event_widget == nullptr) return false;
+        QPoint target_pos = mouse->position().toPoint();
+        if (event_widget != target) {
+            target_pos = target->mapFromGlobal(event_widget->mapToGlobal(target_pos));
+        }
+        return target->rect().contains(target_pos);
+    }
+
+    static void set_desktop_tool_mouse_state(QWidget* widget, bool hovered, bool pressed) {
+        if (widget == nullptr) return;
+        const bool changed = widget->property("desktopToolHover").toBool() != hovered
+            || widget->property("desktopToolPressed").toBool() != pressed;
+        widget->setProperty("desktopToolHover", hovered);
+        widget->setProperty("desktopToolPressed", pressed);
+        widget->setCursor(hovered || pressed ? Qt::PointingHandCursor : widget->cursor());
+        if (!changed) return;
+        if (auto* style = widget->style()) {
+            style->unpolish(widget);
+            style->polish(widget);
+        }
+        widget->update();
+    }
+
+    bool handle_desktop_tool_mouse_response(QObject* watched, QEvent* event) {
+        if (watched == nullptr || event == nullptr || !is_desktop_tool_action(watched)) return false;
+        QWidget* target = desktop_tool_feedback_widget(watched);
+        if (target == nullptr) return false;
+
+        if (event->type() == QEvent::Enter) {
+            set_desktop_tool_mouse_state(target, true, pressed_desktop_tool_action_ == target);
+            return false;
+        }
+        if (event->type() == QEvent::Leave) {
+            const bool still_inside_target = target->rect().contains(target->mapFromGlobal(QCursor::pos()));
+            if (!still_inside_target) {
+                if (pressed_desktop_tool_action_ == target) pressed_desktop_tool_action_.clear();
+                set_desktop_tool_mouse_state(target, false, false);
+            }
+            return false;
+        }
+        if (event->type() == QEvent::MouseButtonPress) {
+            auto* mouse = static_cast<QMouseEvent*>(event);
+            if (mouse->button() == Qt::LeftButton) {
+                pressed_desktop_tool_action_ = target;
+                set_desktop_tool_mouse_state(target, true, true);
+            }
+            return false;
+        }
+        if (event->type() != QEvent::MouseButtonRelease) return false;
+
+        auto* mouse = static_cast<QMouseEvent*>(event);
+        if (mouse->button() != Qt::LeftButton) return false;
+        const bool activate = pressed_desktop_tool_action_ == target
+            && desktop_tool_contains_mouse(watched, target, mouse);
+        pressed_desktop_tool_action_.clear();
+        set_desktop_tool_mouse_state(target, activate, false);
+        if (!activate) return false;
+
+        if (watched->property("drawerWalletAction").toBool()
+            || target->property("drawerWalletAction").toBool()) {
+            close_top_levels("accountDrawer");
+            open_account_features_surface(QStringLiteral("Wallet"));
+            event->accept();
+            return true;
+        }
+        if (watched->property("drawerEmojiStatusAction").toBool()
+            || target->property("drawerEmojiStatusAction").toBool()) {
+            close_top_levels("accountDrawer");
+            update_emoji_status_from_dialog();
+            event->accept();
+            return true;
+        }
+        return false;
+    }
+
 protected:
     bool eventFilter(QObject* watched, QEvent* event) override {
         if (event != nullptr && event->type() == QEvent::Resize
@@ -3922,28 +4047,7 @@ protected:
                 }
             }
         }
-        if (event != nullptr && event->type() == QEvent::MouseButtonRelease
-            && watched != nullptr
-            && watched->property("drawerWalletAction").toBool()) {
-            auto* mouse = static_cast<QMouseEvent*>(event);
-            if (mouse->button() == Qt::LeftButton) {
-                close_top_levels("accountDrawer");
-                open_account_features_surface(QStringLiteral("Wallet"));
-                event->accept();
-                return true;
-            }
-        }
-        if (event != nullptr && event->type() == QEvent::MouseButtonRelease
-            && watched != nullptr
-            && watched->property("drawerEmojiStatusAction").toBool()) {
-            auto* mouse = static_cast<QMouseEvent*>(event);
-            if (mouse->button() == Qt::LeftButton) {
-                close_top_levels("accountDrawer");
-                update_emoji_status_from_dialog();
-                event->accept();
-                return true;
-            }
-        }
+        if (handle_desktop_tool_mouse_response(watched, event)) return true;
         return QMainWindow::eventFilter(watched, event);
     }
 
@@ -4914,11 +5018,13 @@ protected:
                 row->setProperty("settingsActionName", text);
                 auto* click = new QPushButton(row);
                 click->setObjectName("settingsGeneralRowAction");
+                click->setProperty("settingsActionName", text);
                 click->setFlat(true);
                 click->setCursor(Qt::PointingHandCursor);
                 click->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
                 click->setGeometry(row->rect());
                 click->raise();
+                click->installEventFilter(this);
                 QObject::connect(click, &QPushButton::clicked, row, std::move(action));
                 QTimer::singleShot(0, row, [row, click] {
                     click->setGeometry(row->rect());
@@ -4949,11 +5055,13 @@ protected:
             auto state = std::make_shared<bool>(checked);
             auto* click = new QPushButton(row);
             click->setObjectName("settingsGeneralRowAction");
+            click->setProperty("settingsActionName", text);
             click->setFlat(true);
             click->setCursor(Qt::PointingHandCursor);
             click->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
             click->setGeometry(row->rect());
             click->raise();
+            click->installEventFilter(this);
             QObject::connect(click, &QPushButton::clicked, row, [this, box, state, key, text] {
                 *state = !*state;
                 box->setText(*state ? QString::fromUtf8("\xe2\x9c\x93") : QString());
@@ -5047,6 +5155,7 @@ protected:
         }};
         for (const auto& [name, color] : theme_cards) {
             auto* wrap = new QWidget();
+            wrap->setObjectName("settingsThemeCard");
             auto* wrap_layout = new QVBoxLayout(wrap);
             wrap_layout->setContentsMargins(0, 0, 0, 0);
             wrap_layout->setSpacing(10);
@@ -5068,6 +5177,7 @@ protected:
             click->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
             click->setGeometry(wrap->rect());
             click->raise();
+            click->installEventFilter(this);
             const QString theme_name = QString::fromUtf8(name);
             QObject::connect(click, &QPushButton::clicked, wrap, [this, theme_name] {
                 QSettings prefs;
@@ -5092,6 +5202,7 @@ protected:
             swatch->setFixedSize(48, 48);
             swatch->setStyleSheet(QString("background:%1; border-radius:24px;").arg(c));
             auto* holder = new QWidget();
+            holder->setObjectName("settingsAccentColor");
             holder->setFixedSize(48, 48);
             auto* holder_layout = new QVBoxLayout(holder);
             holder_layout->setContentsMargins(0, 0, 0, 0);
@@ -5104,6 +5215,7 @@ protected:
             click->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
             click->setGeometry(holder->rect());
             click->raise();
+            click->installEventFilter(this);
             const QString accent = QString::fromUtf8(c);
             QObject::connect(click, &QPushButton::clicked, holder, [this, accent] {
                 QSettings prefs;
@@ -9781,6 +9893,7 @@ protected:
     QPointer<QLabel> login_status_;
     QPointer<QPushButton> login_submit_;
     QPointer<QPushButton> login_register_;
+    QPointer<QWidget> pressed_desktop_tool_action_;
     QLineEdit* host_ {nullptr};
     QSpinBox* port_ {nullptr};
     QCheckBox* tls_ {nullptr};
